@@ -1,14 +1,10 @@
-# Getting Started with SoulForge
+# Getting Started
 
-SoulForge is an AI-powered terminal IDE. It runs entirely in your terminal — combining a chat interface, an embedded Neovim editor, and an agentic tool loop that can read files, write code, run commands, and search your codebase.
-
----
+This guide walks you through setting up SoulForge for the first time. For a quick overview of what SoulForge does, see the [README](README.md).
 
 ## Prerequisites
 
-Before you start, make sure you have:
-
-### 1. Bun
+### Bun
 
 SoulForge runs on [Bun](https://bun.sh), not Node.js.
 
@@ -20,11 +16,11 @@ curl -fsSL https://bun.sh/install | bash
 brew install bun
 ```
 
-Verify: `bun --version` (need ≥ 1.0)
+Verify: `bun --version` (need >= 1.0)
 
-### 2. Neovim ≥ 0.9.0
+### Neovim
 
-Neovim is required — SoulForge embeds it as a real editor panel inside the TUI.
+SoulForge embeds a real Neovim instance — your config, plugins, and LSP all work inside it.
 
 ```bash
 # macOS
@@ -35,175 +31,194 @@ sudo apt install neovim
 
 # Arch
 sudo pacman -S neovim
-
-# Windows (via Scoop)
-scoop install neovim
 ```
 
-Verify: `nvim --version`
+Verify: `nvim --version` (need >= 0.9)
 
-### 3. An LLM API Key
+### A Nerd Font
 
-You need at least one:
+SoulForge uses [Nerd Font](https://www.nerdfonts.com/) icons throughout the UI. Without one, you'll see blank squares instead of icons. Any Nerd Font works — popular choices:
 
-| Provider | Environment Variable |
-|---|---|
-| Anthropic (Claude) | `ANTHROPIC_API_KEY` |
-| OpenAI (GPT-4o, o3) | `OPENAI_API_KEY` |
-| xAI (Grok) | `XAI_API_KEY` |
-| Google (Gemini) | `GOOGLE_GENERATIVE_AI_API_KEY` |
-| Vercel AI Gateway *(replaces all of the above)* | `AI_GATEWAY_API_KEY` |
+- [JetBrains Mono Nerd Font](https://github.com/ryanoasis/nerd-fonts/releases)
+- [FiraCode Nerd Font](https://github.com/ryanoasis/nerd-fonts/releases)
 
-Add your key(s) to your shell profile (`~/.zshrc`, `~/.bashrc`, etc.):
+After installing, set it as your terminal's font. Or run `/setup` inside SoulForge to check and install fonts automatically.
+
+### An API Key
+
+You need at least one LLM provider key:
+
+| Provider | Env Variable | Models |
+|----------|-------------|--------|
+| Anthropic | `ANTHROPIC_API_KEY` | Claude Opus, Sonnet, Haiku |
+| OpenAI | `OPENAI_API_KEY` | GPT-4o, o3, o4-mini |
+| xAI | `XAI_API_KEY` | Grok |
+| Google | `GOOGLE_GENERATIVE_AI_API_KEY` | Gemini |
+| Ollama | *(none — runs locally)* | Llama, Mistral, etc. |
+
+Add to your shell profile (`~/.zshrc` or `~/.bashrc`):
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
----
+Alternatively, a single [Vercel AI Gateway](https://sdk.vercel.ai/docs/ai-sdk-core/provider-management) key gives you access to all providers:
 
-## Installation
+```bash
+export AI_GATEWAY_API_KEY=...
+```
+
+## Install & Run
 
 ```bash
 git clone https://github.com/proxysoul/soulforge
 cd soulforge
 bun install
-```
-
----
-
-## Running SoulForge
-
-```bash
 bun run dev
 ```
 
-That's it. SoulForge will start, detect your Neovim binary, and drop you into the chat interface.
+On first run, SoulForge creates a config at `~/.soulforge/config.json` with sensible defaults.
 
-> **First run:** If no config exists, one will be created at `~/.soulforge/config.json` with sensible defaults.
+To install globally so you can run `soulforge` or `sf` from anywhere:
 
----
+```bash
+bun link
+```
 
 ## The Interface
 
 When SoulForge starts you'll see:
 
-- **Banner** — animated SoulForge ASCII logo
-- **Chat area** — where you talk to Forge
-- **Status bar** — shows active provider, model, working directory, and message count
-- **Input box** — type here to chat or run slash commands
-- **Footer** — keybinding legend
+```
+┌─────────────────────────────────────────────────┐
+│  󰊠 SoulForge │ tokens │ context │ git │ model   │  ← header
+│                                                 │
+│  Chat messages appear here                      │  ← chat area
+│  Tool calls show in real time                   │
+│                                                 │
+│  > type here...                                 │  ← input
+│  ^X Stop  ^D Mode  ^E Editor  ^G Git  ^L LLM   │  ← footer
+└─────────────────────────────────────────────────┘
+```
 
----
+**Header** shows token usage, context budget, git branch, and active model.
 
-## Keybindings
+**Chat area** renders messages with markdown, syntax-highlighted code blocks, and live tool call progress.
 
-| Key | Action |
-|---|---|
-| `Ctrl+E` | Toggle the Neovim editor panel |
-| `Ctrl+L` | Switch LLM provider / model |
-| `Ctrl+S` | Open the Skills browser |
-| `Ctrl+K` | Clear chat history |
-| `Ctrl+H` | Show help |
-| `Ctrl+C` | Exit SoulForge |
+**Input box** accepts natural language or slash commands (type `/` to see them).
 
-### Editor Focus States (Ctrl+E cycles through)
+**Footer** shows keybinding shortcuts.
 
-1. **Editor closed** → press `Ctrl+E` → editor opens, Neovim is focused
-2. **Editor focused** → press `Ctrl+E` → editor stays open, chat is focused
-3. **Chat focused** → press `Ctrl+E` → editor closes
+## Editor Panel
 
-When Neovim is focused, all keystrokes go directly to Neovim. Use it exactly like normal Neovim.
+Press `Ctrl+E` to open the embedded Neovim editor. The screen splits — editor on the left, chat on the right.
 
----
+Focus cycles with `Ctrl+E`:
 
-## Slash Commands
+1. **Editor closed** → `Ctrl+E` → editor opens, Neovim focused
+2. **Neovim focused** → `Ctrl+E` → chat focused (editor stays open)
+3. **Chat focused** → `Ctrl+E` → editor closes
 
-Type `/` in the input box to see available commands:
+When Neovim is focused, all keystrokes go directly to it — use it exactly like normal Neovim. Click the chat side or press `Ctrl+E` to switch back.
 
-| Command | Action |
-|---|---|
-| `/help` | Show help |
-| `/clear` | Clear chat history |
-| `/editor` or `/edit` | Toggle editor panel |
-| `/open <path>` | Open a file in Neovim |
-| `/skills` | Open skills browser |
-| `/quit` or `/exit` | Exit SoulForge |
-
----
+Open a specific file: `/open src/index.tsx`
 
 ## Switching Models
 
-Press `Ctrl+L` to open the model picker. Select a provider, then pick a model from the live list. The switch takes effect on the next message — you can change models mid-session anytime.
+Press `Ctrl+L` to open the model picker. Pick a provider, then a model. The switch takes effect on the next message — you can change models mid-conversation.
 
----
+Use `/router` to assign different models to different task types. For example, Opus for planning, Haiku for code search.
+
+## Modes
+
+`Ctrl+D` cycles through Forge's personas:
+
+| Mode | Behavior |
+|------|----------|
+| **default** | Standard — investigates then implements |
+| **architect** | Design only — outlines and tradeoffs, no code |
+| **socratic** | Asks probing questions before doing anything |
+| **challenge** | Devil's advocate — challenges every assumption |
+| **plan** | Research only — reads and plans, no file edits |
+
+Or switch directly: `/mode architect`
+
+## Plan Mode
+
+`/plan refactor the auth system` enters plan mode. Forge researches the codebase, writes a plan to `.soulforge/plan.md`, then asks you to approve, revise, or cancel before executing anything.
+
+The plan sidebar (`Ctrl+T` to toggle) shows step-by-step progress during execution.
 
 ## Skills
 
-Skills are knowledge modules that extend what Forge knows and how it behaves. Press `Ctrl+S` (or type `/skills`) to open the skills browser.
+Skills are markdown files that extend what Forge knows. Press `Ctrl+S` to browse.
 
-The browser has three tabs:
+Three tabs:
 
-- **Search** — browse and install skills from the [skills.sh](https://skills.sh) community registry
-- **Installed** — skills already on your machine (looks for `SKILL.md` files in `~/.agents/skills/`, `~/.claude/skills/`, and local equivalents)
-- **Active** — skills currently loaded into the active session
+- **Search** — find and install from the [skills.sh](https://skills.sh) community registry
+- **Installed** — skills on your machine (`~/.agents/skills/`, `~/.claude/skills/`)
+- **Active** — skills loaded in the current session
 
----
+## Git
 
-## What Forge Can Do
+`Ctrl+G` opens the git menu with shortcuts for common operations:
 
-Forge is not just a chatbot. It runs an agentic tool loop and can:
+| Key | Action |
+|-----|--------|
+| `c` | Commit (AI-generated message) |
+| `p` | Push |
+| `u` | Pull |
+| `s` | Stash |
+| `o` | Stash pop |
+| `l` | Log |
+| `g` | Launch lazygit |
 
-- 📖 **Read files** — with line numbers, respecting your working directory
-- ✏️ **Edit files** — exact string replacement or create new files
-- 🖥️ **Run shell commands** — any `sh -c` compatible command, 30s timeout
-- 🔍 **Search with ripgrep** — regex search across your codebase
-- 📁 **Glob files** — find files by pattern using `fd`
+Or use slash commands: `/commit`, `/push`, `/pull`, `/status`, `/diff`, `/log`, `/branch`.
 
-For larger tasks it can delegate to specialized subagents:
+## Privacy
 
-- **Explore subagent** — read-only, used for deep research and codebase understanding
-- **Code subagent** — full tool access, used for implementing multi-step changes, runs lint/typecheck after edits
+Block files from AI access with `/privacy add <pattern>`:
 
----
+```
+/privacy add .env
+/privacy add secrets/**
+```
+
+Forge will refuse to read, display, or access files matching these patterns — even via shell commands.
 
 ## Config
 
-Config lives at `~/.soulforge/config.json`. It's created automatically on first run. You can edit it manually:
+Config lives at `~/.soulforge/config.json`. Created automatically on first run. You can edit it directly or use slash commands:
 
-```json
-{
-  "defaultModel": "anthropic/claude-3-haiku-20240307",
-  "editor": {
-    "command": "nvim",
-    "args": []
-  },
-  "theme": {
-    "accentColor": "#7C3AED"
-  }
-}
 ```
-
----
+/nvim-config user       use your own neovim config
+/nvim-config default    use soulforge's minimal config
+/editor-settings        toggle LSP integrations
+/chat-style bubble      switch chat layout
+```
 
 ## Troubleshooting
 
-**SoulForge won't start — "Neovim not found"**
-Install Neovim ≥ 0.9.0 and make sure `nvim` is on your `PATH`. You can also set `nvimPath` in `~/.soulforge/config.json` to an explicit binary path.
+**"Neovim not found"**
+Make sure `nvim` is on your `PATH`. You can set an explicit path in `~/.soulforge/config.json` under `nvimPath`.
 
-**No models showing up in Ctrl+L**
-Make sure the relevant API key env var is set and exported in your shell. Restart SoulForge after adding new keys.
+**No models in `Ctrl+L`**
+Your API key isn't set or isn't exported. Add `export ANTHROPIC_API_KEY=...` to your shell profile and restart your terminal.
+
+**Icons show as boxes or question marks**
+Install a [Nerd Font](https://www.nerdfonts.com/) and set it as your terminal font. Run `/font` inside SoulForge to check, or `/setup` to install one.
 
 **Editor panel looks garbled**
-Make sure your terminal emulator supports true color (`COLORTERM=truecolor`) and you're using a [Nerd Font](https://www.nerdfonts.com/) for proper icons.
+Make sure your terminal supports true color. Most modern terminals do, but you may need `export COLORTERM=truecolor` in your shell profile.
 
-**Forge seems slow or times out**
-Try switching to a faster model with `Ctrl+L` (e.g. `claude-3-haiku` or `gpt-4o-mini`). Shell tool calls have a 30-second timeout.
+**Forge seems slow**
+Switch to a faster model with `Ctrl+L` (e.g. Haiku or GPT-4o-mini). Shell commands have a 30-second timeout.
 
----
+**Context getting large**
+SoulForge auto-summarizes when context exceeds 80% of the model's window. You can also manually run `/summarize` or `/clear` to reset.
 
-## Next Steps
+## What's Next
 
-- Read [CONTRIBUTING.md](./CONTRIBUTING.md) if you want to hack on SoulForge itself
-- Check out [skills.sh](https://skills.sh) for community skills
-- Open an issue on GitHub if something's broken
+- Type `/help` for the full command reference
+- Press `Ctrl+S` to browse community skills
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) to hack on SoulForge itself

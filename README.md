@@ -16,7 +16,7 @@ cd soulforge
 bun install
 ```
 
-You need [Bun](https://bun.sh) and [Neovim](https://neovim.io) (>= 0.9).
+You need [Bun](https://bun.sh) and [Neovim](https://neovim.io) (>= 0.9). See [Getting Started](GETTING_STARTED.md) for detailed setup instructions and troubleshooting.
 
 ## API Keys
 
