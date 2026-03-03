@@ -16,14 +16,35 @@ export function useGitStatus(cwd: string): GitStatusState {
   const [staged, setStaged] = useState(0);
   const mountedRef = useRef(true);
 
+  // Track previous values to avoid unnecessary re-renders
+  const prevRef2 = useRef({
+    branch: null as string | null,
+    isDirty: false,
+    isRepo: false,
+    staged: 0,
+  });
+
   const poll = useCallback(() => {
     getGitStatus(cwd)
       .then((status) => {
         if (!mountedRef.current) return;
+        const prev = prevRef2.current;
+        const stagedLen = status.staged.length;
+        if (
+          prev.isRepo === status.isRepo &&
+          prev.branch === status.branch &&
+          prev.isDirty === status.isDirty &&
+          prev.staged === stagedLen
+        )
+          return;
+        prev.isRepo = status.isRepo;
+        prev.branch = status.branch;
+        prev.isDirty = status.isDirty;
+        prev.staged = stagedLen;
         setIsRepo(status.isRepo);
         setBranch(status.branch);
         setIsDirty(status.isDirty);
-        setStaged(status.staged.length);
+        setStaged(stagedLen);
       })
       .catch(() => {});
   }, [cwd]);

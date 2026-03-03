@@ -2,7 +2,9 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ToolResult } from "../../types";
 import { analyzeFile, checkConstraints } from "../analysis/complexity";
+import { getNvimInstance } from "../editor/instance";
 import { MemoryManager } from "../memory/manager";
+import { isForbidden } from "../security/forbidden.js";
 
 interface EditFileArgs {
   path: string;
@@ -20,44 +22,58 @@ function formatMetricDelta(label: string, before: number, after: number): string
 export const editFileTool = {
   name: "edit_file",
   description:
-    "Edit a file by replacing an exact string match with new content. Also supports creating new files.",
+    "Edit a file on disk by replacing an exact string match with new content. Also supports creating new files. This is the primary tool for all file modifications.",
   execute: async (args: EditFileArgs): Promise<ToolResult> => {
     try {
       const filePath = resolve(args.path);
+
+      const blocked = isForbidden(filePath);
+      if (blocked) {
+        const msg = `Access denied: "${args.path}" matches forbidden pattern "${blocked}". This file is blocked for security.`;
+        return { success: false, output: msg, error: msg };
+      }
+
       const oldStr = args.oldString;
       const newStr = args.newString;
 
       // Create new file
       if (oldStr === "") {
         writeFileSync(filePath, newStr, "utf-8");
+        let openedInEditor = false;
+        const nvim = getNvimInstance();
+        if (nvim) {
+          try {
+            await nvim.api.command(`edit ${filePath}`);
+            openedInEditor = true;
+          } catch {
+            // Editor not available
+          }
+        }
         const metrics = analyzeFile(newStr);
-        return {
-          success: true,
-          output: `Created ${filePath} (lines: ${String(metrics.lineCount)}, imports: ${String(metrics.importCount)})`,
-        };
+        let out = `Created ${filePath} (lines: ${String(metrics.lineCount)}, imports: ${String(metrics.importCount)})`;
+        if (openedInEditor) out += " → opened in editor";
+        return { success: true, output: out };
       }
 
       if (!existsSync(filePath)) {
-        return { success: false, output: "", error: `File not found: ${filePath}` };
+        return {
+          success: false,
+          output: `File not found: ${filePath}`,
+          error: `File not found: ${filePath}`,
+        };
       }
 
       const content = readFileSync(filePath, "utf-8");
 
       if (!content.includes(oldStr)) {
-        return {
-          success: false,
-          output: "",
-          error: "old_string not found in file. Make sure it matches exactly.",
-        };
+        const msg = "old_string not found in file. Make sure it matches exactly.";
+        return { success: false, output: msg, error: msg };
       }
 
       const occurrences = content.split(oldStr).length - 1;
       if (occurrences > 1) {
-        return {
-          success: false,
-          output: "",
-          error: `Found ${occurrences} matches. Provide more context to make the match unique.`,
-        };
+        const msg = `Found ${String(occurrences)} matches. Provide more context to make the match unique.`;
+        return { success: false, output: msg, error: msg };
       }
 
       const beforeMetrics = analyzeFile(content);
@@ -76,14 +92,27 @@ export const editFileTool = {
           (v) =>
             `${v.constraint.name}: ${v.constraint.metric} is ${String(v.actual)} (limit: ${String(v.constraint.limit)})`,
         );
-        return {
-          success: false,
-          output: "",
-          error: `Constraint violation(s): ${msgs.join("; ")}`,
-        };
+        const constraintMsg = `Constraint violation(s): ${msgs.join("; ")}`;
+        return { success: false, output: constraintMsg, error: constraintMsg };
       }
 
+      // Calculate edit line before writing
+      const editLine = content.slice(0, content.indexOf(oldStr)).split("\n").length;
+
       writeFileSync(filePath, updated, "utf-8");
+
+      // Open edited file in editor if available
+      let openedInEditor = false;
+      const nvim = getNvimInstance();
+      if (nvim) {
+        try {
+          await nvim.api.command(`edit ${filePath}`);
+          await nvim.api.command(`normal! ${String(editLine)}G`);
+          openedInEditor = true;
+        } catch {
+          // Editor not available
+        }
+      }
 
       // Build output with metrics
       const deltas = [
@@ -106,10 +135,12 @@ export const editFileTool = {
         output += `\n${warnMsgs.join("\n")}`;
       }
 
+      if (openedInEditor) output += " → opened in editor";
+
       return { success: true, output };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      return { success: false, output: "", error: msg };
+      return { success: false, output: msg, error: msg };
     }
   },
 };

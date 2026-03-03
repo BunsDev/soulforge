@@ -17,6 +17,6 @@ export function createCodeAgent(model: LanguageModel) {
     model,
     tools: buildCodeTools(),
     instructions: CODE_INSTRUCTIONS,
-    stopWhen: stepCountIs(20),
+    stopWhen: stepCountIs(200),
   });
 }

@@ -27,7 +27,7 @@ export function createMemoryWriteTool(cwd: string) {
         };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        return { success: false, output: "", error: msg };
+        return { success: false, output: msg, error: msg };
       }
     },
   };

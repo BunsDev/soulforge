@@ -4,11 +4,17 @@ import { z } from "zod";
 import { createCodeAgent } from "./code.js";
 import { createExploreAgent } from "./explore.js";
 
+interface SubagentModels {
+  defaultModel: LanguageModel;
+  explorationModel?: LanguageModel;
+  codingModel?: LanguageModel;
+}
+
 /**
  * Wraps explore/code subagents as tool definitions for the main Forge agent.
  * Each call creates a fresh agent instance (fresh context window).
  */
-export function buildSubagentTools(model: LanguageModel) {
+export function buildSubagentTools(models: SubagentModels) {
   return {
     explore: tool({
       description:
@@ -19,7 +25,7 @@ export function buildSubagentTools(model: LanguageModel) {
         task: z.string().describe("A detailed description of what to research or explore"),
       }),
       execute: async (args, { abortSignal }) => {
-        const agent = createExploreAgent(model);
+        const agent = createExploreAgent(models.explorationModel ?? models.defaultModel);
         const result = await agent.generate({
           prompt: args.task,
           abortSignal,
@@ -37,7 +43,7 @@ export function buildSubagentTools(model: LanguageModel) {
         task: z.string().describe("A detailed description of the code changes to implement"),
       }),
       execute: async (args, { abortSignal }) => {
-        const agent = createCodeAgent(model);
+        const agent = createCodeAgent(models.codingModel ?? models.defaultModel);
         const result = await agent.generate({
           prompt: args.task,
           abortSignal,

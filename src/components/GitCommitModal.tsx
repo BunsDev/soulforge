@@ -3,34 +3,20 @@ import TextInput from "ink-text-input";
 import { useCallback, useEffect, useState } from "react";
 import { getGitDiff, getGitStatus, gitAdd, gitCommit } from "../core/git/status.js";
 
+import { POPUP_BG, POPUP_HL, PopupRow } from "./shared.js";
+
 const POPUP_WIDTH = 56;
-const POPUP_BG = "#111122";
-const POPUP_HL = "#1a1a3e";
 
 interface Props {
   visible: boolean;
   cwd: string;
+  coAuthor: boolean;
   onClose: () => void;
   onCommitted: (msg: string) => void;
   onRefresh: () => void;
 }
 
-function Row({ children, bg, w }: { children: React.ReactNode; bg?: string; w: number }) {
-  const fill = bg ?? POPUP_BG;
-  return (
-    <Box width={w} height={1}>
-      <Box position="absolute">
-        <Text backgroundColor={fill}>{" ".repeat(w)}</Text>
-      </Box>
-      <Box position="absolute">
-        <Text backgroundColor={fill}>{"  "}</Text>
-        {children}
-      </Box>
-    </Box>
-  );
-}
-
-export function GitCommitModal({ visible, cwd, onClose, onCommitted, onRefresh }: Props) {
+export function GitCommitModal({ visible, cwd, coAuthor, onClose, onCommitted, onRefresh }: Props) {
   const [message, setMessage] = useState("");
   const [stagedFiles, setStagedFiles] = useState<string[]>([]);
   const [modifiedFiles, setModifiedFiles] = useState<string[]>([]);
@@ -69,7 +55,10 @@ export function GitCommitModal({ visible, cwd, onClose, onCommitted, onRefresh }
       }
     }
 
-    const result = await gitCommit(cwd, message.trim());
+    const commitMsg = coAuthor
+      ? `${message.trim()}\n\nCo-Authored-By: SoulForge <noreply@soulforge.dev>`
+      : message.trim();
+    const result = await gitCommit(cwd, commitMsg);
     if (result.ok) {
       onCommitted(message.trim());
       onRefresh();
@@ -84,6 +73,7 @@ export function GitCommitModal({ visible, cwd, onClose, onCommitted, onRefresh }
     modifiedFiles,
     untrackedFiles,
     cwd,
+    coAuthor,
     onCommitted,
     onRefresh,
     onClose,
@@ -118,75 +108,75 @@ export function GitCommitModal({ visible, cwd, onClose, onCommitted, onRefresh }
       height="100%"
     >
       <Box flexDirection="column" borderStyle="round" borderColor="#FF8C00" width={POPUP_WIDTH}>
-        <Row w={innerW}>
+        <PopupRow w={innerW}>
           <Text color="white" bold backgroundColor={POPUP_BG}>
             {"󰊢"} Git Commit
           </Text>
-        </Row>
-        <Row w={innerW}>
+        </PopupRow>
+        <PopupRow w={innerW}>
           <Text color="#333" backgroundColor={POPUP_BG}>
             {"─".repeat(innerW - 4)}
           </Text>
-        </Row>
+        </PopupRow>
 
         {/* Staged files */}
         {stagedFiles.length > 0 && (
-          <Row w={innerW}>
+          <PopupRow w={innerW}>
             <Text color="#2d5" backgroundColor={POPUP_BG}>
               ● {String(stagedFiles.length)} staged
             </Text>
-          </Row>
+          </PopupRow>
         )}
         {modifiedFiles.length > 0 && (
-          <Row w={innerW}>
+          <PopupRow w={innerW}>
             <Text color="#FF8C00" backgroundColor={POPUP_BG}>
               ● {String(modifiedFiles.length)} modified
             </Text>
-          </Row>
+          </PopupRow>
         )}
         {untrackedFiles.length > 0 && (
-          <Row w={innerW}>
+          <PopupRow w={innerW}>
             <Text color="#f44" backgroundColor={POPUP_BG}>
               ● {String(untrackedFiles.length)} untracked
             </Text>
-          </Row>
+          </PopupRow>
         )}
         {totalChanges === 0 && (
-          <Row w={innerW}>
+          <PopupRow w={innerW}>
             <Text color="#555" backgroundColor={POPUP_BG}>
               No changes to commit
             </Text>
-          </Row>
+          </PopupRow>
         )}
 
-        <Row w={innerW}>
+        <PopupRow w={innerW}>
           <Text color="#555" backgroundColor={POPUP_BG}>
             {diffSummary}
           </Text>
-        </Row>
+        </PopupRow>
 
         {/* Stage all toggle */}
         {(modifiedFiles.length > 0 || untrackedFiles.length > 0) && (
-          <Row w={innerW} bg={stageAll ? POPUP_HL : POPUP_BG}>
+          <PopupRow w={innerW} bg={stageAll ? POPUP_HL : POPUP_BG}>
             <Text
               color={stageAll ? "#FF0040" : "#666"}
               backgroundColor={stageAll ? POPUP_HL : POPUP_BG}
             >
               [Tab] {stageAll ? "✓" : "○"} Stage all changes
             </Text>
-          </Row>
+          </PopupRow>
         )}
 
-        <Row w={innerW}>
+        <PopupRow w={innerW}>
           <Text>{""}</Text>
-        </Row>
+        </PopupRow>
 
         {/* Commit message input */}
-        <Row w={innerW}>
+        <PopupRow w={innerW}>
           <Text color="#aaa" backgroundColor={POPUP_BG}>
             Message:
           </Text>
-        </Row>
+        </PopupRow>
         <Box paddingX={2}>
           <Box borderStyle="round" borderColor="#6A0DAD" paddingX={1} width={innerW - 2}>
             <TextInput
@@ -200,21 +190,21 @@ export function GitCommitModal({ visible, cwd, onClose, onCommitted, onRefresh }
         </Box>
 
         {error && (
-          <Row w={innerW}>
+          <PopupRow w={innerW}>
             <Text color="#f44" backgroundColor={POPUP_BG}>
               {error}
             </Text>
-          </Row>
+          </PopupRow>
         )}
 
-        <Row w={innerW}>
+        <PopupRow w={innerW}>
           <Text>{""}</Text>
-        </Row>
-        <Row w={innerW}>
+        </PopupRow>
+        <PopupRow w={innerW}>
           <Text color="#555" backgroundColor={POPUP_BG}>
             ⏎ commit tab stage-all esc cancel
           </Text>
-        </Row>
+        </PopupRow>
       </Box>
     </Box>
   );

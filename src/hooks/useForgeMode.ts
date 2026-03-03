@@ -8,6 +8,7 @@ const MODE_LABELS: Record<ForgeMode, string> = {
   architect: "Architect",
   socratic: "Socratic",
   challenge: "Challenge",
+  plan: "Plan",
 };
 
 const MODE_COLORS: Record<ForgeMode, string> = {
@@ -15,6 +16,7 @@ const MODE_COLORS: Record<ForgeMode, string> = {
   architect: "#9B30FF",
   socratic: "#FF8C00",
   challenge: "#FF0040",
+  plan: "#00BFFF",
 };
 
 interface ForgeModeState {

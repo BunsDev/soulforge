@@ -10,6 +10,8 @@ interface Props {
   defaultBg?: string;
   modeName?: string;
   focused?: boolean;
+  cursorLine?: number;
+  cursorCol?: number;
   onClosed?: () => void;
 }
 
@@ -39,6 +41,8 @@ export function EditorPanel({
   defaultBg,
   modeName = "normal",
   focused = false,
+  cursorLine,
+  cursorCol,
   onClosed,
 }: Props) {
   const [animFrame, setAnimFrame] = useState(0);
@@ -143,7 +147,9 @@ export function EditorPanel({
       </Box>
       {/* Separator */}
       <Box paddingX={1} flexShrink={0} height={1}>
-        <Text color="#333">{"─".repeat(200)}</Text>
+        <Text color="#333" wrap="truncate">
+          {"─".repeat(200)}
+        </Text>
       </Box>
 
       {/* Neovim screen */}
@@ -177,16 +183,25 @@ export function EditorPanel({
 
       {/* Separator */}
       <Box paddingX={1} flexShrink={0} height={1}>
-        <Text color="#333">{"─".repeat(200)}</Text>
+        <Text color="#333" wrap="truncate">
+          {"─".repeat(200)}
+        </Text>
       </Box>
       {/* Bottom bar */}
       <Box paddingX={1} justifyContent="space-between" flexShrink={0} height={1}>
         <Text color="#555" wrap="truncate">
           {fileName ?? ""}
         </Text>
-        <Text color="#555" bold>
-          nvim
-        </Text>
+        <Box gap={2}>
+          {cursorLine != null && (
+            <Text color="#666">
+              {String(cursorLine)}:{String((cursorCol ?? 0) + 1)}
+            </Text>
+          )}
+          <Text color="#555" bold>
+            nvim
+          </Text>
+        </Box>
       </Box>
     </Box>
   );

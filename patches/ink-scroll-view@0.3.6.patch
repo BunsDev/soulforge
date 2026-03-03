@@ -1,0 +1,30 @@
+diff --git a/dist/index.js b/dist/index.js
+index 9dc2bc396d7d1ab80ff7e283e266b4b420c619a2..24eddec8c45ce3fe6ec149e5375c0360d1084c6a 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -268,10 +268,10 @@ var ScrollView = forwardRef2(
+           if (typeof offset !== "number" || isNaN(offset)) {
+             return;
+           }
+-          const currentContentHeight = contentHeightRef.current;
++          const maxOffset = getBottomOffset();
+           const newScrollTop = Math.max(
+             0,
+-            Math.min(offset, currentContentHeight)
++            Math.min(offset, maxOffset)
+           );
+           if (newScrollTop !== getScrollOffset()) {
+             setScrollOffset(newScrollTop);
+@@ -282,10 +282,10 @@ var ScrollView = forwardRef2(
+           if (typeof delta !== "number" || isNaN(delta)) {
+             return;
+           }
+-          const currentContentHeight = contentHeightRef.current;
++          const maxOffset = getBottomOffset();
+           const newScrollTop = Math.max(
+             0,
+-            Math.min(getScrollOffset() + delta, currentContentHeight)
++            Math.min(getScrollOffset() + delta, maxOffset)
+           );
+           if (newScrollTop !== getScrollOffset()) {
+             setScrollOffset(newScrollTop);

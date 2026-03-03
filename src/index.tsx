@@ -1,20 +1,36 @@
 #!/usr/bin/env bun
 import { render } from "ink";
 import { App } from "./components/App.js";
-import { loadConfig } from "./config/index.js";
+import { loadConfig, loadProjectConfig } from "./config/index.js";
 import { detectNeovim } from "./core/editor/detect.js";
+import { getVendoredPath, installNeovim, installRipgrep } from "./core/setup/install.js";
 
-// Load configuration
+// Load configuration (global + project)
 const config = loadConfig();
+const projectConfig = loadProjectConfig(process.cwd());
 
-// Detect neovim before launching UI
-try {
-  const nvim = detectNeovim();
-  config.nvimPath = nvim.path;
-} catch (err: unknown) {
-  const msg = err instanceof Error ? err.message : String(err);
-  process.stderr.write(`\x1b[1;31mError:\x1b[0m ${msg}\n`);
-  process.exit(1);
+// Detect neovim before launching UI — auto-install if missing
+let nvim = detectNeovim();
+
+if (!nvim) {
+  process.stderr.write("Installing Neovim 0.11...\n");
+  try {
+    const path = await installNeovim();
+    nvim = { path, version: "0.11.1" };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(
+      `\x1b[1;31mFailed to install Neovim:\x1b[0m ${msg}\nInstall manually: brew install neovim\n`,
+    );
+    process.exit(1);
+  }
+}
+
+config.nvimPath = nvim.path;
+
+// Background-install ripgrep (non-blocking, non-fatal)
+if (!getVendoredPath("rg")) {
+  installRipgrep().catch(() => {});
 }
 
 // Clear terminal on exit
@@ -25,6 +41,6 @@ process.on("exit", () => {
 // Clear screen and render
 process.stdout.write("\x1b[2J\x1b[H");
 
-render(<App config={config} />, {
+render(<App config={config} projectConfig={projectConfig} />, {
   exitOnCtrlC: false,
 });

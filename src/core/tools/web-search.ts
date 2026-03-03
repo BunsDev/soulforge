@@ -24,11 +24,8 @@ export const webSearchTool = {
       });
 
       if (!res.ok) {
-        return {
-          success: false,
-          output: "",
-          error: `Search failed: HTTP ${String(res.status)}`,
-        };
+        const msg = `Search failed: HTTP ${String(res.status)}`;
+        return { success: false, output: msg, error: msg };
       }
 
       const html = await res.text();
@@ -83,7 +80,7 @@ export const webSearchTool = {
       };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      return { success: false, output: "", error: `Search error: ${msg}` };
+      return { success: false, output: `Search error: ${msg}`, error: `Search error: ${msg}` };
     }
   },
 };

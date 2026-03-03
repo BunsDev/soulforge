@@ -1,10 +1,25 @@
-import { PROVIDERS } from "./provider.js";
+import { getAllProviders, getProvider } from "./providers/index.js";
+import type { ProviderModelInfo } from "./providers/types.js";
+
+// Re-export for backward compatibility
+export type { ProviderModelInfo } from "./providers/types.js";
 
 // ─── Types ───
 
-export interface ProviderModelInfo {
+export interface FetchModelsResult {
+  models: ProviderModelInfo[];
+  error?: string;
+}
+
+export interface GatewaySubProvider {
   id: string;
   name: string;
+}
+
+export interface GatewayModelsResult {
+  subProviders: GatewaySubProvider[];
+  modelsByProvider: Record<string, ProviderModelInfo[]>;
+  error?: string;
 }
 
 export interface ProviderConfig {
@@ -13,42 +28,53 @@ export interface ProviderConfig {
   envVar: string;
 }
 
-// ─── Provider Configs (derived from PROVIDERS) ───
+// ─── Provider Configs (derived from registry) ───
 
-export const PROVIDER_CONFIGS: ProviderConfig[] = Object.entries(PROVIDERS).map(
-  ([id, { name, envVar }]) => ({ id, name, envVar }),
-);
+export const PROVIDER_CONFIGS: ProviderConfig[] = getAllProviders().map((p) => ({
+  id: p.id,
+  name: p.name,
+  envVar: p.envVar,
+}));
 
-// ─── Fallback Model Lists ───
+// ─── Context Windows ───
 
-const FALLBACK_MODELS: Record<string, ProviderModelInfo[]> = {
-  anthropic: [
-    { id: "claude-opus-4", name: "Claude Opus 4" },
-    { id: "claude-sonnet-4", name: "Claude Sonnet 4" },
-    { id: "claude-haiku-4", name: "Claude Haiku 4" },
-  ],
-  openai: [
-    { id: "gpt-4o", name: "GPT-4o" },
-    { id: "gpt-4o-mini", name: "GPT-4o Mini" },
-    { id: "o3-mini", name: "o3 Mini" },
-    { id: "o1", name: "o1" },
-  ],
-  xai: [
-    { id: "grok-3", name: "Grok 3" },
-    { id: "grok-3-mini", name: "Grok 3 Mini" },
-  ],
-  google: [
-    { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
-    { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
-    { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash" },
-  ],
-  ollama: [
-    { id: "llama3.1", name: "Llama 3.1" },
-    { id: "codellama", name: "Code Llama" },
-    { id: "mistral", name: "Mistral" },
-    { id: "deepseek-coder-v2", name: "DeepSeek Coder v2" },
-  ],
-};
+const DEFAULT_CONTEXT_TOKENS = 128_000;
+
+/**
+ * Get the context window size (in tokens) for a model ID.
+ * Checks cached API data first, then falls back to provider-defined patterns.
+ * Accepts full "provider/model" format or just the model part.
+ * Pattern order matters — specific patterns must come before general ones.
+ */
+export function getModelContextWindow(modelId: string): number {
+  const slashIdx = modelId.indexOf("/");
+  const providerId = slashIdx >= 0 ? modelId.slice(0, slashIdx) : "";
+  const model = slashIdx >= 0 ? modelId.slice(slashIdx + 1) : modelId;
+
+  // 1. Check cached API data (most accurate — comes from the provider)
+  if (providerId && providerId !== "gateway") {
+    const cached = modelCache.get(providerId);
+    if (cached) {
+      const match = cached.find((m) => m.id === model);
+      if (match?.contextWindow) return match.contextWindow;
+    }
+  }
+  // Gateway models use "gateway/sub-provider/model" — check sub-provider cache
+  if (providerId === "gateway" && gatewayCache) {
+    for (const models of Object.values(gatewayCache.modelsByProvider)) {
+      const match = models.find((m) => m.id === model || modelId.endsWith(m.id));
+      if (match?.contextWindow) return match.contextWindow;
+    }
+  }
+
+  // 2. Fallback to provider-defined context window patterns
+  for (const provider of getAllProviders()) {
+    for (const [pattern, tokens] of provider.contextWindows) {
+      if (model.includes(pattern)) return tokens;
+    }
+  }
+  return DEFAULT_CONTEXT_TOKENS;
+}
 
 // ─── Cache ───
 
@@ -58,149 +84,84 @@ export function getCachedModels(providerId: string): ProviderModelInfo[] | null 
   return modelCache.get(providerId) ?? null;
 }
 
-// ─── OpenAI Allowlist Prefixes ───
-
-const OPENAI_PREFIXES = ["gpt-4", "gpt-3.5", "o1", "o3", "chatgpt"];
-
-// ─── Fetch Helpers ───
-
-interface AnthropicModel {
-  id: string;
-  type: string;
-  display_name?: string;
-}
-
-interface OpenAIModel {
-  id: string;
-}
-
-interface GoogleModel {
-  name: string;
-  displayName?: string;
-  supportedGenerationMethods?: string[];
-}
-
-async function fetchAnthropic(apiKey: string): Promise<ProviderModelInfo[]> {
-  const res = await fetch("https://api.anthropic.com/v1/models", {
-    headers: {
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-  });
-  if (!res.ok) throw new Error(`Anthropic API ${res.status}`);
-  const data = (await res.json()) as { data: AnthropicModel[] };
-  const result: ProviderModelInfo[] = [];
-  for (const m of data.data) {
-    if (m.type === "model") result.push({ id: m.id, name: m.display_name ?? m.id });
-  }
-  return result;
-}
-
-async function fetchOpenAI(apiKey: string): Promise<ProviderModelInfo[]> {
-  const res = await fetch("https://api.openai.com/v1/models", {
-    headers: { Authorization: `Bearer ${apiKey}` },
-  });
-  if (!res.ok) throw new Error(`OpenAI API ${res.status}`);
-  const data = (await res.json()) as { data: OpenAIModel[] };
-  const result: ProviderModelInfo[] = [];
-  for (const m of data.data) {
-    if (OPENAI_PREFIXES.some((p) => m.id.startsWith(p))) result.push({ id: m.id, name: m.id });
-  }
-  return result;
-}
-
-async function fetchXai(apiKey: string): Promise<ProviderModelInfo[]> {
-  const res = await fetch("https://api.x.ai/v1/models", {
-    headers: { Authorization: `Bearer ${apiKey}` },
-  });
-  if (!res.ok) throw new Error(`xAI API ${res.status}`);
-  const data = (await res.json()) as { data: OpenAIModel[] };
-  const result: ProviderModelInfo[] = [];
-  for (const m of data.data) {
-    if (!m.id.includes("embed")) result.push({ id: m.id, name: m.id });
-  }
-  return result;
-}
-
-interface OllamaModel {
-  name: string;
-}
-
-async function fetchOllama(): Promise<ProviderModelInfo[]> {
-  const res = await fetch("http://localhost:11434/api/tags");
-  if (!res.ok) throw new Error(`Ollama API ${res.status}`);
-  const data = (await res.json()) as { models: OllamaModel[] };
-  return data.models.map((m) => {
-    const name = m.name.replace(/:latest$/, "");
-    return { id: name, name };
-  });
-}
-
-async function fetchGoogle(apiKey: string): Promise<ProviderModelInfo[]> {
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-  if (!res.ok) throw new Error(`Google API ${res.status}`);
-  const data = (await res.json()) as { models: GoogleModel[] };
-  const result: ProviderModelInfo[] = [];
-  for (const m of data.models) {
-    if (!m.supportedGenerationMethods?.includes("generateContent")) continue;
-    const id = m.name?.replace("models/", "") ?? "";
-    if (id === "") continue;
-    result.push({ id, name: m.displayName ?? id });
-  }
-  return result;
-}
-
 // ─── Public API ───
 
-export async function fetchProviderModels(providerId: string): Promise<ProviderModelInfo[]> {
+export async function fetchProviderModels(providerId: string): Promise<FetchModelsResult> {
   // Check cache first
   const cached = modelCache.get(providerId);
-  if (cached) return cached;
+  if (cached) return { models: cached };
 
-  const providerInfo = PROVIDERS[providerId];
-  if (!providerInfo) return getFallbackModels(providerId);
-
-  // Ollama doesn't use an API key
-  if (providerId === "ollama") {
-    try {
-      const models = await fetchOllama();
-      modelCache.set(providerId, models);
-      return models;
-    } catch {
-      return getFallbackModels(providerId);
-    }
-  }
-
-  const apiKey = process.env[providerInfo.envVar];
-  if (!apiKey) return getFallbackModels(providerId);
+  const provider = getProvider(providerId);
+  if (!provider) return { models: [] };
 
   try {
-    let models: ProviderModelInfo[];
-
-    switch (providerId) {
-      case "anthropic":
-        models = await fetchAnthropic(apiKey);
-        break;
-      case "openai":
-        models = await fetchOpenAI(apiKey);
-        break;
-      case "xai":
-        models = await fetchXai(apiKey);
-        break;
-      case "google":
-        models = await fetchGoogle(apiKey);
-        break;
-      default:
-        return getFallbackModels(providerId);
+    const models = await provider.fetchModels();
+    if (models) {
+      modelCache.set(providerId, models);
+      return { models };
     }
-
-    modelCache.set(providerId, models);
-    return models;
-  } catch {
-    return getFallbackModels(providerId);
+    return { models: provider.fallbackModels };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    return { models: provider.fallbackModels, error: `API error: ${msg}` };
   }
 }
 
-function getFallbackModels(providerId: string): ProviderModelInfo[] {
-  return FALLBACK_MODELS[providerId] ?? [];
+// ─── Gateway Models ───
+
+interface GatewayApiModel {
+  id: string;
+  owned_by: string;
+  name: string;
+  type: string;
+}
+
+let gatewayCache: GatewayModelsResult | null = null;
+
+export function getCachedGatewayModels(): GatewayModelsResult | null {
+  return gatewayCache;
+}
+
+function titleCase(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+export async function fetchGatewayModels(): Promise<GatewayModelsResult> {
+  if (gatewayCache) return gatewayCache;
+
+  if (!process.env.AI_GATEWAY_API_KEY) {
+    return { subProviders: [], modelsByProvider: {}, error: "AI_GATEWAY_API_KEY not set" };
+  }
+
+  try {
+    const res = await fetch("https://ai-gateway.vercel.sh/v1/models");
+    if (!res.ok) {
+      return {
+        subProviders: [],
+        modelsByProvider: {},
+        error: `Gateway error: ${String(res.status)}`,
+      };
+    }
+
+    const data = (await res.json()) as { data: GatewayApiModel[] };
+    const grouped: Record<string, ProviderModelInfo[]> = {};
+
+    for (const m of data.data) {
+      if (m.type !== "language") continue;
+      const owner = m.owned_by;
+      if (!grouped[owner]) grouped[owner] = [];
+      grouped[owner].push({ id: m.id, name: m.name });
+    }
+
+    const subProviders: GatewaySubProvider[] = Object.keys(grouped)
+      .sort()
+      .map((id) => ({ id, name: titleCase(id) }));
+
+    const result: GatewayModelsResult = { subProviders, modelsByProvider: grouped };
+    gatewayCache = result;
+    return result;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    return { subProviders: [], modelsByProvider: {}, error: `Gateway error: ${msg}` };
+  }
 }

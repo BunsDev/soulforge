@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import type { ToolResult } from "../../types";
+import { getVendoredPath } from "../setup/install.js";
 
 interface GrepArgs {
   pattern: string;
@@ -26,7 +27,8 @@ export const grepTool = {
     ];
 
     return new Promise((resolve) => {
-      const proc = spawn("rg", rgArgs, {
+      const rgBin = getVendoredPath("rg") ?? "rg";
+      const proc = spawn(rgBin, rgArgs, {
         cwd: process.cwd(),
         timeout: 10_000,
       });

@@ -66,10 +66,9 @@ function pushSeg(segs: Seg[], char: string, color: string, bold: boolean) {
 interface Props {
   providers: ProviderStatus[];
   activeModel: string;
-  hasGateway: boolean;
 }
 
-export function Banner({ providers, activeModel, hasGateway: gw }: Props) {
+export function Banner({ providers, activeModel }: Props) {
   const [frame, setFrame] = useState(0);
 
   const animDone = frame >= TOTAL_FRAMES;
@@ -175,24 +174,14 @@ export function Banner({ providers, activeModel, hasGateway: gw }: Props) {
       {showHealth && (
         <>
           <Box marginTop={1} gap={2}>
-            {gw ? (
-              <Box gap={1}>
-                <Text color="#00FF00" bold>
-                  ●
+            {providers.map((p) => (
+              <Box key={p.id} gap={0}>
+                <Text color={p.available ? "#00FF00" : "#FF0040"} bold>
+                  {providerIcon(p.id)}
                 </Text>
-                <Text color="#888">Gateway</Text>
-                <Text color="#555">(all models)</Text>
+                <Text color={p.available ? "#888" : "#444"}> {p.name}</Text>
               </Box>
-            ) : (
-              providers.map((p) => (
-                <Box key={p.id} gap={0}>
-                  <Text color={p.available ? "#00FF00" : "#FF0040"} bold>
-                    {providerIcon(p.id)}
-                  </Text>
-                  <Text color={p.available ? "#888" : "#444"}> {p.name}</Text>
-                </Box>
-              ))
-            )}
+            ))}
           </Box>
 
           <Box marginTop={0}>

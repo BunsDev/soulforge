@@ -1,0 +1,219 @@
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, join, resolve } from "node:path";
+
+/**
+ * Forbidden file guard — prevents the LLM from reading or editing sensitive files.
+ *
+ * Config priority: session patterns > project (.soulforge/forbidden.json) > global (~/.soulforge/forbidden.json)
+ * Built-in defaults always apply and cannot be removed.
+ */
+
+// ─── Built-in patterns that always apply ───
+const BUILTIN_PATTERNS = [
+  ".env",
+  ".env.*",
+  "*.pem",
+  "*.key",
+  "*.p12",
+  "*.pfx",
+  "*.keystore",
+  "*.jks",
+  "id_rsa",
+  "id_ed25519",
+  "id_ecdsa",
+  "id_dsa",
+  "*.pub", // SSH public keys (usually fine but safer to block)
+  "credentials.json",
+  "service-account*.json",
+  "secrets.json",
+  "secrets.yaml",
+  "secrets.yml",
+  ".npmrc",
+  ".pypirc",
+  ".netrc",
+  ".docker/config.json",
+  "token.json",
+  "tokens.json",
+  "**/aws/credentials",
+  "**/.aws/credentials",
+  ".htpasswd",
+];
+
+export interface ForbiddenConfig {
+  /** Glob-like patterns to block (e.g. ".env", "*.pem", "secrets/**") */
+  patterns: string[];
+}
+
+// ─── Module-level state ───
+let globalPatterns: string[] = [];
+let projectPatterns: string[] = [];
+let sessionPatterns: string[] = [];
+let aiIgnorePatterns: string[] = [];
+let initialized = false;
+
+function globToRegex(pattern: string): RegExp {
+  // Convert a simple glob pattern to a regex
+  // Supports: * (any chars except /), ** (any path), ? (single char)
+  const re = pattern
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&") // escape regex special chars (except * and ?)
+    .replace(/\*\*/g, "\0DOUBLESTAR\0")
+    .replace(/\*/g, "[^/]*")
+    .replace(/\0DOUBLESTAR\0/g, ".*")
+    .replace(/\?/g, ".");
+  // Match the pattern against filename or full path
+  return new RegExp(`(^|/)${re}$`, "i");
+}
+
+function loadPatternsFromFile(filePath: string): string[] {
+  try {
+    if (!existsSync(filePath)) return [];
+    const raw = readFileSync(filePath, "utf-8");
+    const parsed = JSON.parse(raw) as ForbiddenConfig;
+    return Array.isArray(parsed.patterns) ? parsed.patterns : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Parse a .gitignore / .aiignore style file into patterns */
+function parseIgnoreFile(filePath: string): string[] {
+  try {
+    if (!existsSync(filePath)) return [];
+    const content = readFileSync(filePath, "utf-8");
+    return content
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0 && !l.startsWith("#"));
+  } catch {
+    return [];
+  }
+}
+
+/** Initialize the forbidden guard. Call once at startup. */
+export function initForbidden(cwd: string): void {
+  const globalFile = join(homedir(), ".soulforge", "forbidden.json");
+  const projectFile = join(cwd, ".soulforge", "forbidden.json");
+
+  globalPatterns = loadPatternsFromFile(globalFile);
+  projectPatterns = loadPatternsFromFile(projectFile);
+  sessionPatterns = [];
+
+  // Respect .aiignore (AI-specific exclusions)
+  aiIgnorePatterns = parseIgnoreFile(join(cwd, ".aiignore"));
+
+  initialized = true;
+}
+
+/** Add a session-scoped pattern (lost on restart) */
+export function addSessionPattern(pattern: string): void {
+  if (!sessionPatterns.includes(pattern)) {
+    sessionPatterns.push(pattern);
+  }
+}
+
+/** Remove a session-scoped pattern */
+export function removeSessionPattern(pattern: string): void {
+  sessionPatterns = sessionPatterns.filter((p) => p !== pattern);
+}
+
+/** Add a pattern to the project config (.soulforge/forbidden.json) */
+export function addProjectPattern(cwd: string, pattern: string): void {
+  const filePath = join(cwd, ".soulforge", "forbidden.json");
+  const existing = loadPatternsFromFile(filePath);
+  if (!existing.includes(pattern)) {
+    existing.push(pattern);
+    const { mkdirSync } = require("node:fs") as typeof import("node:fs");
+    mkdirSync(join(cwd, ".soulforge"), { recursive: true });
+    writeFileSync(filePath, JSON.stringify({ patterns: existing }, null, 2));
+    projectPatterns = existing;
+  }
+}
+
+/** Remove a pattern from the project config */
+export function removeProjectPattern(cwd: string, pattern: string): void {
+  const filePath = join(cwd, ".soulforge", "forbidden.json");
+  const existing = loadPatternsFromFile(filePath);
+  const updated = existing.filter((p) => p !== pattern);
+  if (updated.length !== existing.length) {
+    writeFileSync(filePath, JSON.stringify({ patterns: updated }, null, 2));
+    projectPatterns = updated;
+  }
+}
+
+/** Add a pattern to the global config (~/.soulforge/forbidden.json) */
+export function addGlobalPattern(pattern: string): void {
+  const filePath = join(homedir(), ".soulforge", "forbidden.json");
+  const existing = loadPatternsFromFile(filePath);
+  if (!existing.includes(pattern)) {
+    existing.push(pattern);
+    const { mkdirSync } = require("node:fs") as typeof import("node:fs");
+    mkdirSync(join(homedir(), ".soulforge"), { recursive: true });
+    writeFileSync(filePath, JSON.stringify({ patterns: existing }, null, 2));
+    globalPatterns = existing;
+  }
+}
+
+/** Get all active patterns grouped by source */
+export function getAllPatterns(): {
+  builtin: string[];
+  global: string[];
+  project: string[];
+  session: string[];
+  aiignore: string[];
+} {
+  return {
+    builtin: [...BUILTIN_PATTERNS],
+    global: [...globalPatterns],
+    project: [...projectPatterns],
+    session: [...sessionPatterns],
+    aiignore: [...aiIgnorePatterns],
+  };
+}
+
+/** Check if a file path is forbidden. Returns the matching pattern or null. */
+export function isForbidden(filePath: string): string | null {
+  if (!initialized) return null;
+
+  const resolved = resolve(filePath);
+  const name = basename(resolved);
+
+  const allPatterns = [
+    ...BUILTIN_PATTERNS,
+    ...globalPatterns,
+    ...projectPatterns,
+    ...sessionPatterns,
+    ...aiIgnorePatterns,
+  ];
+
+  for (const pattern of allPatterns) {
+    const re = globToRegex(pattern);
+    // Test against both the full path and just the filename
+    if (re.test(resolved) || re.test(name)) {
+      return pattern;
+    }
+  }
+
+  return null;
+}
+
+/** Build a summary for the system prompt */
+export function buildForbiddenContext(): string {
+  const all = [
+    ...BUILTIN_PATTERNS,
+    ...globalPatterns,
+    ...projectPatterns,
+    ...sessionPatterns,
+    ...aiIgnorePatterns,
+  ];
+  const unique = [...new Set(all)];
+  if (unique.length === 0) return "";
+  return [
+    "## Forbidden Files (Security)",
+    "You MUST NOT read, edit, display, `cat`, `echo`, or access in ANY way files matching these patterns — not even via `shell`.",
+    "Do NOT suggest workarounds, alternative commands, or ways to bypass this restriction.",
+    "If asked, reply briefly: the file is blocked for security. One sentence max. Do not over-explain.",
+    "The user can manage these rules with `/privacy`.",
+    `Patterns: ${unique.map((p) => `\`${p}\``).join(", ")}`,
+  ].join("\n");
+}

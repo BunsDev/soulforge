@@ -1,7 +1,23 @@
 import { spawn } from "node:child_process";
 import type { ToolResult } from "../../types";
+import { isForbidden } from "../security/forbidden.js";
 
 const DEFAULT_TIMEOUT = 30_000;
+
+// Patterns that extract file content from shell commands
+const FILE_ACCESS_RE = /\b(cat|head|tail|less|more|bat|xxd|hexdump|strings|base64)\s+(.+)/;
+
+function checkShellForbidden(command: string): string | null {
+  const match = command.match(FILE_ACCESS_RE);
+  if (!match) return null;
+  // Extract potential file paths from the command args
+  const args = (match[2] ?? "").split(/\s+/).filter((a) => !a.startsWith("-"));
+  for (const arg of args) {
+    const blocked = isForbidden(arg.replace(/['"]/g, ""));
+    if (blocked) return blocked;
+  }
+  return null;
+}
 
 interface ShellArgs {
   command: string;
@@ -15,6 +31,13 @@ export const shellTool = {
   execute: async (args: ShellArgs): Promise<ToolResult> => {
     const command = args.command;
     const cwd = args.cwd ?? process.cwd();
+
+    // Check if the command tries to read forbidden files
+    const blocked = checkShellForbidden(command);
+    if (blocked) {
+      const msg = `Access denied: command references a file matching forbidden pattern "${blocked}".`;
+      return { success: false, output: msg, error: msg };
+    }
     const timeout = args.timeout ?? DEFAULT_TIMEOUT;
 
     return new Promise((resolve) => {
@@ -46,7 +69,7 @@ export const shellTool = {
       });
 
       proc.on("error", (err: Error) => {
-        resolve({ success: false, output: "", error: err.message });
+        resolve({ success: false, output: err.message, error: err.message });
       });
     });
   },

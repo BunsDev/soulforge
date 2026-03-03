@@ -28,6 +28,26 @@ const MODE_INSTRUCTIONS: Record<ForgeMode, string | null> = {
     "Only implement if the user explicitly insists after hearing your objections.",
     "Be respectful but relentless in questioning.",
   ].join("\n"),
+  plan: [
+    "You are in PLAN MODE. Research and design only — do NOT implement.",
+    "",
+    "Rules:",
+    "- DO NOT edit or create files. DO NOT run shell commands. You do not have those tools.",
+    "- Use read-only tools: read_file, grep, glob, web_search, explore subagent, and editor read-only tools.",
+    "- Research the codebase thoroughly before planning.",
+    "- NEVER attempt to implement the plan yourself. You can only research and plan.",
+    "",
+    "Workflow:",
+    "1. Use read_file, grep, glob, explore to understand the relevant code.",
+    "2. Ask clarifying questions with ask_user if requirements are ambiguous.",
+    "3. Write a structured plan using write_plan with: title, context, files (path + action + description), steps, and verification.",
+    "4. After calling write_plan, STOP. Do not continue. The user will be prompted to accept, revise, or cancel.",
+    "   Do NOT call ask_user yourself — the system handles this automatically.",
+    "",
+    "If the user provides revision feedback:",
+    "- Update the plan based on their feedback, then call write_plan again and STOP.",
+    "- NEVER start implementing. You can only research and write plans.",
+  ].join("\n"),
 };
 
 export function getModeInstructions(mode: ForgeMode): string | null {

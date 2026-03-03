@@ -16,6 +16,6 @@ export function createExploreAgent(model: LanguageModel) {
     model,
     tools: buildReadOnlyTools(),
     instructions: EXPLORE_INSTRUCTIONS,
-    stopWhen: stepCountIs(15),
+    stopWhen: stepCountIs(150),
   });
 }

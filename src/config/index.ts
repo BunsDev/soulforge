@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AppConfig } from "../types";
 
-const CONFIG_DIR = join(homedir(), ".proxy");
+const CONFIG_DIR = join(homedir(), ".soulforge");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 
 const DEFAULT_CONFIG: AppConfig = {
@@ -16,8 +16,22 @@ const DEFAULT_CONFIG: AppConfig = {
   theme: {
     accentColor: "cyan",
   },
+  nvimConfig: "auto",
+  editorIntegration: {
+    diagnostics: true,
+    symbols: true,
+    hover: true,
+    references: true,
+    definition: true,
+    codeActions: true,
+    editorContext: true,
+    rename: true,
+    lspStatus: true,
+    format: true,
+  },
 };
 
+/** Load global config from ~/.soulforge/config.json */
 export function loadConfig(): AppConfig {
   if (!existsSync(CONFIG_DIR)) {
     mkdirSync(CONFIG_DIR, { recursive: true });
@@ -36,6 +50,48 @@ export function loadConfig(): AppConfig {
   }
 }
 
+/** Load project-level config from <cwd>/.soulforge/config.json */
+export function loadProjectConfig(cwd: string): Partial<AppConfig> | null {
+  const projectFile = join(cwd, ".soulforge", "config.json");
+  if (!existsSync(projectFile)) return null;
+  try {
+    const raw = readFileSync(projectFile, "utf-8");
+    return JSON.parse(raw) as Partial<AppConfig>;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Merge configs with priority: session > project > global.
+ * Nested objects (editor, theme) are shallow-merged.
+ */
+export function mergeConfigs(
+  global: AppConfig,
+  project: Partial<AppConfig> | null,
+  session: Partial<AppConfig> | null,
+): AppConfig {
+  const layers: Partial<AppConfig>[] = [global];
+  if (project) layers.push(project);
+  if (session) layers.push(session);
+
+  let merged: AppConfig = { ...global };
+  for (const layer of layers.slice(1)) {
+    const ei = layer.editorIntegration
+      ? { ...merged.editorIntegration, ...layer.editorIntegration }
+      : merged.editorIntegration;
+    merged = {
+      ...merged,
+      ...layer,
+      editor: { ...merged.editor, ...layer.editor },
+      theme: { ...merged.theme, ...layer.theme },
+      editorIntegration: ei,
+    };
+  }
+  return merged;
+}
+
+/** Save global config to ~/.soulforge/config.json */
 export function saveConfig(config: AppConfig): void {
   if (!existsSync(CONFIG_DIR)) {
     mkdirSync(CONFIG_DIR, { recursive: true });

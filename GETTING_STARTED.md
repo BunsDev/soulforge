@@ -80,7 +80,7 @@ bun run dev
 
 That's it. SoulForge will start, detect your Neovim binary, and drop you into the chat interface.
 
-> **First run:** If no config exists, one will be created at `~/.proxy/config.json` with sensible defaults.
+> **First run:** If no config exists, one will be created at `~/.soulforge/config.json` with sensible defaults.
 
 ---
 
@@ -169,7 +169,7 @@ For larger tasks it can delegate to specialized subagents:
 
 ## Config
 
-Config lives at `~/.proxy/config.json`. It's created automatically on first run. You can edit it manually:
+Config lives at `~/.soulforge/config.json`. It's created automatically on first run. You can edit it manually:
 
 ```json
 {
@@ -189,7 +189,7 @@ Config lives at `~/.proxy/config.json`. It's created automatically on first run.
 ## Troubleshooting
 
 **SoulForge won't start — "Neovim not found"**
-Install Neovim ≥ 0.9.0 and make sure `nvim` is on your `PATH`. You can also set `nvimPath` in `~/.proxy/config.json` to an explicit binary path.
+Install Neovim ≥ 0.9.0 and make sure `nvim` is on your `PATH`. You can also set `nvimPath` in `~/.soulforge/config.json` to an explicit binary path.
 
 **No models showing up in Ctrl+L**
 Make sure the relevant API key env var is set and exported in your shell. Restart SoulForge after adding new keys.

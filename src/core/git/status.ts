@@ -17,10 +17,14 @@ export interface GitLogEntry {
   date: string;
 }
 
-function run(args: string[], cwd: string): Promise<{ ok: boolean; stdout: string }> {
+function run(
+  args: string[],
+  cwd: string,
+  timeout = 5_000,
+): Promise<{ ok: boolean; stdout: string }> {
   return new Promise((resolve) => {
     const chunks: string[] = [];
-    const proc = spawn("git", args, { cwd, timeout: 5_000, env: { ...process.env } });
+    const proc = spawn("git", args, { cwd, timeout, env: { ...process.env } });
     proc.stdout.on("data", (d: Buffer) => chunks.push(d.toString()));
     proc.on("close", (code) => resolve({ ok: code === 0, stdout: chunks.join("") }));
     proc.on("error", () => resolve({ ok: false, stdout: "" }));
@@ -140,6 +144,36 @@ export async function gitCommit(
 export async function gitAdd(cwd: string, files: string[]): Promise<boolean> {
   const { ok } = await run(["add", ...files], cwd);
   return ok;
+}
+
+export async function gitPush(
+  cwd: string,
+  args?: string[],
+): Promise<{ ok: boolean; output: string }> {
+  const { ok, stdout } = await run(["push", ...(args ?? [])], cwd, 30_000);
+  return { ok, output: stdout };
+}
+
+export async function gitPull(
+  cwd: string,
+  args?: string[],
+): Promise<{ ok: boolean; output: string }> {
+  const { ok, stdout } = await run(["pull", ...(args ?? [])], cwd, 30_000);
+  return { ok, output: stdout };
+}
+
+export async function gitStash(
+  cwd: string,
+  message?: string,
+): Promise<{ ok: boolean; output: string }> {
+  const args = message ? ["stash", "push", "-m", message] : ["stash"];
+  const { ok, stdout } = await run(args, cwd);
+  return { ok, output: stdout };
+}
+
+export async function gitStashPop(cwd: string): Promise<{ ok: boolean; output: string }> {
+  const { ok, stdout } = await run(["stash", "pop"], cwd);
+  return { ok, output: stdout };
 }
 
 export async function buildGitContext(cwd: string): Promise<string | null> {

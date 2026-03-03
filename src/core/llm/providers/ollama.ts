@@ -1,0 +1,50 @@
+import { createOpenAI } from "@ai-sdk/openai";
+import type { ProviderDefinition, ProviderModelInfo } from "./types.js";
+
+interface OllamaModel {
+  name: string;
+}
+
+// Ollama uses OpenAI's SDK with a local base URL because Ollama exposes
+// an OpenAI-compatible API at localhost:11434/v1.
+export const ollama: ProviderDefinition = {
+  id: "ollama",
+  name: "Ollama",
+  envVar: "",
+  icon: "🦙",
+
+  createModel(modelId: string) {
+    const client = createOpenAI({
+      baseURL: "http://localhost:11434/v1",
+      apiKey: "ollama",
+    });
+    return client(modelId);
+  },
+
+  async fetchModels(): Promise<ProviderModelInfo[] | null> {
+    const res = await fetch("http://localhost:11434/api/tags");
+    if (!res.ok) throw new Error(`Ollama API ${String(res.status)}`);
+    const data = (await res.json()) as { models: OllamaModel[] };
+    return data.models.map((m) => {
+      const name = m.name.replace(/:latest$/, "");
+      return { id: name, name };
+    });
+  },
+
+  fallbackModels: [
+    { id: "llama3.1", name: "Llama 3.1" },
+    { id: "codellama", name: "Code Llama" },
+    { id: "mistral", name: "Mistral" },
+    { id: "deepseek-coder-v2", name: "DeepSeek Coder v2" },
+  ],
+
+  contextWindows: [
+    ["llama3.1:70b", 128_000],
+    ["llama3.1", 128_000],
+    ["codellama", 16_000],
+    ["deepseek-coder", 128_000],
+    ["deepseek", 128_000],
+    ["mistral", 32_000],
+    ["qwen", 32_000],
+  ],
+};

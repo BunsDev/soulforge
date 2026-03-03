@@ -5,6 +5,9 @@ interface UseEditorFocusReturn {
   focusMode: FocusMode;
   editorOpen: boolean;
   toggleFocus: () => void;
+  setFocus: (mode: FocusMode) => void;
+  openEditor: () => void;
+  closeEditor: () => void;
 }
 
 /**
@@ -33,5 +36,25 @@ export function useEditorFocus(): UseEditorFocusReturn {
     }
   }, [editorOpen, focusMode]);
 
-  return { focusMode, editorOpen, toggleFocus };
+  const setFocus = useCallback(
+    (mode: FocusMode) => {
+      if (mode === "editor" && !editorOpen) return;
+      setFocusMode(mode);
+    },
+    [editorOpen],
+  );
+
+  const openEditor = useCallback(() => {
+    if (!editorOpen) {
+      setEditorOpen(true);
+      setFocusMode("editor");
+    }
+  }, [editorOpen]);
+
+  const closeEditor = useCallback(() => {
+    setEditorOpen(false);
+    setFocusMode("chat");
+  }, []);
+
+  return { focusMode, editorOpen, toggleFocus, setFocus, openEditor, closeEditor };
 }

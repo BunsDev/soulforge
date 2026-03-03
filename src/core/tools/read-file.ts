@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ToolResult } from "../../types";
+import { isForbidden } from "../security/forbidden.js";
 
 interface ReadFileArgs {
   path: string;
@@ -15,13 +16,27 @@ export const readFileTool = {
     try {
       const filePath = resolve(args.path);
 
+      const blocked = isForbidden(filePath);
+      if (blocked) {
+        const msg = `Access denied: "${args.path}" matches forbidden pattern "${blocked}". This file is blocked for security.`;
+        return { success: false, output: msg, error: msg };
+      }
+
       if (!existsSync(filePath)) {
-        return { success: false, output: "", error: `File not found: ${filePath}` };
+        return {
+          success: false,
+          output: `File not found: ${filePath}`,
+          error: `File not found: ${filePath}`,
+        };
       }
 
       const stat = statSync(filePath);
       if (stat.isDirectory()) {
-        return { success: false, output: "", error: `Path is a directory: ${filePath}` };
+        return {
+          success: false,
+          output: `Path is a directory: ${filePath}`,
+          error: `Path is a directory: ${filePath}`,
+        };
       }
 
       const content = readFileSync(filePath, "utf-8");
@@ -38,7 +53,7 @@ export const readFileTool = {
       return { success: true, output: numbered };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      return { success: false, output: "", error: msg };
+      return { success: false, output: msg, error: msg };
     }
   },
 };

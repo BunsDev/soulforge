@@ -1,36 +1,79 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { ModelMessage } from "ai";
-import { generateText } from "ai";
+import { generateText, stepCountIs, ToolLoopAgent } from "ai";
 import { Box, Text, useApp, useInput, useStdout } from "ink";
+import { ScrollView, type ScrollViewRef } from "ink-scroll-view";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { mergeConfigs, saveConfig } from "../config/index.js";
 import { createForgeAgent } from "../core/agents/index.js";
+import { buildSubagentTools } from "../core/agents/subagent-tools.js";
 import { ContextManager } from "../core/context/manager.js";
-import { getGitDiff, getGitStatus, gitInit } from "../core/git/status.js";
-import { UI_ICONS } from "../core/icons.js";
+import { providerIcon, UI_ICONS } from "../core/icons.js";
+import { getModelContextWindow } from "../core/llm/models.js";
 import { resolveModel } from "../core/llm/provider.js";
+import { detectTaskType, resolveTaskModel } from "../core/llm/task-router.js";
+import { initForbidden } from "../core/security/forbidden.js";
+import { SessionManager } from "../core/sessions/manager.js";
+import { getMissingRequired } from "../core/setup/prerequisites.js";
+import { suspendAndRun } from "../core/terminal/suspend.js";
+import { createThinkingParser } from "../core/thinking-parser.js";
+import { buildInteractiveTools, buildPlanModeTools } from "../core/tools/index.js";
 import { useEditorFocus } from "../hooks/useEditorFocus.js";
 import { useEditorInput } from "../hooks/useEditorInput.js";
 import { useForgeMode } from "../hooks/useForgeMode.js";
 import { useGitStatus } from "../hooks/useGitStatus.js";
+import { useMouse } from "../hooks/useMouse.js";
 import { useNeovim } from "../hooks/useNeovim.js";
-import type { AppConfig, ChatMessage } from "../types/index.js";
+import type {
+  AppConfig,
+  ChatMessage,
+  ChatStyle,
+  EditorIntegration,
+  InteractiveCallbacks,
+  MessageSegment,
+  PendingQuestion,
+  Plan,
+  PlanStepStatus,
+  QueuedMessage,
+  TaskRouter,
+} from "../types/index.js";
 import { ContextBar } from "./ContextBar.js";
+import { handleCommand } from "./commands.js";
 import { EditorPanel } from "./EditorPanel.js";
+import { EditorSettings } from "./EditorSettings.js";
+import { ErrorLog } from "./ErrorLog.js";
 import { Footer } from "./Footer.js";
 import { GitCommitModal } from "./GitCommitModal.js";
+import { GitMenu } from "./GitMenu.js";
+import { HealthCheck } from "./HealthCheck.js";
+import { HelpPopup } from "./HelpPopup.js";
 import { InputBox } from "./InputBox.js";
 import { LlmSelector } from "./LlmSelector.js";
+import { CodeExpandedProvider } from "./Markdown.js";
 import { MessageList } from "./MessageList.js";
+import { PlanReviewPrompt } from "./PlanReviewPrompt.js";
+import { QuestionPrompt } from "./QuestionPrompt.js";
+import { RightSidebar } from "./RightSidebar.js";
+import { RouterSettings } from "./RouterSettings.js";
+import { SessionPicker } from "./SessionPicker.js";
+import { SetupGuide } from "./SetupGuide.js";
 import { SkillSearch } from "./SkillSearch.js";
-import { StreamingText } from "./StreamingText.js";
-import { type LiveToolCall, ToolCallDisplay } from "./ToolCallDisplay.js";
+import { type StreamSegment, StreamSegmentList } from "./StreamSegmentList.js";
+import { SystemBanner } from "./SystemBanner.js";
+import { TokenDisplay } from "./TokenDisplay.js";
+import type { LiveToolCall } from "./ToolCallDisplay.js";
 
-type StreamSegment = { type: "text"; content: string } | { type: "tools"; callIds: string[] };
+function truncate(str: string, max: number): string {
+  return str.length > max ? `${str.slice(0, max - 1)}…` : str;
+}
 
 interface Props {
   config: AppConfig;
+  projectConfig?: Partial<AppConfig> | null;
 }
 
-export function App({ config }: Props) {
+export function App({ config, projectConfig }: Props) {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -39,8 +82,24 @@ export function App({ config }: Props) {
   const [streamSegments, setStreamSegments] = useState<StreamSegment[]>([]);
   const [liveToolCalls, setLiveToolCalls] = useState<LiveToolCall[]>([]);
 
+  // Interactive state
+  const abortRef = useRef<AbortController | null>(null);
+  const [activePlan, setActivePlan] = useState<Plan | null>(null);
+  const [sidebarPlan, setSidebarPlan] = useState<Plan | null>(null);
+  const [showPlanPanel, setShowPlanPanel] = useState(true);
+  const [pendingQuestion, setPendingQuestion] = useState<PendingQuestion | null>(null);
+  const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
+
+  // Tiered config: session > project > global
+  const [sessionConfig, setSessionConfig] = useState<Partial<AppConfig> | null>(null);
+  const effectiveConfig = useMemo(
+    () => mergeConfigs(config, projectConfig ?? null, sessionConfig),
+    [config, projectConfig, sessionConfig],
+  );
+
   // Editor state
-  const { focusMode, editorOpen, toggleFocus } = useEditorFocus();
+  const { focusMode, editorOpen, toggleFocus, setFocus, openEditor, closeEditor } =
+    useEditorFocus();
   const [editorVisible, setEditorVisible] = useState(false);
   const {
     ready: nvimReady,
@@ -48,10 +107,36 @@ export function App({ config }: Props) {
     defaultBg,
     modeName: nvimMode,
     fileName: editorFile,
+    cursorLine,
+    cursorCol,
+    visualSelection,
     openFile: nvimOpen,
     sendKeys,
     error: nvimError,
-  } = useNeovim(editorOpen, config.nvimPath);
+  } = useNeovim(editorOpen, effectiveConfig.nvimPath, effectiveConfig.nvimConfig, closeEditor);
+
+  // Queue a file to open once neovim is ready
+  const pendingEditorFileRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (nvimReady && pendingEditorFileRef.current) {
+      const file = pendingEditorFileRef.current;
+      pendingEditorFileRef.current = null;
+      nvimOpen(file).catch(() => {});
+    }
+  }, [nvimReady, nvimOpen]);
+
+  const openEditorWithFile = useCallback(
+    (file: string) => {
+      if (editorOpen && nvimReady) {
+        nvimOpen(file).catch(() => {});
+      } else {
+        pendingEditorFileRef.current = file;
+        openEditor();
+      }
+    },
+    [editorOpen, nvimReady, nvimOpen, openEditor],
+  );
 
   // Track visual presence: visible when open, stays visible during close animation
   useEffect(() => {
@@ -65,14 +150,43 @@ export function App({ config }: Props) {
   useEditorInput(sendKeys, focusMode === "editor" && nvimReady);
 
   // LLM state
-  const [activeModel, setActiveModel] = useState(config.defaultModel);
+  const [activeModel, setActiveModel] = useState(effectiveConfig.defaultModel);
   const [showLlmSelector, setShowLlmSelector] = useState(false);
   const [showSkillSearch, setShowSkillSearch] = useState(false);
   const [showGitCommit, setShowGitCommit] = useState(false);
+  const [showSessionPicker, setShowSessionPicker] = useState(false);
+  const [showHelpPopup, setShowHelpPopup] = useState(false);
+  const [showErrorLog, setShowErrorLog] = useState(false);
+  const [showGitMenu, setShowGitMenu] = useState(false);
+  const [showEditorSettings, setShowEditorSettings] = useState(false);
+  const [showRouterSettings, setShowRouterSettings] = useState(false);
+  const [routerSlotPicking, setRouterSlotPicking] = useState<keyof TaskRouter | null>(null);
+  const [showSetup, setShowSetup] = useState(() => getMissingRequired().length > 0);
+  const [suspended, setSuspended] = useState(false);
+  const [coAuthorCommits, setCoAuthorCommits] = useState(true);
+  const [codeExpanded, setCodeExpanded] = useState(false);
+  const [chatStyle, setChatStyle] = useState<ChatStyle>("accent");
+  const scrollRef = useRef<ScrollViewRef>(null);
+  const shouldAutoScroll = useRef(true);
+  const [isScrolledUp, setIsScrolledUp] = useState(false);
+  const [chatViewportHeight, setChatViewportHeight] = useState(0);
+  // Reasoning is always shown during streaming, auto-collapsed after
   const [tokenUsage, setTokenUsage] = useState({ prompt: 0, completion: 0, total: 0 });
+  const sessionIdRef = useRef<string>(crypto.randomUUID());
 
   const cwd = process.cwd();
+  const [showPlanReview, setShowPlanReview] = useState(false);
+  const planModeRef = useRef(false);
+  const planRequestRef = useRef<string | null>(null);
+
+  // Initialize security guard once
+  // biome-ignore lint/correctness/useExhaustiveDependencies: one-time init
+  useEffect(() => {
+    initForbidden(cwd);
+  }, []);
+
   const contextManager = useMemo(() => new ContextManager(cwd), [cwd]);
+  const sessionManager = useMemo(() => new SessionManager(cwd), [cwd]);
   const git = useGitStatus(cwd);
   const {
     mode: forgeMode,
@@ -89,8 +203,22 @@ export function App({ config }: Props) {
 
   // Sync editor state to context manager
   useEffect(() => {
-    contextManager.setEditorState(editorOpen, editorFile, nvimMode);
-  }, [editorOpen, editorFile, nvimMode, contextManager]);
+    contextManager.setEditorState(
+      editorOpen,
+      editorFile,
+      nvimMode,
+      cursorLine,
+      cursorCol,
+      visualSelection,
+    );
+  }, [editorOpen, editorFile, nvimMode, cursorLine, cursorCol, visualSelection, contextManager]);
+
+  // Sync editor integration settings to context manager
+  useEffect(() => {
+    if (effectiveConfig.editorIntegration) {
+      contextManager.setEditorIntegration(effectiveConfig.editorIntegration);
+    }
+  }, [effectiveConfig.editorIntegration, contextManager]);
 
   // Refresh git context on mount
   // biome-ignore lint/correctness/useExhaustiveDependencies: contextManager is stable (useMemo on cwd)
@@ -101,10 +229,23 @@ export function App({ config }: Props) {
 
   const chatChars = useMemo(
     () =>
-      coreMessages.reduce(
-        (sum, m) => sum + (typeof m.content === "string" ? m.content.length : 0),
-        0,
-      ),
+      coreMessages.reduce((sum, m) => {
+        if (typeof m.content === "string") return sum + m.content.length;
+        if (Array.isArray(m.content)) {
+          return (
+            sum +
+            m.content.reduce(
+              (s: number, part: unknown) =>
+                s +
+                (typeof part === "object" && part !== null && "text" in part
+                  ? String((part as { text: string }).text).length
+                  : JSON.stringify(part).length),
+              0,
+            )
+          );
+        }
+        return sum;
+      }, 0),
     [coreMessages],
   );
 
@@ -127,6 +268,7 @@ export function App({ config }: Props) {
       setMessages((prev) => [
         ...prev,
         {
+          id: crypto.randomUUID(),
           role: "system",
           content: `Context compressed. Summary: ${summary}`,
           timestamp: Date.now(),
@@ -135,7 +277,12 @@ export function App({ config }: Props) {
     } catch {
       setMessages((prev) => [
         ...prev,
-        { role: "system", content: "Failed to summarize conversation.", timestamp: Date.now() },
+        {
+          id: crypto.randomUUID(),
+          role: "system",
+          content: "Failed to summarize conversation.",
+          timestamp: Date.now(),
+        },
       ]);
     }
   }, [coreMessages, activeModel]);
@@ -145,12 +292,14 @@ export function App({ config }: Props) {
   useEffect(() => {
     const systemChars = contextManager.getContextBreakdown().reduce((sum, s) => sum + s.chars, 0);
     const totalChars = systemChars + chatChars;
-    const pct = totalChars / 12_288;
+    const contextBudgetChars = getModelContextWindow(activeModel) * 4; // ~4 chars/token
+    const pct = totalChars / contextBudgetChars;
     if (pct > 0.8 && !autoSummarizedRef.current && coreMessages.length >= 6) {
       autoSummarizedRef.current = true;
       setMessages((prev) => [
         ...prev,
         {
+          id: crypto.randomUUID(),
           role: "system",
           content: "Context at >80% capacity. Auto-summarizing conversation...",
           timestamp: Date.now(),
@@ -161,22 +310,118 @@ export function App({ config }: Props) {
     if (pct < 0.5) {
       autoSummarizedRef.current = false;
     }
-  }, [chatChars, contextManager, coreMessages.length, summarizeConversation]);
+  }, [chatChars, contextManager, coreMessages.length, summarizeConversation, activeModel]);
 
-  const { displayProvider, displayModel } = useMemo(() => {
+  const handleSuspend = useCallback(
+    async (opts: { command: string; args?: string[] }) => {
+      setSuspended(true);
+      // Small delay to let Ink flush before we steal the terminal
+      await new Promise((r) => setTimeout(r, 50));
+      const result = await suspendAndRun({ ...opts, cwd });
+      setSuspended(false);
+      if (result.exitCode === null) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: "system",
+            content: `Failed to launch ${opts.command}. Is it installed?`,
+            timestamp: Date.now(),
+          },
+        ]);
+      }
+      git.refresh();
+      contextManager.refreshGitContext();
+    },
+    [cwd, git, contextManager],
+  );
+
+  const { displayProvider, displayModel, isGateway } = useMemo(() => {
+    const isGw = activeModel.startsWith("gateway/");
+    if (isGw) {
+      // gateway/anthropic/claude-opus-4.6 → provider=anthropic, model=claude-opus-4.6
+      const rest = activeModel.slice(8); // after "gateway/"
+      const idx = rest.indexOf("/");
+      return {
+        displayProvider: idx >= 0 ? rest.slice(0, idx) : rest,
+        displayModel: idx >= 0 ? rest.slice(idx + 1) : rest,
+        isGateway: true,
+      };
+    }
     const idx = activeModel.indexOf("/");
     return {
       displayProvider: idx >= 0 ? activeModel.slice(0, idx) : "unknown",
       displayModel: idx >= 0 ? activeModel.slice(idx + 1) : activeModel,
+      isGateway: false,
     };
   }, [activeModel]);
+
+  // Restore a session from disk
+  const handleRestoreSession = useCallback(
+    (sessionId: string) => {
+      const session = sessionManager.loadSession(sessionId);
+      if (!session) return;
+      sessionIdRef.current = session.id;
+      setMessages(session.messages);
+      setCoreMessages(session.coreMessages);
+      setSessionConfig(session.configOverrides ?? null);
+      setStreamSegments([]);
+      setLiveToolCalls([]);
+      setTokenUsage({ prompt: 0, completion: 0, total: 0 });
+    },
+    [sessionManager],
+  );
+
+  // Auto-scroll to bottom when new messages arrive
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only reset on message count change
+  useEffect(() => {
+    shouldAutoScroll.current = true;
+    scrollRef.current?.scrollToBottom();
+  }, [messages.length]);
+
+  // Keep viewport pinned to bottom during streaming
+  const handleContentHeightChange = useCallback(() => {
+    if (shouldAutoScroll.current) {
+      scrollRef.current?.scrollToBottom();
+    }
+  }, []);
+
+  // Track viewport size for bottom-alignment
+  const handleViewportSizeChange = useCallback((size: { width: number; height: number }) => {
+    setChatViewportHeight(size.height);
+  }, []);
+
+  // Track scroll position for auto-scroll + indicator
+  const handleScroll = useCallback((offset: number) => {
+    const sr = scrollRef.current;
+    if (!sr) return;
+    const ch = sr.getContentHeight();
+    const vh = sr.getViewportHeight();
+    const atBottom = ch <= vh || offset >= ch - vh - 1;
+    shouldAutoScroll.current = atBottom;
+    setIsScrolledUp(!atBottom);
+  }, []);
+
+  // Re-measure on terminal resize
+  useEffect(() => {
+    const handleResize = () => scrollRef.current?.remeasure();
+    stdout?.on("resize", handleResize);
+    return () => {
+      stdout?.off("resize", handleResize);
+    };
+  }, [stdout]);
 
   // Show nvim errors in chat
   useEffect(() => {
     if (nvimError) {
       setMessages((prev) => [
         ...prev,
-        { role: "system", content: `Neovim error: ${nvimError}`, timestamp: Date.now() },
+        {
+          id: crypto.randomUUID(),
+          role: "system",
+          content: `Neovim error: ${nvimError}`,
+          timestamp: Date.now(),
+        },
       ]);
     }
   }, [nvimError]);
@@ -188,8 +433,24 @@ export function App({ config }: Props) {
         toggleFocus();
         return;
       }
+      if (key.ctrl && input === "o") {
+        setCodeExpanded((prev) => !prev);
+        return;
+      }
       if (focusMode === "editor") return;
 
+      if (key.ctrl && input === "x") {
+        if (abortRef.current) {
+          // Resolve any pending question before aborting
+          if (pendingQuestion) {
+            pendingQuestion.resolve("__skipped__");
+            setPendingQuestion(null);
+          }
+          setActivePlan(null);
+          abortRef.current.abort();
+        }
+        return;
+      }
       if (key.ctrl && input === "c") {
         exit();
       }
@@ -203,47 +464,222 @@ export function App({ config }: Props) {
         setMessages([]);
         setCoreMessages([]);
         setStreamSegments([]);
+        setTokenUsage({ prompt: 0, completion: 0, total: 0 });
       }
       if (key.ctrl && input === "d") {
         cycleMode();
       }
       if (key.ctrl && input === "g") {
-        setShowGitCommit((prev) => !prev);
+        setShowGitMenu((prev) => !prev);
       }
-      if (key.ctrl && input === "h") {
-        showHelp(setMessages);
+      // Ctrl+H sends backspace (0x08) in most terminals
+      if ((key.ctrl && input === "h") || key.backspace) {
+        setShowHelpPopup((prev) => !prev);
+      }
+      if (key.ctrl && input === "p") {
+        setShowSessionPicker((prev) => !prev);
+      }
+      if (key.ctrl && input === "r") {
+        setShowErrorLog((prev) => !prev);
+      }
+      if (key.ctrl && input === "t") {
+        setShowPlanPanel((prev) => !prev);
+      }
+      // PageUp / PageDown for chat scroll (line-based)
+      if (key.pageUp) {
+        const vh = scrollRef.current?.getViewportHeight() ?? 20;
+        scrollRef.current?.scrollBy(-vh);
+      }
+      if (key.pageDown) {
+        const vh = scrollRef.current?.getViewportHeight() ?? 20;
+        scrollRef.current?.scrollBy(vh);
       }
     },
-    { isActive: !showLlmSelector && !showSkillSearch && !showGitCommit },
+    {
+      isActive:
+        !showLlmSelector &&
+        !showSkillSearch &&
+        !showGitCommit &&
+        !showGitMenu &&
+        !showSetup &&
+        !showSessionPicker &&
+        !showHelpPopup &&
+        !showErrorLog &&
+        !showEditorSettings &&
+        !showRouterSettings,
+    },
+  );
+
+  // Mouse scroll + click-to-focus (3 lines per tick)
+  const handleMouseScroll = useCallback((direction: "up" | "down") => {
+    scrollRef.current?.scrollBy(direction === "up" ? -3 : 3);
+  }, []);
+
+  const handleMouseClick = useCallback(
+    (col: number, _row: number) => {
+      if (!editorVisible) return;
+      const termWidth = stdout?.columns ?? 80;
+      const editorWidth = Math.floor(termWidth * 0.6);
+      if (col <= editorWidth) {
+        setFocus("editor");
+      } else {
+        setFocus("chat");
+      }
+    },
+    [editorVisible, stdout?.columns, setFocus],
+  );
+
+  useMouse({
+    onScroll: handleMouseScroll,
+    onClick: handleMouseClick,
+    isActive:
+      !showLlmSelector &&
+      !showSkillSearch &&
+      !showGitCommit &&
+      !showGitMenu &&
+      !showSetup &&
+      !showSessionPicker &&
+      !showHelpPopup &&
+      !showErrorLog &&
+      !showEditorSettings &&
+      !showRouterSettings,
+  });
+
+  // Interactive callbacks for plan/question tools
+  const interactiveCallbacks = useMemo<InteractiveCallbacks>(
+    () => ({
+      onPlanCreate: (plan: Plan) => {
+        setActivePlan(plan);
+        setSidebarPlan(plan);
+        setShowPlanPanel(true);
+      },
+      onPlanStepUpdate: (stepId: string, status: PlanStepStatus) => {
+        const updater = (prev: Plan | null) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            steps: prev.steps.map((s) => (s.id === stepId ? { ...s, status } : s)),
+          };
+        };
+        setActivePlan(updater);
+        setSidebarPlan(updater);
+      },
+      onAskUser: (question, options, allowSkip) => {
+        return new Promise<string>((resolve) => {
+          setPendingQuestion({
+            id: crypto.randomUUID(),
+            question,
+            options,
+            allowSkip,
+            resolve,
+          });
+        });
+      },
+      onOpenEditor: async (file?: string) => {
+        if (file) {
+          openEditorWithFile(file);
+        } else {
+          openEditor();
+        }
+      },
+    }),
+    [openEditor, openEditorWithFile],
   );
 
   const handleSubmit = useCallback(
     async (input: string) => {
       if (input.startsWith("/")) {
-        handleCommand(
-          input,
+        // Handle /continue
+        if (input.trim().toLowerCase() === "/continue") {
+          handleSubmit("Continue from where you left off. Complete any remaining work.");
+          return;
+        }
+        // Handle /plan — toggle plan mode
+        if (
+          input.trim().toLowerCase() === "/plan" ||
+          input.trim().toLowerCase().startsWith("/plan ")
+        ) {
+          const desc = input.trim().slice(5).trim();
+          if (planModeRef.current) {
+            // Already in plan mode — toggle OFF
+            planModeRef.current = false;
+            planRequestRef.current = null;
+            setForgeMode("default");
+            setShowPlanReview(false);
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                role: "system",
+                content: "Plan mode OFF",
+                timestamp: Date.now(),
+              },
+            ]);
+          } else {
+            // Enter plan mode
+            planModeRef.current = true;
+            planRequestRef.current = desc || null;
+            setForgeMode("plan");
+            contextManager.setForgeMode("plan");
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                role: "system",
+                content: "Plan mode ON — Forge will research and plan without making changes.",
+                timestamp: Date.now(),
+              },
+            ]);
+            if (desc) {
+              setTimeout(() => handleSubmit(desc), 0);
+            }
+          }
+          return;
+        }
+        handleCommand(input, {
           setMessages,
           setCoreMessages,
           toggleFocus,
           nvimOpen,
           exit,
-          () => setShowSkillSearch(true),
-          () => setShowGitCommit(true),
+          openSkills: () => setShowSkillSearch(true),
+          openGitCommit: () => setShowGitCommit(true),
+          openSessions: () => setShowSessionPicker(true),
+          openHelp: () => setShowHelpPopup(true),
+          openErrorLog: () => setShowErrorLog(true),
           cwd,
-          () => {
+          refreshGit: () => {
             git.refresh();
             contextManager.refreshGitContext();
           },
           setForgeMode,
-          forgeMode,
-          modeLabel,
+          currentMode: forgeMode,
+          currentModeLabel: modeLabel,
           contextManager,
           summarizeConversation,
-        );
+          coAuthorCommits,
+          setCoAuthorCommits,
+          chatStyle,
+          setChatStyle,
+          handleSuspend,
+          openGitMenu: () => setShowGitMenu(true),
+          openEditorWithFile,
+          setSessionConfig,
+          effectiveNvimConfig: effectiveConfig.nvimConfig,
+          openSetup: () => setShowSetup(true),
+          openEditorSettings: () => setShowEditorSettings(true),
+          openRouterSettings: () => setShowRouterSettings(true),
+          togglePlanPanel: () => setShowPlanPanel((prev) => !prev),
+        });
         return;
       }
 
-      const userMsg: ChatMessage = { role: "user", content: input, timestamp: Date.now() };
+      const userMsg: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: "user",
+        content: input,
+        timestamp: Date.now(),
+      };
       setMessages((prev) => [...prev, userMsg]);
 
       const newCoreMessages: ModelMessage[] = [
@@ -254,33 +690,151 @@ export function App({ config }: Props) {
       setIsLoading(true);
       setStreamSegments([]);
       setLiveToolCalls([]);
+      setActivePlan(null);
+      setPendingQuestion(null);
+
+      // Abort controller for Ctrl+X
+      const abortController = new AbortController();
+      abortRef.current = abortController;
+
+      let fullText = "";
+      const completedCalls: import("../types/index.js").ToolCall[] = [];
+      const finalSegments: MessageSegment[] = [];
 
       try {
-        const model = resolveModel(activeModel);
-        const agent = createForgeAgent({ model, contextManager });
-        const result = await agent.stream({ messages: newCoreMessages });
+        const taskType = detectTaskType(input);
+        const modelId = resolveTaskModel(taskType, effectiveConfig.taskRouter, activeModel);
+        const model = resolveModel(modelId);
 
-        let fullText = "";
+        // Resolve subagent models from task router
+        const tr = effectiveConfig.taskRouter;
+        const explorationModelId = tr?.exploration ?? undefined;
+        const codingModelId = tr?.coding ?? undefined;
+        const subagentModels =
+          explorationModelId || codingModelId
+            ? {
+                exploration: explorationModelId ? resolveModel(explorationModelId) : undefined,
+                coding: codingModelId ? resolveModel(codingModelId) : undefined,
+              }
+            : undefined;
+
+        const agent = planModeRef.current
+          ? new ToolLoopAgent({
+              id: "forge-plan",
+              model,
+              tools: {
+                ...buildPlanModeTools(cwd, effectiveConfig.editorIntegration),
+                explore: buildSubagentTools({ defaultModel: model }).explore,
+                ...(interactiveCallbacks ? buildInteractiveTools(interactiveCallbacks) : {}),
+              },
+              instructions: contextManager.buildSystemPrompt(),
+              stopWhen: stepCountIs(50),
+            })
+          : createForgeAgent({
+              model,
+              contextManager,
+              interactive: interactiveCallbacks,
+              editorIntegration: effectiveConfig.editorIntegration,
+              subagentModels,
+            });
+        const result = await agent.stream({
+          messages: newCoreMessages,
+          abortSignal: abortController.signal,
+        });
+
         const toolCallArgs = new Map<string, string>();
-        const completedCalls: import("../types/index.js").ToolCall[] = [];
-        const runningTokens = { prompt: 0, completion: 0, total: 0 };
+        const thinkingParser = createThinkingParser();
+        let hasNativeReasoning = false;
+        let thinkingIdCounter = 0;
+
+        // Helpers for accumulating text/reasoning into finalSegments + streamSegments
+        const appendText = (text: string) => {
+          fullText += text;
+          const lastSeg = finalSegments[finalSegments.length - 1];
+          if (lastSeg?.type === "text") {
+            lastSeg.content += text;
+          } else {
+            finalSegments.push({ type: "text", content: text });
+          }
+          setStreamSegments((prev) => {
+            const last = prev[prev.length - 1];
+            if (last?.type === "text") {
+              return [
+                ...prev.slice(0, -1),
+                { type: "text" as const, content: last.content + text },
+              ];
+            }
+            return [...prev, { type: "text" as const, content: text }];
+          });
+        };
+
+        const pushReasoningSegment = (id: string) => {
+          finalSegments.push({ type: "reasoning", content: "", id });
+          setStreamSegments((prev) => [...prev, { type: "reasoning" as const, content: "", id }]);
+        };
+
+        const appendReasoningContent = (text: string) => {
+          const lastSeg = finalSegments[finalSegments.length - 1];
+          if (lastSeg?.type === "reasoning") {
+            lastSeg.content += text;
+          }
+          setStreamSegments((prev) => {
+            const last = prev[prev.length - 1];
+            if (last?.type === "reasoning") {
+              return [...prev.slice(0, -1), { ...last, content: last.content + text }];
+            }
+            return prev;
+          });
+        };
 
         for await (const part of result.fullStream) {
           switch (part.type) {
-            case "text-delta":
-              fullText += part.text;
-              setStreamSegments((prev) => {
-                const last = prev[prev.length - 1];
-                if (last?.type === "text") {
-                  return [
-                    ...prev.slice(0, -1),
-                    { type: "text" as const, content: last.content + part.text },
-                  ];
-                }
-                return [...prev, { type: "text" as const, content: part.text }];
-              });
+            case "reasoning-start": {
+              hasNativeReasoning = true;
+              const id = (part as { id?: string }).id ?? `reasoning-${String(thinkingIdCounter++)}`;
+              pushReasoningSegment(id);
               break;
-            case "tool-input-start":
+            }
+            case "reasoning-delta": {
+              appendReasoningContent((part as { text: string }).text);
+              break;
+            }
+            case "reasoning-end":
+              // Segment already accumulated
+              break;
+            case "text-delta": {
+              if (hasNativeReasoning) {
+                // SDK reasoning is structured — no tag parsing needed
+                appendText(part.text);
+              } else {
+                // Feed through thinking parser to extract <thinking> tags
+                const parsed = thinkingParser.feed(part.text);
+                for (const chunk of parsed) {
+                  switch (chunk.type) {
+                    case "text":
+                      appendText(chunk.content);
+                      break;
+                    case "reasoning-start":
+                      pushReasoningSegment(`thinking-${String(thinkingIdCounter++)}`);
+                      break;
+                    case "reasoning-content":
+                      appendReasoningContent(chunk.content);
+                      break;
+                    case "reasoning-end":
+                      break;
+                  }
+                }
+              }
+              break;
+            }
+            case "tool-input-start": {
+              // Mirror into local segments
+              const lastToolSeg = finalSegments[finalSegments.length - 1];
+              if (lastToolSeg?.type === "tools") {
+                lastToolSeg.toolCallIds.push(part.id);
+              } else {
+                finalSegments.push({ type: "tools", toolCallIds: [part.id] });
+              }
               setLiveToolCalls((prev) => [
                 ...prev,
                 { id: part.id, toolName: part.toolName, state: "running" },
@@ -297,6 +851,7 @@ export function App({ config }: Props) {
               });
               toolCallArgs.set(part.id, "");
               break;
+            }
             case "tool-input-delta":
               toolCallArgs.set(part.id, (toolCallArgs.get(part.id) ?? "") + part.delta);
               setLiveToolCalls((prev) =>
@@ -337,41 +892,152 @@ export function App({ config }: Props) {
               });
               break;
             case "finish-step": {
-              const su = part.usage;
-              runningTokens.prompt += su.inputTokens ?? 0;
-              runningTokens.completion += su.outputTokens ?? 0;
-              runningTokens.total = runningTokens.prompt + runningTokens.completion;
-              setTokenUsage({ ...runningTokens });
+              const su = part.usage as { inputTokens?: number; outputTokens?: number } | undefined;
+              const stepIn = su?.inputTokens ?? 0;
+              const stepOut = su?.outputTokens ?? 0;
+              setTokenUsage((prev) => ({
+                prompt: prev.prompt + stepIn,
+                completion: prev.completion + stepOut,
+                total: prev.total + stepIn + stepOut,
+              }));
               break;
             }
           }
         }
 
+        // Flush any buffered partial tags from the thinking parser
+        if (!hasNativeReasoning) {
+          for (const chunk of thinkingParser.flush()) {
+            switch (chunk.type) {
+              case "text":
+                appendText(chunk.content);
+                break;
+              case "reasoning-content":
+                appendReasoningContent(chunk.content);
+                break;
+              default:
+                break;
+            }
+          }
+        }
+
+        // Embed plan as a segment if one was created
+        setActivePlan((currentPlan) => {
+          if (currentPlan) {
+            finalSegments.push({ type: "plan", plan: currentPlan });
+          }
+          return null;
+        });
+
         const assistantMsg: ChatMessage = {
+          id: crypto.randomUUID(),
           role: "assistant",
           content: fullText,
           timestamp: Date.now(),
           toolCalls: completedCalls.length > 0 ? completedCalls : undefined,
+          segments: finalSegments.length > 0 ? finalSegments : undefined,
         };
 
-        setMessages((prev) => [...prev, assistantMsg]);
+        setMessages((prev) => {
+          const next = [...prev, assistantMsg];
+          // Auto-save session after each exchange
+          const updatedCore = [
+            ...coreMessages,
+            { role: "user" as const, content: input },
+            { role: "assistant" as const, content: fullText },
+          ];
+          sessionManager.saveSession({
+            id: sessionIdRef.current,
+            title: SessionManager.deriveTitle(next),
+            messages: next.filter((m) => m.role !== "system"),
+            coreMessages: updatedCore,
+            cwd,
+            startedAt: next[0]?.timestamp ?? Date.now(),
+            updatedAt: Date.now(),
+            configOverrides: sessionConfig ?? undefined,
+          });
+          return next;
+        });
         setCoreMessages((prev) => [...prev, { role: "assistant" as const, content: fullText }]);
         setStreamSegments([]);
         setLiveToolCalls([]);
       } catch (err: unknown) {
+        const isAbort = abortController.signal.aborted;
         const errorMsg = err instanceof Error ? err.message : String(err);
+        // Preserve any partial content the AI streamed before the error
+        if (fullText.trim().length > 0 || completedCalls.length > 0) {
+          const partialMsg: ChatMessage = {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: fullText,
+            timestamp: Date.now(),
+            toolCalls: completedCalls.length > 0 ? completedCalls : undefined,
+            segments: finalSegments.length > 0 ? finalSegments : undefined,
+          };
+          setMessages((prev) => [...prev, partialMsg]);
+          setCoreMessages((prev) => [...prev, { role: "assistant" as const, content: fullText }]);
+        }
         setMessages((prev) => [
           ...prev,
-          { role: "assistant", content: `Error: ${errorMsg}`, timestamp: Date.now() },
+          {
+            id: crypto.randomUUID(),
+            role: "system",
+            content: isAbort ? "Generation interrupted." : `Error: ${errorMsg}`,
+            timestamp: Date.now(),
+          },
         ]);
+        setStreamSegments([]);
+        setLiveToolCalls([]);
       } finally {
         setIsLoading(false);
+        abortRef.current = null;
+        setPendingQuestion(null);
+        setActivePlan(null);
+
+        // In plan mode, populate sidebar from structured write_plan data + show review
+        if (planModeRef.current) {
+          const writePlanCall = completedCalls.find(
+            (c) => c.name === "write_plan" && c.result?.success,
+          );
+          if (writePlanCall && Array.isArray(writePlanCall.args.steps)) {
+            const planSteps = writePlanCall.args.steps as Array<{
+              id: string;
+              label: string;
+            }>;
+            const sidebarData: Plan = {
+              title: String(writePlanCall.args.title ?? "Plan"),
+              steps: planSteps.map((s) => ({
+                id: s.id,
+                label: s.label,
+                status: "pending" as const,
+              })),
+              createdAt: Date.now(),
+            };
+            setSidebarPlan(sidebarData);
+            setShowPlanPanel(true);
+          }
+          setShowPlanReview(true);
+        } else {
+          // Process message queue
+          setMessageQueue((queue) => {
+            if (queue.length > 0) {
+              const [next, ...rest] = queue;
+              if (next) {
+                setTimeout(() => handleSubmit(next.content), 0);
+              }
+              return rest;
+            }
+            return queue;
+          });
+        }
       }
     },
     [
       coreMessages,
       activeModel,
       contextManager,
+      sessionManager,
+      interactiveCallbacks,
       toggleFocus,
       nvimOpen,
       exit,
@@ -381,8 +1047,20 @@ export function App({ config }: Props) {
       modeLabel,
       setForgeMode,
       summarizeConversation,
+      sessionConfig,
+      coAuthorCommits,
+      chatStyle,
+      handleSuspend,
+      openEditorWithFile,
+      effectiveConfig.nvimConfig,
+      effectiveConfig.editorIntegration,
+      effectiveConfig.taskRouter,
     ],
   );
+
+  if (suspended) {
+    return <Box height={termHeight} />;
+  }
 
   return (
     <Box flexDirection="column" height={termHeight}>
@@ -392,23 +1070,36 @@ export function App({ config }: Props) {
           <Text color="#9B30FF" bold>
             󰊠 SoulForge
           </Text>
-          {tokenUsage.total > 0 && (
-            <>
-              <Text color="#333">│</Text>
-              <Text color="#444">tokens {tokenUsage.total.toLocaleString()}</Text>
-            </>
-          )}
           <Text color="#333">│</Text>
-          <ContextBar contextManager={contextManager} chatChars={chatChars} />
+          <TokenDisplay
+            prompt={tokenUsage.prompt}
+            completion={tokenUsage.completion}
+            total={tokenUsage.total}
+          />
+          <Text color="#333">│</Text>
+          <ContextBar contextManager={contextManager} chatChars={chatChars} modelId={activeModel} />
           <Text color="#333">│</Text>
           {git.isRepo ? (
-            <Text color={git.isDirty ? "#FF8C00" : "#2d5"}>
-              {UI_ICONS.git} {git.branch ?? "HEAD"}
+            <Text color={git.isDirty ? "#FF8C00" : "#2d5"} wrap="truncate">
+              {UI_ICONS.git} {truncate(git.branch ?? "HEAD", 30)}
               {git.isDirty ? "*" : ""}
             </Text>
           ) : (
             <Text color="#333">{UI_ICONS.git} no repo</Text>
           )}
+          <Text color="#333">│</Text>
+          <Text color="#6A0DAD" wrap="truncate">
+            {isGateway ? (
+              <>
+                <Text color="#555">GW→</Text>
+                {providerIcon(displayProvider)} {truncate(displayModel, 28)}
+              </>
+            ) : (
+              <>
+                {providerIcon(displayProvider)} {truncate(displayModel, 32)}
+              </>
+            )}
+          </Text>
           {forgeMode !== "default" && (
             <>
               <Text color="#333">│</Text>
@@ -418,19 +1109,15 @@ export function App({ config }: Props) {
             </>
           )}
         </Box>
-        <Text wrap="truncate">
-          <Text color="#6A0DAD"></Text>
-          <Text backgroundColor="#6A0DAD" color="white" bold>
-            {` 󰘦 ${displayProvider}/${displayModel} `}
-          </Text>
-          <Text color="#6A0DAD"></Text>
-        </Text>
         <Text italic>
           <Text color="#333">by </Text>
           <Text color="#9B30FF">Proxy</Text>
           <Text color="#FF0040">Soul</Text>
         </Text>
       </Box>
+
+      {/* System banner — ephemeral notifications between header and chat */}
+      <SystemBanner messages={messages} expanded={codeExpanded} />
 
       {/* Main content — LLM selector lives here so its scrim stays within bounds */}
       <Box flexDirection="row" flexGrow={1} flexShrink={1} minHeight={0}>
@@ -442,23 +1129,22 @@ export function App({ config }: Props) {
           defaultBg={defaultBg}
           modeName={nvimMode}
           focused={focusMode === "editor"}
+          cursorLine={cursorLine}
+          cursorCol={cursorCol}
           onClosed={handleEditorClosed}
         />
 
         {/* Chat — full width, no border */}
         <Box flexDirection="column" width={editorVisible ? "40%" : "100%"}>
           {/* Messages */}
-          <Box
-            flexDirection="column"
-            flexGrow={1}
-            flexShrink={1}
-            minHeight={0}
-            overflowY="hidden"
-            justifyContent={
-              messages.length === 0 && streamSegments.length === 0 ? "center" : "flex-end"
-            }
-          >
-            {messages.length === 0 && streamSegments.length === 0 ? (
+          {messages.length === 0 && streamSegments.length === 0 ? (
+            <Box
+              flexDirection="column"
+              flexGrow={1}
+              flexShrink={1}
+              minHeight={0}
+              justifyContent="center"
+            >
               <Box flexDirection="column" alignItems="center" paddingX={2}>
                 <Text color="#9B30FF" bold>
                   󰊠
@@ -474,58 +1160,301 @@ export function App({ config }: Props) {
                   {"  "}/help{"    "}/open {"<file>"}
                   {"    "}/editor
                 </Text>
+                <Text color="#333"> </Text>
+                <HealthCheck />
               </Box>
-            ) : (
-              <>
-                <MessageList messages={messages} />
-
-                {streamSegments.length > 0 && (
-                  <Box flexDirection="column" paddingX={1} flexShrink={0}>
-                    <Box gap={1}>
-                      <Text color="#9B30FF" bold>
-                        󰚩
-                      </Text>
-                      <Text color="#9B30FF" bold>
-                        Forge
-                      </Text>
-                    </Box>
-                    <StreamSegmentList segments={streamSegments} toolCalls={liveToolCalls} />
+            </Box>
+          ) : (
+            <Box flexDirection="row" flexGrow={1} flexShrink={1} minHeight={0}>
+              {/* Chat scroll area */}
+              <Box flexDirection="column" flexGrow={1} flexShrink={1} minHeight={0}>
+                {isScrolledUp && (
+                  <Box height={1} flexShrink={0} justifyContent="center">
+                    <Text color="#555">▲ scrolled up — scroll down to return</Text>
                   </Box>
                 )}
-              </>
-            )}
-          </Box>
+                <ScrollView
+                  ref={scrollRef}
+                  flexGrow={1}
+                  flexShrink={1}
+                  minHeight={0}
+                  onScroll={handleScroll}
+                  onContentHeightChange={handleContentHeightChange}
+                  onViewportSizeChange={handleViewportSizeChange}
+                >
+                  <CodeExpandedProvider value={codeExpanded}>
+                    <Box
+                      key="chat-content"
+                      flexDirection="column"
+                      minHeight={chatViewportHeight}
+                      justifyContent="flex-end"
+                    >
+                      <MessageList
+                        messages={(messages.length > 100 ? messages.slice(-100) : messages).filter(
+                          (m) => m.role !== "system",
+                        )}
+                        chatStyle={chatStyle}
+                      />
 
-          {/* Input — flush to bottom */}
-          <InputBox
-            onSubmit={handleSubmit}
-            isLoading={isLoading}
-            isFocused={focusMode === "chat" && !showLlmSelector && !showSkillSearch}
-          />
+                      {streamSegments.length > 0 && (
+                        <Box paddingX={1} flexShrink={0} marginBottom={1}>
+                          <Box
+                            flexDirection="column"
+                            borderStyle="bold"
+                            borderLeft
+                            borderTop={false}
+                            borderBottom={false}
+                            borderRight={false}
+                            borderColor="#9B30FF"
+                            paddingLeft={1}
+                          >
+                            <Box>
+                              <Text color="#9B30FF">󰚩 Forge</Text>
+                            </Box>
+                            <StreamSegmentList
+                              segments={streamSegments}
+                              toolCalls={liveToolCalls}
+                            />
+                          </Box>
+                        </Box>
+                      )}
+                    </Box>
+                  </CodeExpandedProvider>
+                </ScrollView>
+              </Box>
+              {/* Right sidebar — plan + changed files */}
+              <RightSidebar
+                plan={showPlanPanel ? (activePlan ?? sidebarPlan) : null}
+                messages={messages}
+                cwd={cwd}
+              />
+            </Box>
+          )}
+
+          {/* Bottom area — PlanReview, QuestionPrompt, or InputBox */}
+          {showPlanReview ? (
+            <Box flexShrink={0} paddingX={1}>
+              <PlanReviewPrompt
+                isActive={
+                  focusMode === "chat" &&
+                  !showLlmSelector &&
+                  !showSkillSearch &&
+                  !showGitCommit &&
+                  !showGitMenu &&
+                  !showSetup &&
+                  !showSessionPicker &&
+                  !showHelpPopup &&
+                  !showErrorLog &&
+                  !showEditorSettings &&
+                  !showRouterSettings
+                }
+                onAccept={() => {
+                  setShowPlanReview(false);
+
+                  // Build execution prompt from plan file, or original request + context
+                  let executionPrompt: string | null = null;
+                  const planPath = join(cwd, ".soulforge", "plan.md");
+                  try {
+                    const planContent = readFileSync(planPath, "utf-8");
+                    executionPrompt = `Execute the following plan step by step. Create a plan checklist and update steps as you go.\n\n${planContent}`;
+                  } catch {
+                    // No plan file — build from original request + AI context
+                    const originalRequest = planRequestRef.current;
+                    const lastAssistant = [...messages]
+                      .reverse()
+                      .find((m) => m.role === "assistant");
+                    if (originalRequest) {
+                      const ctx = lastAssistant
+                        ? `\n\nContext from planning:\n${lastAssistant.content}`
+                        : "";
+                      executionPrompt = `Implement the following: ${originalRequest}${ctx}`;
+                    } else if (lastAssistant) {
+                      executionPrompt = `Implement the changes described below:\n\n${lastAssistant.content}`;
+                    }
+                  }
+
+                  if (!executionPrompt) {
+                    setMessages((prev) => [
+                      ...prev,
+                      {
+                        id: crypto.randomUUID(),
+                        role: "system",
+                        content: "No plan found to execute.",
+                        timestamp: Date.now(),
+                      },
+                    ]);
+                    return;
+                  }
+
+                  // Exit plan mode — refs update immediately (no stale closure issues)
+                  planModeRef.current = false;
+                  planRequestRef.current = null;
+                  setForgeMode("default");
+                  contextManager.setForgeMode("default");
+
+                  setMessages((prev) => [
+                    ...prev,
+                    {
+                      id: crypto.randomUUID(),
+                      role: "system",
+                      content: "Plan accepted — executing...",
+                      timestamp: Date.now(),
+                    },
+                  ]);
+
+                  // Direct call — planModeRef is already false so handleSubmit creates full agent.
+                  // contextManager already has "default" mode so system prompt is correct.
+                  handleSubmit(executionPrompt);
+                }}
+                onRevise={(feedback) => {
+                  setShowPlanReview(false);
+                  handleSubmit(feedback);
+                }}
+                onCancel={() => {
+                  planModeRef.current = false;
+                  planRequestRef.current = null;
+                  setShowPlanReview(false);
+                  setForgeMode("default");
+                  setMessages((prev) => [
+                    ...prev,
+                    {
+                      id: crypto.randomUUID(),
+                      role: "system",
+                      content: "Plan cancelled.",
+                      timestamp: Date.now(),
+                    },
+                  ]);
+                }}
+              />
+            </Box>
+          ) : pendingQuestion ? (
+            <Box flexShrink={0} paddingX={1}>
+              <QuestionPrompt
+                question={pendingQuestion}
+                isActive={
+                  focusMode === "chat" &&
+                  !showLlmSelector &&
+                  !showSkillSearch &&
+                  !showGitCommit &&
+                  !showGitMenu &&
+                  !showSetup &&
+                  !showSessionPicker &&
+                  !showHelpPopup &&
+                  !showErrorLog &&
+                  !showEditorSettings &&
+                  !showRouterSettings
+                }
+              />
+            </Box>
+          ) : (
+            <InputBox
+              onSubmit={handleSubmit}
+              isLoading={isLoading}
+              isFocused={
+                focusMode === "chat" &&
+                !showLlmSelector &&
+                !showSkillSearch &&
+                !showGitCommit &&
+                !showGitMenu &&
+                !showSetup &&
+                !showSessionPicker &&
+                !showHelpPopup &&
+                !showErrorLog &&
+                !showEditorSettings &&
+                !showRouterSettings
+              }
+              onQueue={(msg) =>
+                setMessageQueue((prev) => [...prev, { content: msg, queuedAt: Date.now() }])
+              }
+              queueCount={messageQueue.length}
+            />
+          )}
         </Box>
 
         {/* LLM Selector — inside main content so scrim doesn't cover header/footer */}
         <LlmSelector
           visible={showLlmSelector}
           activeModel={activeModel}
-          onSelect={setActiveModel}
-          onClose={() => setShowLlmSelector(false)}
+          onSelect={(modelId) => {
+            if (routerSlotPicking) {
+              // Assign to router slot
+              const current = effectiveConfig.taskRouter ?? {
+                planning: null,
+                coding: null,
+                exploration: null,
+                default: null,
+              };
+              const updated = { ...current, [routerSlotPicking]: modelId };
+              const newConfig = { ...config, taskRouter: updated };
+              saveConfig(newConfig);
+              setSessionConfig((prev) => ({ ...prev, taskRouter: updated }));
+              setRouterSlotPicking(null);
+            } else {
+              setActiveModel(modelId);
+            }
+          }}
+          onClose={() => {
+            setShowLlmSelector(false);
+            setRouterSlotPicking(null);
+          }}
         />
 
         {/* Git Commit Modal */}
         <GitCommitModal
           visible={showGitCommit}
           cwd={cwd}
+          coAuthor={coAuthorCommits}
           onClose={() => setShowGitCommit(false)}
           onCommitted={(msg) => {
             setMessages((prev) => [
               ...prev,
-              { role: "system", content: `Committed: ${msg}`, timestamp: Date.now() },
+              {
+                id: crypto.randomUUID(),
+                role: "system",
+                content: `Committed: ${msg}`,
+                timestamp: Date.now(),
+              },
             ]);
           }}
           onRefresh={() => {
             git.refresh();
             contextManager.refreshGitContext();
+          }}
+        />
+
+        {/* Git Menu */}
+        <GitMenu
+          visible={showGitMenu}
+          cwd={cwd}
+          onClose={() => setShowGitMenu(false)}
+          onCommit={() => {
+            setShowGitMenu(false);
+            setShowGitCommit(true);
+          }}
+          onSuspend={handleSuspend}
+          onSystemMessage={(msg) => {
+            setMessages((prev) => [
+              ...prev,
+              { id: crypto.randomUUID(), role: "system", content: msg, timestamp: Date.now() },
+            ]);
+          }}
+          onRefresh={() => {
+            git.refresh();
+            contextManager.refreshGitContext();
+          }}
+        />
+
+        {/* Session Picker */}
+        <SessionPicker
+          visible={showSessionPicker}
+          cwd={cwd}
+          onClose={() => setShowSessionPicker(false)}
+          onRestore={handleRestoreSession}
+          onSystemMessage={(msg) => {
+            setMessages((prev) => [
+              ...prev,
+              { id: crypto.randomUUID(), role: "system", content: msg, timestamp: Date.now() },
+            ]);
           }}
         />
 
@@ -537,9 +1466,66 @@ export function App({ config }: Props) {
           onSystemMessage={(msg) => {
             setMessages((prev) => [
               ...prev,
-              { role: "system", content: msg, timestamp: Date.now() },
+              { id: crypto.randomUUID(), role: "system", content: msg, timestamp: Date.now() },
             ]);
           }}
+        />
+
+        {/* Help Popup */}
+        <HelpPopup visible={showHelpPopup} onClose={() => setShowHelpPopup(false)} />
+
+        {/* Editor Settings */}
+        <EditorSettings
+          visible={showEditorSettings}
+          settings={effectiveConfig.editorIntegration}
+          onUpdate={(settings: EditorIntegration) => {
+            setSessionConfig((prev) => ({ ...prev, editorIntegration: settings }));
+            saveConfig({ ...config, editorIntegration: settings });
+          }}
+          onClose={() => setShowEditorSettings(false)}
+        />
+
+        {/* Router Settings */}
+        <RouterSettings
+          visible={showRouterSettings && !routerSlotPicking}
+          router={effectiveConfig.taskRouter}
+          activeModel={activeModel}
+          onPickSlot={(slot) => {
+            setRouterSlotPicking(slot);
+            setShowLlmSelector(true);
+          }}
+          onClearSlot={(slot) => {
+            const current = effectiveConfig.taskRouter ?? {
+              planning: null,
+              coding: null,
+              exploration: null,
+              default: null,
+            };
+            const updated = { ...current, [slot]: null };
+            const newConfig = { ...config, taskRouter: updated };
+            saveConfig(newConfig);
+            setSessionConfig((prev) => ({ ...prev, taskRouter: updated }));
+          }}
+          onClose={() => setShowRouterSettings(false)}
+        />
+
+        {/* Setup Guide */}
+        <SetupGuide
+          visible={showSetup}
+          onClose={() => setShowSetup(false)}
+          onSystemMessage={(msg) => {
+            setMessages((prev) => [
+              ...prev,
+              { id: crypto.randomUUID(), role: "system", content: msg, timestamp: Date.now() },
+            ]);
+          }}
+        />
+
+        {/* Error Log */}
+        <ErrorLog
+          visible={showErrorLog}
+          messages={messages}
+          onClose={() => setShowErrorLog(false)}
         />
       </Box>
 
@@ -549,317 +1535,4 @@ export function App({ config }: Props) {
       </Box>
     </Box>
   );
-}
-
-function StreamSegmentList({
-  segments,
-  toolCalls,
-}: {
-  segments: StreamSegment[];
-  toolCalls: LiveToolCall[];
-}) {
-  const toolCallMap = useMemo(() => new Map(toolCalls.map((tc) => [tc.id, tc])), [toolCalls]);
-  return (
-    <>
-      {segments.map((seg, i) => {
-        if (seg.type === "text") {
-          return (
-            <Box key={`text-${String(i)}`} marginLeft={2} width="100%">
-              <StreamingText text={seg.content} />
-            </Box>
-          );
-        }
-        const calls = seg.callIds
-          .map((id) => toolCallMap.get(id))
-          .filter((tc): tc is LiveToolCall => tc != null);
-        return calls.length > 0 ? <ToolCallDisplay key={seg.callIds[0]} calls={calls} /> : null;
-      })}
-    </>
-  );
-}
-
-function showHelp(setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>) {
-  setMessages((prev) => [
-    ...prev,
-    {
-      role: "system",
-      content: [
-        "SoulForge Commands:",
-        "  /help       — show this help",
-        "  /clear      — clear chat history",
-        "  /editor     — toggle editor panel",
-        "  /open <path> — open file in editor",
-        "  /skills     — browse & install skills",
-        "  /commit     — AI-assisted git commit",
-        "  /diff       — show current diff",
-        "  /status     — git status",
-        "  /branch     — show/create branch",
-        "  /init       — initialize git repo",
-        "  /summarize  — compress conversation to save context",
-        "  /context    — show context budget breakdown",
-        "  /mode       — show/switch forge mode",
-        "  /quit       — exit soulforge",
-        "",
-        "Keybindings:",
-        "  Ctrl+D      — cycle forge mode",
-        "  Ctrl+E      — toggle editor / focus",
-        "  Ctrl+G      — git commit",
-        "  Ctrl+L      — switch LLM model",
-        "  Ctrl+S      — browse skills",
-        "  Ctrl+K      — clear chat",
-        "  Ctrl+H      — show help",
-        "  Ctrl+C      — exit",
-      ].join("\n"),
-      timestamp: Date.now(),
-    },
-  ]);
-}
-
-function handleCommand(
-  input: string,
-  setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>,
-  setCoreMessages: React.Dispatch<React.SetStateAction<ModelMessage[]>>,
-  toggleFocus: () => void,
-  nvimOpen: (path: string) => Promise<void>,
-  exit: () => void,
-  openSkills: () => void,
-  openGitCommit: () => void,
-  cwd: string,
-  refreshGit: () => void,
-  setForgeMode: (mode: import("../types/index.js").ForgeMode) => void,
-  currentMode: import("../types/index.js").ForgeMode,
-  currentModeLabel: string,
-  contextManager: ContextManager,
-  summarizeConversation: () => Promise<void>,
-) {
-  const trimmed = input.trim();
-  const cmd = trimmed.toLowerCase();
-
-  if (cmd.startsWith("/open ")) {
-    const filePath = trimmed.slice(6).trim();
-    if (!filePath) {
-      setMessages((prev) => [
-        ...prev,
-        { role: "system", content: "Usage: /open <file-path>", timestamp: Date.now() },
-      ]);
-      return;
-    }
-    nvimOpen(filePath).catch(() => {});
-    setMessages((prev) => [
-      ...prev,
-      { role: "system", content: `Opening ${filePath} in editor...`, timestamp: Date.now() },
-    ]);
-    return;
-  }
-
-  if (cmd.startsWith("/mode ")) {
-    const modeName = trimmed.slice(6).trim().toLowerCase();
-    const validModes = ["default", "architect", "socratic", "challenge"] as const;
-    const matched = validModes.find((m) => m === modeName);
-    if (matched) {
-      setForgeMode(matched);
-      setMessages((prev) => [
-        ...prev,
-        { role: "system", content: `Forge mode set to: ${matched}`, timestamp: Date.now() },
-      ]);
-    } else {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "system",
-          content: `Unknown mode: ${modeName}. Available: default, architect, socratic, challenge`,
-          timestamp: Date.now(),
-        },
-      ]);
-    }
-    return;
-  }
-
-  if (cmd.startsWith("/context clear") || cmd === "/context reset") {
-    const what = cmd.includes("git")
-      ? "git"
-      : cmd.includes("skills")
-        ? "skills"
-        : cmd.includes("memory")
-          ? "memory"
-          : "all";
-    const cleared = contextManager.clearContext(what as "git" | "memory" | "skills" | "all");
-    setMessages((prev) => [
-      ...prev,
-      {
-        role: "system",
-        content: cleared.length > 0 ? `Cleared: ${cleared.join(", ")}` : "Nothing to clear.",
-        timestamp: Date.now(),
-      },
-    ]);
-    return;
-  }
-
-  if (cmd === "/git init" || cmd === "/init") {
-    gitInit(cwd).then((ok) => {
-      refreshGit();
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "system",
-          content: ok ? "Initialized git repository." : "Failed to initialize git repository.",
-          timestamp: Date.now(),
-        },
-      ]);
-    });
-    return;
-  }
-
-  if (cmd.startsWith("/branch ")) {
-    const branchName = trimmed.slice(8).trim();
-    if (branchName) {
-      const { spawn } = require("node:child_process") as typeof import("node:child_process");
-      const proc = spawn("git", ["checkout", "-b", branchName], { cwd });
-      const chunks: string[] = [];
-      proc.stdout.on("data", (d: Buffer) => chunks.push(d.toString()));
-      proc.stderr.on("data", (d: Buffer) => chunks.push(d.toString()));
-      proc.on("close", (code) => {
-        refreshGit();
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "system",
-            content: code === 0 ? `Switched to new branch '${branchName}'` : chunks.join("").trim(),
-            timestamp: Date.now(),
-          },
-        ]);
-      });
-    }
-    return;
-  }
-
-  switch (cmd) {
-    case "/quit":
-    case "/exit":
-      exit();
-      break;
-    case "/clear":
-      setMessages([]);
-      setCoreMessages([]);
-      break;
-    case "/editor":
-    case "/edit":
-      toggleFocus();
-      break;
-    case "/help":
-      showHelp(setMessages);
-      break;
-    case "/skills":
-      openSkills();
-      break;
-    case "/summarize":
-      setMessages((prev) => [
-        ...prev,
-        { role: "system", content: "Summarizing conversation...", timestamp: Date.now() },
-      ]);
-      summarizeConversation();
-      break;
-    case "/commit":
-      openGitCommit();
-      break;
-    case "/diff":
-      getGitDiff(cwd).then((diff) => {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "system",
-            content: diff ? `\`\`\`diff\n${diff}\`\`\`` : "No unstaged changes.",
-            timestamp: Date.now(),
-          },
-        ]);
-      });
-      break;
-    case "/status":
-      getGitStatus(cwd).then((status) => {
-        if (!status.isRepo) {
-          setMessages((prev) => [
-            ...prev,
-            {
-              role: "system",
-              content: "Not a git repository. Use /init to initialize.",
-              timestamp: Date.now(),
-            },
-          ]);
-          return;
-        }
-        const lines = [
-          `Branch: ${status.branch ?? "(detached)"}`,
-          `Staged: ${String(status.staged.length)} file(s)`,
-          `Modified: ${String(status.modified.length)} file(s)`,
-          `Untracked: ${String(status.untracked.length)} file(s)`,
-        ];
-        if (status.ahead > 0) lines.push(`Ahead: ${String(status.ahead)}`);
-        if (status.behind > 0) lines.push(`Behind: ${String(status.behind)}`);
-        setMessages((prev) => [
-          ...prev,
-          { role: "system", content: lines.join("\n"), timestamp: Date.now() },
-        ]);
-      });
-      break;
-    case "/branch":
-      getGitStatus(cwd).then((status) => {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "system",
-            content: status.branch
-              ? `Current branch: ${status.branch}`
-              : "Not on a branch (detached HEAD)",
-            timestamp: Date.now(),
-          },
-        ]);
-      });
-      break;
-    case "/context": {
-      const breakdown = contextManager.getContextBreakdown();
-      const total = breakdown.reduce((sum, s) => sum + s.chars, 0);
-      const lines = breakdown
-        .filter((s) => s.active)
-        .map((s) => {
-          const kb = (s.chars / 1024).toFixed(1);
-          const pct = total > 0 ? Math.round((s.chars / total) * 100) : 0;
-          return `  ${String(pct).padStart(3)}%  ${kb.padStart(5)}k  ${s.section}`;
-        });
-      const totalKb = (total / 1024).toFixed(1);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "system",
-          content: [
-            `System prompt context: ${totalKb}k chars`,
-            "",
-            ...lines,
-            "",
-            "Clear with: /context clear [git|skills|memory]",
-          ].join("\n"),
-          timestamp: Date.now(),
-        },
-      ]);
-      break;
-    }
-    case "/mode":
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "system",
-          content: `Current mode: ${currentModeLabel} (${currentMode})\nAvailable: /mode default | architect | socratic | challenge`,
-          timestamp: Date.now(),
-        },
-      ]);
-      break;
-    default:
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "system",
-          content: `Unknown command: ${cmd}. Type /help for available commands.`,
-          timestamp: Date.now(),
-        },
-      ]);
-  }
 }

@@ -1,5 +1,8 @@
 import { type ChildProcess, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { attach } from "neovim";
+import type { NvimConfigMode } from "../../types/index.js";
 import { NvimScreen } from "./screen.js";
 
 export interface NvimInstance {
@@ -24,8 +27,39 @@ export async function launchNeovim(
   nvimPath: string,
   cols: number = DEFAULT_COLS,
   rows: number = DEFAULT_ROWS,
+  configMode: NvimConfigMode = "auto",
 ): Promise<NvimInstance> {
-  const proc = spawn(nvimPath, ["--embed", "-i", "NONE"], {
+  const args = ["--embed", "-i", "NONE"];
+
+  const shippedInit = join(import.meta.dir, "init.lua");
+
+  switch (configMode) {
+    case "none":
+      args.push("-u", "NONE");
+      break;
+    case "default":
+      if (existsSync(shippedInit)) {
+        args.push("-u", shippedInit);
+      }
+      break;
+    case "user":
+      // Let nvim use its own config discovery
+      break;
+    default: {
+      const nvimConfigDir = join(
+        process.env.XDG_CONFIG_HOME ?? join(process.env.HOME ?? "", ".config"),
+        "nvim",
+      );
+      const hasUserConfig =
+        existsSync(join(nvimConfigDir, "init.lua")) || existsSync(join(nvimConfigDir, "init.vim"));
+      if (!hasUserConfig && existsSync(shippedInit)) {
+        args.push("-u", shippedInit);
+      }
+      break;
+    }
+  }
+
+  const proc = spawn(nvimPath, args, {
     stdio: ["pipe", "pipe", "pipe"],
   });
 
@@ -94,6 +128,45 @@ export async function getCursorPosition(
 export async function getBufferName(nvim: NvimInstance): Promise<string> {
   const result = await nvim.api.request("nvim_buf_get_name", [0]);
   return typeof result === "string" ? result : "";
+}
+
+/**
+ * Get visual selection text from neovim.
+ * Uses getpos('v') + getpos('.') which work during live visual mode,
+ * unlike '< '> marks which only set after leaving visual.
+ * Returns selected text or null if not in visual mode.
+ */
+export async function getVisualSelection(nvim: NvimInstance): Promise<string | null> {
+  const lua = `
+    local mode = vim.fn.mode()
+    if mode ~= 'v' and mode ~= 'V' and mode ~= '\\22' then
+      return nil
+    end
+    local vstart = vim.fn.getpos('v')
+    local vend = vim.fn.getpos('.')
+    local srow, scol = vstart[2], vstart[3]
+    local erow, ecol = vend[2], vend[3]
+    if srow > erow or (srow == erow and scol > ecol) then
+      srow, scol, erow, ecol = erow, ecol, srow, scol
+    end
+    local lines = vim.api.nvim_buf_get_lines(0, srow - 1, erow, false)
+    if #lines == 0 then return nil end
+    if mode == 'V' then
+      return table.concat(lines, '\\n')
+    end
+    if #lines == 1 then
+      return lines[1]:sub(scol, ecol)
+    end
+    lines[1] = lines[1]:sub(scol)
+    lines[#lines] = lines[#lines]:sub(1, ecol)
+    return table.concat(lines, '\\n')
+  `;
+  try {
+    const result = await nvim.api.executeLua(lua, []);
+    return typeof result === "string" ? result : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
