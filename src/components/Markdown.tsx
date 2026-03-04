@@ -1,4 +1,4 @@
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import { marked, type Token, type Tokens } from "marked";
 import { createContext, useContext, useMemo } from "react";
 import { highlightCode, TOKEN_COLORS } from "../core/highlight.js";
@@ -341,18 +341,38 @@ function BlockquoteBlock({ token }: { token: Tokens.Blockquote }) {
 }
 
 function TableBlock({ token }: { token: Tokens.Table }) {
-  // Calculate column widths from header + all rows
+  const { stdout } = useStdout();
+  // Reserve space for message border, padding, and outer margins (~8 chars)
+  const maxWidth = (stdout?.columns ?? 80) - 8;
   const colCount = token.header.length;
-  const colWidths: number[] = new Array(colCount).fill(0);
 
+  // Natural column widths from content
+  const natural: number[] = new Array(colCount).fill(0);
   for (let c = 0; c < colCount; c++) {
-    colWidths[c] = Math.max(colWidths[c] ?? 0, (token.header[c]?.text ?? "").length);
+    natural[c] = Math.max(natural[c] ?? 0, (token.header[c]?.text ?? "").length);
     for (const row of token.rows) {
-      colWidths[c] = Math.max(colWidths[c] ?? 0, (row[c]?.text ?? "").length);
+      natural[c] = Math.max(natural[c] ?? 0, (row[c]?.text ?? "").length);
     }
   }
 
-  const pad = (text: string, width: number) => text.padEnd(width, " ");
+  // Total width: leading space + each col padded + separators (3 chars: " │ ")
+  const separatorChars = 1 + (colCount - 1) * 3;
+  const naturalTotal = natural.reduce((a, b) => a + b, 0) + separatorChars;
+
+  // Shrink columns proportionally if table is too wide
+  const colWidths = [...natural];
+  if (naturalTotal > maxWidth && maxWidth > separatorChars + colCount) {
+    const budget = maxWidth - separatorChars;
+    const totalNatural = natural.reduce((a, b) => a + b, 0);
+    for (let c = 0; c < colCount; c++) {
+      colWidths[c] = Math.max(4, Math.floor(((natural[c] ?? 0) / totalNatural) * budget));
+    }
+  }
+
+  const truncPad = (text: string, width: number) => {
+    if (text.length > width) return `${text.slice(0, width - 1)}…`;
+    return text.padEnd(width, " ");
+  };
   const sep = colWidths.map((w) => "─".repeat(w + 2)).join("┼");
 
   return (
@@ -365,7 +385,7 @@ function TableBlock({ token }: { token: Tokens.Table }) {
             <Text key={c}>
               <Text color="#888">{c === 0 ? " " : " │ "}</Text>
               <Text bold color="#ccc">
-                {pad(cell.text, colWidths[c] ?? 0)}
+                {truncPad(cell.text, colWidths[c] ?? 0)}
               </Text>
             </Text>
           ))}
@@ -387,7 +407,7 @@ function TableBlock({ token }: { token: Tokens.Table }) {
               // biome-ignore lint/suspicious/noArrayIndexKey: stable column order
               <Text key={c}>
                 <Text color="#555">{c === 0 ? " " : " │ "}</Text>
-                <Text color="#bbb">{pad(cell.text, colWidths[c] ?? 0)}</Text>
+                <Text color="#bbb">{truncPad(cell.text, colWidths[c] ?? 0)}</Text>
               </Text>
             ))}
           </Text>
