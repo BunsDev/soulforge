@@ -1,58 +1,250 @@
-#!/usr/bin/env bun
-import { render } from "ink";
-import { App } from "./components/App.js";
-import { loadConfig, loadProjectConfig } from "./config/index.js";
-import { detectNeovim } from "./core/editor/detect.js";
-import { getVendoredPath, installNeovim, installRipgrep } from "./core/setup/install.js";
+import { type createCliRenderer as CreateCliRenderer, TextAttributes } from "@opentui/core";
+import type { createRoot as CreateRoot } from "@opentui/react";
+import { useCallback, useEffect, useState } from "react";
+import type { App as AppComponent } from "./components/App.js";
+import { BRAND_PURPLE, BRAND_RED, garble } from "./components/splash.js";
+import { icon } from "./core/icons.js";
+import { disposeIntelligenceRouter } from "./core/intelligence/index.js";
+import type { ProviderStatus } from "./core/llm/provider.js";
+import { stopProxy } from "./core/proxy/lifecycle.js";
+import type { PrerequisiteStatus } from "./core/setup/prerequisites.js";
+import { resetStatusBarStore } from "./stores/statusbar.js";
+import { resetUIStore } from "./stores/ui.js";
+import type { AppConfig } from "./types/index.js";
 
-// Load configuration (global + project)
-const config = loadConfig();
-const projectConfig = loadProjectConfig(process.cwd());
+let exitSessionId: string | null = null;
+let renderer: Awaited<ReturnType<typeof CreateCliRenderer>> | null = null;
 
-// Detect neovim before launching UI — auto-install if missing
-let nvim = detectNeovim();
-
-if (!nvim) {
-  process.stderr.write("Installing Neovim 0.11...\n");
-  try {
-    const path = await installNeovim();
-    nvim = { path, version: "0.11.1" };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    process.stderr.write(
-      `\x1b[1;31mFailed to install Neovim:\x1b[0m ${msg}\nInstall manually: brew install neovim\n`,
-    );
-    process.exit(1);
-  }
+export function setExitSessionId(id: string | null): void {
+  exitSessionId = id;
 }
 
-config.nvimPath = nvim.path;
-
-// Background-install ripgrep (non-blocking, non-fatal)
-if (!getVendoredPath("rg")) {
-  installRipgrep().catch(() => {});
+function restoreTerminal(): void {
+  try {
+    if (process.stdin.isTTY && process.stdin.isRaw) {
+      process.stdin.setRawMode(false);
+    }
+  } catch {}
+  try {
+    process.stdout.write("\x1b[?25h\x1b[0m");
+  } catch {}
 }
 
-// Clear terminal and dispose resources on exit
-process.on("exit", () => {
+let cleanedUp = false;
+
+function runCleanup(): void {
+  if (cleanedUp) return;
+  cleanedUp = true;
+  restoreTerminal();
   try {
-    const { stopProxy } = require("./core/proxy/lifecycle.js");
     stopProxy();
-  } catch {
-    // Proxy module may not be loaded
-  }
+  } catch {}
   try {
-    const { disposeIntelligenceRouter } = require("./core/intelligence/index.js");
     disposeIntelligenceRouter();
-  } catch {
-    // Intelligence module may not be loaded
-  }
+  } catch {}
+}
+
+let bannerPrinted = false;
+
+function printExitBanner(): void {
+  if (bannerPrinted) return;
+  bannerPrinted = true;
   process.stdout.write("\x1b[2J\x1b[H");
+  if (exitSessionId) {
+    const shortId = exitSessionId.slice(0, 8);
+    process.stdout.write(
+      `\x1b[1;35m${icon("ghost")} SoulForge\x1b[0m session saved.\n` +
+        `  Resume: \x1b[1;36msoulforge --session ${shortId}\x1b[0m\n` +
+        `  by \x1b[1;35mProxy\x1b[38;2;255;0;64mSoul\x1b[0m.com\n\n`,
+    );
+  }
+}
+
+export function cleanupAndExit(code = 0): void {
+  runCleanup();
+  renderer?.destroy();
+  printExitBanner();
+  process.exit(code);
+}
+
+// ─── Soft restart ───
+
+let triggerRestart: (() => void) | null = null;
+
+export function restart(): void {
+  triggerRestart?.();
+}
+
+process.on("exit", () => {
+  runCleanup();
+  printExitBanner();
 });
 
-// Clear screen and render
-process.stdout.write("\x1b[2J\x1b[H");
-
-render(<App config={config} projectConfig={projectConfig} />, {
-  exitOnCtrlC: false,
+let sigintCount = 0;
+process.on("SIGINT", () => {
+  sigintCount++;
+  if (sigintCount >= 2) {
+    cleanupAndExit(130);
+  }
 });
+
+process.on("SIGTERM", () => {
+  cleanupAndExit(143);
+});
+
+// ─── Restart splash (React component) ───
+
+const RESTART_STEPS = [
+  "quenching active flames…",
+  "reloading config…",
+  "checking providers…",
+  "reforging…",
+];
+
+function RestartSplash({ onComplete }: { onComplete: () => void }) {
+  const [phase, setPhase] = useState(0);
+  const ghost = icon("ghost");
+  const [ghostFrame, setGhostFrame] = useState(ghost);
+  const [typeIdx, setTypeIdx] = useState(0);
+  const [wordmark, setWordmark] = useState(garble("SOULFORGE"));
+  const label = "restarting";
+
+  useEffect(() => {
+    let step = 0;
+    const timer = setInterval(() => {
+      step++;
+      // Ghost fade out: frames 1-4
+      if (step === 1) setGhostFrame("▓");
+      if (step === 2) setGhostFrame("▒");
+      if (step === 3) setGhostFrame("░");
+      if (step === 4) setGhostFrame(" ");
+      // Ghost fade in: frames 6-9
+      if (step === 6) setGhostFrame("░");
+      if (step === 7) setGhostFrame("▒");
+      if (step === 8) setGhostFrame("▓");
+      if (step === 9) setGhostFrame(ghost);
+      // Typewriter: frames 10+
+      if (step >= 10 && step <= 10 + label.length) {
+        setTypeIdx(step - 10);
+      }
+      // Status steps
+      if (step === 10 + label.length + 2) setPhase(1);
+      if (step === 10 + label.length + 5) setPhase(2);
+      if (step === 10 + label.length + 8) setPhase(3);
+      // Wordmark glitch
+      if (step === 10 + label.length + 11) setWordmark(garble("SOULFORGE"));
+      if (step === 10 + label.length + 12) setWordmark("SOULFORGE");
+      if (step === 10 + label.length + 13) setWordmark(garble("SOULFORGE"));
+      // Done
+      if (step === 10 + label.length + 16) {
+        clearInterval(timer);
+        onComplete();
+      }
+    }, 50);
+    return () => clearInterval(timer);
+  }, [onComplete, ghost]);
+
+  const visibleLabel = label.slice(0, typeIdx);
+  const cursor = typeIdx < label.length ? "█" : "";
+
+  return (
+    <box flexDirection="column" flexGrow={1} justifyContent="center" alignItems="center">
+      <text fg={BRAND_PURPLE} attributes={TextAttributes.BOLD}>
+        {ghostFrame}
+      </text>
+      <box height={1} />
+      <text>
+        <span fg="#555">{visibleLabel}</span>
+        <span fg={BRAND_RED}>{cursor}</span>
+      </text>
+      <box height={1} />
+      <text fg="#333">{"─".repeat(30)}</text>
+      <box height={1} />
+      <text fg="#444">{RESTART_STEPS[phase] ?? ""}</text>
+      <box height={1} />
+      <text fg={BRAND_PURPLE} attributes={TextAttributes.BOLD}>
+        {wordmark}
+      </text>
+    </box>
+  );
+}
+
+// ─── Root wrapper (manages soft restart via key swap) ───
+
+interface StartOptions {
+  App: typeof AppComponent;
+  createCliRenderer: typeof CreateCliRenderer;
+  createRoot: typeof CreateRoot;
+  config: AppConfig;
+  projectConfig: Partial<AppConfig> | null;
+  resumeSessionId?: string;
+  bootProviders: ProviderStatus[];
+  bootPrereqs: PrerequisiteStatus[];
+}
+
+function AppRoot({ opts }: { opts: StartOptions }) {
+  const [appKey, setAppKey] = useState(0);
+  const [restarting, setRestarting] = useState(false);
+  const [freshConfig, setFreshConfig] = useState(opts.config);
+  const [freshProjectConfig, setFreshProjectConfig] = useState(opts.projectConfig);
+  const [freshProviders, setFreshProviders] = useState(opts.bootProviders);
+  const [freshPrereqs, setFreshPrereqs] = useState(opts.bootPrereqs);
+
+  useEffect(() => {
+    triggerRestart = () => setRestarting(true);
+    return () => {
+      triggerRestart = null;
+    };
+  }, []);
+
+  const handleRestartComplete = useCallback(async () => {
+    resetStatusBarStore();
+    resetUIStore();
+
+    try {
+      const { loadConfig, loadProjectConfig } = await import("./config/index.js");
+      const { checkProviders } = await import("./core/llm/provider.js");
+      const { checkPrerequisites } = await import("./core/setup/prerequisites.js");
+
+      const newConfig = loadConfig();
+      const newProjectConfig = loadProjectConfig(process.cwd());
+      const [newProviders, newPrereqs] = await Promise.all([
+        checkProviders(),
+        Promise.resolve(checkPrerequisites()),
+      ]);
+
+      setFreshConfig(newConfig);
+      setFreshProjectConfig(newProjectConfig);
+      setFreshProviders(newProviders);
+      setFreshPrereqs(newPrereqs);
+    } catch {}
+    setExitSessionId(null);
+    setAppKey((k) => k + 1);
+    setRestarting(false);
+  }, []);
+
+  if (restarting) {
+    return <RestartSplash onComplete={handleRestartComplete} />;
+  }
+
+  return (
+    <opts.App
+      key={appKey}
+      config={freshConfig}
+      projectConfig={freshProjectConfig}
+      resumeSessionId={appKey === 0 ? opts.resumeSessionId : undefined}
+      bootProviders={freshProviders}
+      bootPrereqs={freshPrereqs}
+    />
+  );
+}
+
+export async function start(opts: StartOptions): Promise<void> {
+  const r = await opts.createCliRenderer({
+    exitOnCtrlC: false,
+    useKittyKeyboard: { disambiguate: true },
+  });
+  renderer = r;
+
+  opts.createRoot(r).render(<AppRoot opts={opts} />);
+}

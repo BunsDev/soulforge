@@ -1,10 +1,12 @@
-import { Box, Text, useInput } from "ink";
+import { TextAttributes } from "@opentui/core";
+import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useState } from "react";
 import { getGitLog, gitPull, gitPush, gitStash, gitStashPop } from "../core/git/status.js";
 
 import { POPUP_BG, POPUP_HL, PopupRow } from "./shared.js";
 
-const POPUP_WIDTH = 46;
+const MAX_POPUP_WIDTH = 46;
+const CHROME_ROWS = 7;
 
 interface MenuItem {
   key: string;
@@ -41,8 +43,21 @@ export function GitMenu({
   onSystemMessage,
   onRefresh,
 }: Props) {
+  const { width: termCols, height: termRows } = useTerminalDimensions();
+  const containerRows = termRows - 2;
+  const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.7));
+  const maxVisible = Math.max(4, Math.floor(containerRows * 0.7) - CHROME_ROWS);
   const [cursor, setCursor] = useState(0);
+  const [scrollOffset, setScrollOffset] = useState(0);
   const [busy, setBusy] = useState(false);
+
+  const adjustScroll = (next: number) => {
+    setScrollOffset((prev) => {
+      if (next < prev) return next;
+      if (next >= prev + maxVisible) return next - maxVisible + 1;
+      return prev;
+    });
+  };
 
   const executeAction = async (action: string) => {
     switch (action) {
@@ -111,54 +126,59 @@ export function GitMenu({
     }
   };
 
-  useInput(
-    (input, key) => {
-      if (busy) return;
+  useKeyboard((evt) => {
+    if (!visible) return;
+    if (busy) return;
 
-      if (key.escape) {
-        onClose();
-        return;
-      }
+    if (evt.name === "escape") {
+      onClose();
+      return;
+    }
 
-      if (key.return) {
-        const item = MENU_ITEMS[cursor];
-        if (item) {
-          setBusy(true);
-          executeAction(item.action).finally(() => setBusy(false));
-        }
-        return;
-      }
-
-      if (key.upArrow || input === "k") {
-        setCursor((prev) => (prev > 0 ? prev - 1 : MENU_ITEMS.length - 1));
-        return;
-      }
-
-      if (key.downArrow || input === "j") {
-        setCursor((prev) => (prev < MENU_ITEMS.length - 1 ? prev + 1 : 0));
-        return;
-      }
-
-      // Single-key shortcuts
-      const idx = MENU_ITEMS.findIndex((m) => m.key === input);
-      if (idx >= 0) {
-        setCursor(idx);
+    if (evt.name === "return") {
+      const item = MENU_ITEMS[cursor];
+      if (item) {
         setBusy(true);
-        const item = MENU_ITEMS[idx];
-        if (item) {
-          executeAction(item.action).finally(() => setBusy(false));
-        }
+        executeAction(item.action).finally(() => setBusy(false));
       }
-    },
-    { isActive: visible },
-  );
+      return;
+    }
+
+    if (evt.name === "up" || evt.name === "k") {
+      setCursor((prev) => {
+        const next = prev > 0 ? prev - 1 : MENU_ITEMS.length - 1;
+        adjustScroll(next);
+        return next;
+      });
+      return;
+    }
+
+    if (evt.name === "down" || evt.name === "j") {
+      setCursor((prev) => {
+        const next = prev < MENU_ITEMS.length - 1 ? prev + 1 : 0;
+        adjustScroll(next);
+        return next;
+      });
+      return;
+    }
+
+    const idx = MENU_ITEMS.findIndex((m) => m.key === evt.name);
+    if (idx >= 0) {
+      setCursor(idx);
+      setBusy(true);
+      const item = MENU_ITEMS[idx];
+      if (item) {
+        executeAction(item.action).finally(() => setBusy(false));
+      }
+    }
+  });
 
   if (!visible) return null;
 
-  const innerW = POPUP_WIDTH - 2;
+  const innerW = popupWidth - 2;
 
   return (
-    <Box
+    <box
       position="absolute"
       flexDirection="column"
       alignItems="center"
@@ -166,58 +186,82 @@ export function GitMenu({
       width="100%"
       height="100%"
     >
-      <Box flexDirection="column" borderStyle="round" borderColor="#8B5CF6" width={POPUP_WIDTH}>
-        {/* Title */}
+      <box
+        flexDirection="column"
+        borderStyle="rounded"
+        border={true}
+        borderColor="#8B5CF6"
+        width={popupWidth}
+      >
         <PopupRow w={innerW}>
-          <Text color="white" bold backgroundColor={POPUP_BG}>
+          <text fg="white" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
             {"󰊢"} Git
-          </Text>
+          </text>
         </PopupRow>
 
-        {/* Separator */}
         <PopupRow w={innerW}>
-          <Text color="#333" backgroundColor={POPUP_BG}>
+          <text fg="#333" bg={POPUP_BG}>
             {"─".repeat(innerW - 4)}
-          </Text>
+          </text>
         </PopupRow>
 
-        {/* Empty row */}
         <PopupRow w={innerW}>
-          <Text>{""}</Text>
+          <text>{""}</text>
         </PopupRow>
 
-        {/* Menu items */}
-        {MENU_ITEMS.map((item, i) => {
-          const isActive = i === cursor;
-          const bg = isActive ? POPUP_HL : POPUP_BG;
-          return (
-            <PopupRow key={item.action} bg={bg} w={innerW}>
-              <Text backgroundColor={bg} color={isActive ? "#FF0040" : "#555"}>
-                {isActive ? "› " : "  "}
-              </Text>
-              <Text backgroundColor={bg} color={isActive ? "#FF8C00" : "#666"} bold={isActive}>
-                {item.key}
-              </Text>
-              <Text backgroundColor={bg} color={isActive ? "#FF0040" : "#aaa"} bold={isActive}>
-                {"  "}
-                {item.label}
-              </Text>
-            </PopupRow>
-          );
-        })}
+        <box
+          flexDirection="column"
+          height={Math.min(MENU_ITEMS.length, maxVisible)}
+          overflow="hidden"
+        >
+          {MENU_ITEMS.slice(scrollOffset, scrollOffset + maxVisible).map((item, vi) => {
+            const i = vi + scrollOffset;
+            const isActive = i === cursor;
+            const bg = isActive ? POPUP_HL : POPUP_BG;
+            return (
+              <PopupRow key={item.action} bg={bg} w={innerW}>
+                <text bg={bg} fg={isActive ? "#FF0040" : "#555"}>
+                  {isActive ? "› " : "  "}
+                </text>
+                <text
+                  bg={bg}
+                  fg={isActive ? "#FF8C00" : "#666"}
+                  attributes={isActive ? TextAttributes.BOLD : undefined}
+                >
+                  {item.key}
+                </text>
+                <text
+                  bg={bg}
+                  fg={isActive ? "#FF0040" : "#aaa"}
+                  attributes={isActive ? TextAttributes.BOLD : undefined}
+                >
+                  {"  "}
+                  {item.label}
+                </text>
+              </PopupRow>
+            );
+          })}
+        </box>
+        {MENU_ITEMS.length > maxVisible && (
+          <PopupRow w={innerW}>
+            <text fg="#555" bg={POPUP_BG}>
+              {scrollOffset > 0 ? "↑ " : "  "}
+              {cursor + 1}/{MENU_ITEMS.length}
+              {scrollOffset + maxVisible < MENU_ITEMS.length ? " ↓" : ""}
+            </text>
+          </PopupRow>
+        )}
 
-        {/* Empty row */}
         <PopupRow w={innerW}>
-          <Text>{""}</Text>
+          <text>{""}</text>
         </PopupRow>
 
-        {/* Hints */}
         <PopupRow w={innerW}>
-          <Text color="#555" backgroundColor={POPUP_BG}>
-            {"↑↓"} navigate {"⏎"}/key select esc close
-          </Text>
+          <text fg="#555" bg={POPUP_BG}>
+            {"↑↓"} navigate | {"⏎"}/key select | esc close
+          </text>
         </PopupRow>
-      </Box>
-    </Box>
+      </box>
+    </box>
   );
 }

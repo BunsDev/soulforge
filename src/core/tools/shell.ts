@@ -3,19 +3,100 @@ import type { ToolResult } from "../../types";
 import { isForbidden } from "../security/forbidden.js";
 
 const DEFAULT_TIMEOUT = 30_000;
+const MAX_OUTPUT_BYTES = 16_384;
 
-// Patterns that extract file content from shell commands
-const FILE_ACCESS_RE = /\b(cat|head|tail|less|more|bat|xxd|hexdump|strings|base64)\s+(.+)/;
+// Commands that read file content
+const FILE_READ_RE =
+  /\b(cat|head|tail|less|more|bat|xxd|hexdump|strings|base64|tac|nl|od|file)\s+(.+)/;
+// Commands that search file content
+const FILE_SEARCH_RE = /\b(grep|rg|ag|ack|sed|awk)\s+(.+)/;
+// Input redirection: command < file
+const INPUT_REDIR_RE = /<\s*([^\s|&;]+)/g;
+// Output redirection to a file: > file, >> file
+const OUTPUT_REDIR_RE = />{1,2}\s*([^\s|&;]+)/g;
+
+function extractPathArgs(argsStr: string): string[] {
+  return argsStr
+    .split(/\s+/)
+    .filter((a) => !a.startsWith("-"))
+    .map((a) => a.replace(/['"]/g, ""));
+}
+
+// Subshell / variable expansion patterns that could bypass direct path checks
+const SUBSHELL_RE = /\$\(|`[^`]*`|\$\{/;
+
+function extractAllPathLikeArgs(command: string): string[] {
+  const paths: string[] = [];
+  const words = command.match(/(?:[^\s'"]+|'[^']*'|"[^"]*")+/g) ?? [];
+  for (const w of words) {
+    const cleaned = w.replace(/^['"]|['"]$/g, "");
+    if (cleaned.startsWith("-") || cleaned.includes("=")) continue;
+    if (/^[a-z_/~.][\w./~*?-]*$/i.test(cleaned)) {
+      paths.push(cleaned);
+    }
+  }
+  return paths;
+}
 
 function checkShellForbidden(command: string): string | null {
-  const match = command.match(FILE_ACCESS_RE);
-  if (!match) return null;
-  // Extract potential file paths from the command args
-  const args = (match[2] ?? "").split(/\s+/).filter((a) => !a.startsWith("-"));
-  for (const arg of args) {
-    const blocked = isForbidden(arg.replace(/['"]/g, ""));
+  // Check ALL path-like arguments in the command against forbidden patterns
+  for (const arg of extractAllPathLikeArgs(command)) {
+    const blocked = isForbidden(arg);
     if (blocked) return blocked;
   }
+
+  // Check direct file-reading commands
+  const readMatch = command.match(FILE_READ_RE);
+  if (readMatch) {
+    for (const arg of extractPathArgs(readMatch[2] ?? "")) {
+      const blocked = isForbidden(arg);
+      if (blocked) return blocked;
+    }
+  }
+
+  // Check search commands (last non-flag arg is often the path)
+  const searchMatch = command.match(FILE_SEARCH_RE);
+  if (searchMatch) {
+    for (const arg of extractPathArgs(searchMatch[2] ?? "")) {
+      const blocked = isForbidden(arg);
+      if (blocked) return blocked;
+    }
+  }
+
+  // Check input redirection (< file)
+  for (const m of command.matchAll(INPUT_REDIR_RE)) {
+    if (m[1]) {
+      const blocked = isForbidden(m[1].replace(/['"]/g, ""));
+      if (blocked) return blocked;
+    }
+  }
+
+  // Check output redirection (> file, >> file)
+  for (const m of command.matchAll(OUTPUT_REDIR_RE)) {
+    if (m[1]) {
+      const blocked = isForbidden(m[1].replace(/['"]/g, ""));
+      if (blocked) return blocked;
+    }
+  }
+
+  // Block subshell / variable expansion referencing forbidden filenames directly
+  if (SUBSHELL_RE.test(command)) {
+    for (const pattern of [
+      "env",
+      "pem",
+      "key",
+      "credentials",
+      "secrets",
+      "npmrc",
+      "netrc",
+      "htpasswd",
+    ]) {
+      if (command.toLowerCase().includes(pattern)) {
+        return `suspicious subshell referencing "${pattern}"`;
+      }
+    }
+  }
+
   return null;
 }
 
@@ -27,7 +108,9 @@ interface ShellArgs {
 
 export const shellTool = {
   name: "shell",
-  description: "Execute a shell command and return its output.",
+  description:
+    "Run a shell command (build, test, lint, install, git, etc). " +
+    "For type-checking, prefer analyze diagnostics. For file search, prefer grep/glob.",
   execute: async (args: ShellArgs): Promise<ToolResult> => {
     const command = args.command;
     const cwd = args.cwd ?? process.cwd();
@@ -54,8 +137,12 @@ export const shellTool = {
       proc.stderr.on("data", (data: Buffer) => errChunks.push(data.toString()));
 
       proc.on("close", (code: number | null) => {
-        const stdout = chunks.join("");
+        let stdout = chunks.join("");
         const stderr = errChunks.join("");
+
+        if (stdout.length > MAX_OUTPUT_BYTES) {
+          stdout = `${stdout.slice(0, MAX_OUTPUT_BYTES)}\n\n... [truncated: output exceeded ${String(MAX_OUTPUT_BYTES)} bytes]`;
+        }
 
         if (code === 0) {
           resolve({ success: true, output: stdout || stderr });

@@ -1,5 +1,6 @@
-import { Box, Text, useInput } from "ink";
-import { useEffect, useState } from "react";
+import { TextAttributes } from "@opentui/core";
+import { useKeyboard, useTerminalDimensions } from "@opentui/react";
+import { memo, useEffect, useState } from "react";
 import { providerIcon } from "../core/icons.js";
 import { PROVIDER_CONFIGS } from "../core/llm/models.js";
 import { checkProviders, type ProviderStatus } from "../core/llm/provider.js";
@@ -7,7 +8,7 @@ import { useGroupedModels } from "../hooks/useGroupedModels.js";
 import { useProviderModels } from "../hooks/useProviderModels.js";
 import { POPUP_BG, POPUP_HL, PopupRow, SPINNER_FRAMES_FILLED } from "./shared.js";
 
-const POPUP_WIDTH = 44;
+const MAX_POPUP_WIDTH = 60;
 
 interface Props {
   visible: boolean;
@@ -22,18 +23,30 @@ function isGroupedProvider(id: string | null): boolean {
   return !!id && !!PROVIDER_CONFIGS.find((p) => p.id === id)?.grouped;
 }
 
-export function LlmSelector({ visible, activeModel, onSelect, onClose }: Props) {
+const CHROME_ROWS = 8;
+
+export const LlmSelector = memo(function LlmSelector({
+  visible,
+  activeModel,
+  onSelect,
+  onClose,
+}: Props) {
+  const { width: termCols, height: termRows } = useTerminalDimensions();
+  const containerRows = termRows - 2;
+  const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.7));
+  const maxVisible = Math.max(4, Math.floor(containerRows * 0.7) - CHROME_ROWS);
   const [level, setLevel] = useState<Level>("provider");
   const [providerCursor, setProviderCursor] = useState(0);
   const [subproviderCursor, setSubproviderCursor] = useState(0);
   const [modelCursor, setModelCursor] = useState(0);
+  const [subScrollOffset, setSubScrollOffset] = useState(0);
+  const [modelScrollOffset, setModelScrollOffset] = useState(0);
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const [expandedSubprovider, setExpandedSubprovider] = useState<string | null>(null);
   const [spinnerIdx, setSpinnerIdx] = useState(0);
 
   const isGrouped = isGroupedProvider(expandedProvider);
 
-  // Direct provider models (non-grouped)
   const directProviderId = expandedProvider && !isGrouped ? expandedProvider : null;
   const {
     models: directModels,
@@ -41,7 +54,6 @@ export function LlmSelector({ visible, activeModel, onSelect, onClose }: Props) 
     error: directError,
   } = useProviderModels(directProviderId);
 
-  // Grouped provider models (gateway, proxy, etc.)
   const groupedProviderId = isGrouped ? expandedProvider : null;
   const {
     subProviders,
@@ -58,6 +70,22 @@ export function LlmSelector({ visible, activeModel, onSelect, onClose }: Props) 
     checkProviders().then(setProviderStatuses);
   }, []);
 
+  const adjustSubScroll = (next: number) => {
+    setSubScrollOffset((prev) => {
+      if (next < prev) return next;
+      if (next >= prev + maxVisible) return next - maxVisible + 1;
+      return prev;
+    });
+  };
+
+  const adjustModelScroll = (next: number) => {
+    setModelScrollOffset((prev) => {
+      if (next < prev) return next;
+      if (next >= prev + maxVisible) return next - maxVisible + 1;
+      return prev;
+    });
+  };
+
   useEffect(() => {
     if (visible) {
       setLevel("provider");
@@ -65,6 +93,8 @@ export function LlmSelector({ visible, activeModel, onSelect, onClose }: Props) 
       setExpandedSubprovider(null);
       setModelCursor(0);
       setSubproviderCursor(0);
+      setSubScrollOffset(0);
+      setModelScrollOffset(0);
     }
   }, [visible]);
 
@@ -76,7 +106,6 @@ export function LlmSelector({ visible, activeModel, onSelect, onClose }: Props) 
     return () => clearInterval(interval);
   }, [loading]);
 
-  // Determine current models for the model level
   const currentModels =
     isGrouped && expandedSubprovider
       ? (groupedModelsByProvider[expandedSubprovider] ?? [])
@@ -84,108 +113,123 @@ export function LlmSelector({ visible, activeModel, onSelect, onClose }: Props) 
 
   const currentError = isGrouped ? groupedError : directError;
 
-  useInput(
-    (input, key) => {
-      if (level === "provider") {
-        if (key.escape) {
-          onClose();
-          return;
-        }
-        if (key.return) {
-          const provider = PROVIDER_CONFIGS[providerCursor];
-          if (provider) {
-            setExpandedProvider(provider.id);
-            if (provider.grouped) {
-              setLevel("subprovider");
-              setSubproviderCursor(0);
-            } else {
-              setLevel("model");
-              setModelCursor(0);
-            }
-          }
-          return;
-        }
-        if (key.upArrow || input === "k") {
-          setProviderCursor((prev) => (prev > 0 ? prev - 1 : PROVIDER_CONFIGS.length - 1));
-          return;
-        }
-        if (key.downArrow || input === "j") {
-          setProviderCursor((prev) => (prev < PROVIDER_CONFIGS.length - 1 ? prev + 1 : 0));
-          return;
-        }
-      }
+  useKeyboard((evt) => {
+    if (!visible) return;
 
-      if (level === "subprovider") {
-        if (key.escape || key.leftArrow) {
-          setLevel("provider");
-          setExpandedProvider(null);
-          setExpandedSubprovider(null);
-          return;
-        }
-        if (key.return && !groupedLoading && subProviders.length > 0) {
-          const sub = subProviders[subproviderCursor];
-          if (sub) {
-            setExpandedSubprovider(sub.id);
+    if (level === "provider") {
+      if (evt.name === "escape") {
+        onClose();
+        return;
+      }
+      if (evt.name === "return") {
+        const provider = PROVIDER_CONFIGS[providerCursor];
+        if (provider) {
+          setExpandedProvider(provider.id);
+          if (provider.grouped) {
+            setLevel("subprovider");
+            setSubproviderCursor(0);
+            setSubScrollOffset(0);
+          } else {
             setLevel("model");
             setModelCursor(0);
+            setModelScrollOffset(0);
           }
-          return;
         }
-        if (key.upArrow || input === "k") {
-          setSubproviderCursor((prev) =>
-            prev > 0 ? prev - 1 : Math.max(0, subProviders.length - 1),
-          );
-          return;
-        }
-        if (key.downArrow || input === "j") {
-          setSubproviderCursor((prev) => (prev < subProviders.length - 1 ? prev + 1 : 0));
-          return;
-        }
+        return;
       }
+      if (evt.name === "up" || evt.name === "k") {
+        setProviderCursor((prev) => (prev > 0 ? prev - 1 : PROVIDER_CONFIGS.length - 1));
+        return;
+      }
+      if (evt.name === "down" || evt.name === "j") {
+        setProviderCursor((prev) => (prev < PROVIDER_CONFIGS.length - 1 ? prev + 1 : 0));
+        return;
+      }
+    }
 
-      if (level === "model") {
-        if (key.escape || key.leftArrow) {
-          if (isGrouped) {
-            setLevel("subprovider");
-            setExpandedSubprovider(null);
-          } else {
-            setLevel("provider");
-            setExpandedProvider(null);
-          }
-          return;
-        }
-        if (key.return && !loading && currentModels.length > 0) {
-          const model = currentModels[modelCursor];
-          if (model) {
-            onSelect(`${expandedProvider}/${model.id}`);
-            onClose();
-          }
-          return;
-        }
-        if (key.upArrow || input === "k") {
-          setModelCursor((prev) => (prev > 0 ? prev - 1 : Math.max(0, currentModels.length - 1)));
-          return;
-        }
-        if (key.downArrow || input === "j") {
-          setModelCursor((prev) => (prev < currentModels.length - 1 ? prev + 1 : 0));
-          return;
-        }
+    if (level === "subprovider") {
+      if (evt.name === "escape" || evt.name === "left") {
+        setLevel("provider");
+        setExpandedProvider(null);
+        setExpandedSubprovider(null);
+        return;
       }
-    },
-    { isActive: visible },
-  );
+      if (evt.name === "return" && !groupedLoading && subProviders.length > 0) {
+        const sub = subProviders[subproviderCursor];
+        if (sub) {
+          setExpandedSubprovider(sub.id);
+          setLevel("model");
+          setModelCursor(0);
+          setModelScrollOffset(0);
+        }
+        return;
+      }
+      if (evt.name === "up" || evt.name === "k") {
+        setSubproviderCursor((prev) => {
+          const next = prev > 0 ? prev - 1 : Math.max(0, subProviders.length - 1);
+          adjustSubScroll(next);
+          return next;
+        });
+        return;
+      }
+      if (evt.name === "down" || evt.name === "j") {
+        setSubproviderCursor((prev) => {
+          const next = prev < subProviders.length - 1 ? prev + 1 : 0;
+          adjustSubScroll(next);
+          return next;
+        });
+        return;
+      }
+    }
+
+    if (level === "model") {
+      if (evt.name === "escape" || evt.name === "left") {
+        if (isGrouped) {
+          setLevel("subprovider");
+          setExpandedSubprovider(null);
+        } else {
+          setLevel("provider");
+          setExpandedProvider(null);
+        }
+        return;
+      }
+      if (evt.name === "return" && !loading && currentModels.length > 0) {
+        const model = currentModels[modelCursor];
+        if (model) {
+          onSelect(`${expandedProvider}/${model.id}`);
+          onClose();
+        }
+        return;
+      }
+      if (evt.name === "up" || evt.name === "k") {
+        setModelCursor((prev) => {
+          const next = prev > 0 ? prev - 1 : Math.max(0, currentModels.length - 1);
+          adjustModelScroll(next);
+          return next;
+        });
+        return;
+      }
+      if (evt.name === "down" || evt.name === "j") {
+        setModelCursor((prev) => {
+          const next = prev < currentModels.length - 1 ? prev + 1 : 0;
+          adjustModelScroll(next);
+          return next;
+        });
+        return;
+      }
+    }
+  });
 
   if (!visible) return null;
 
-  // Parse activeModel: "gateway/anthropic/claude-opus-4.6" or "anthropic/claude-opus-4.6"
   const slashIdx = activeModel.indexOf("/");
   const activeProvider = slashIdx >= 0 ? activeModel.slice(0, slashIdx) : "";
   const activeModelId = slashIdx >= 0 ? activeModel.slice(slashIdx + 1) : "";
-  const innerW = POPUP_WIDTH - 2; // inside border
+  const innerW = popupWidth - 2;
 
   if (level === "provider") {
     return (
-      <Box
+      <box
         position="absolute"
         flexDirection="column"
         alignItems="center"
@@ -193,22 +237,25 @@ export function LlmSelector({ visible, activeModel, onSelect, onClose }: Props) 
         width="100%"
         height="100%"
       >
-        <Box flexDirection="column" borderStyle="round" borderColor="#8B5CF6" width={POPUP_WIDTH}>
-          {/* Title */}
+        <box
+          flexDirection="column"
+          borderStyle="rounded"
+          border={true}
+          borderColor="#8B5CF6"
+          width={popupWidth}
+        >
           <PopupRow w={innerW}>
-            <Text color="white" bold backgroundColor={POPUP_BG}>
+            <text fg="white" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
               {"\uDB80\uDE26"} Select Provider
-            </Text>
+            </text>
           </PopupRow>
-          {/* Separator */}
           <PopupRow w={innerW}>
-            <Text color="#333" backgroundColor={POPUP_BG}>
+            <text fg="#333" bg={POPUP_BG}>
               {"─".repeat(innerW - 4)}
-            </Text>
+            </text>
           </PopupRow>
-          {/* Empty row for spacing */}
           <PopupRow w={innerW}>
-            <Text>{""}</Text>
+            <text>{""}</text>
           </PopupRow>
 
           {PROVIDER_CONFIGS.map((provider, i) => {
@@ -218,32 +265,34 @@ export function LlmSelector({ visible, activeModel, onSelect, onClose }: Props) 
             const bg = isActive ? POPUP_HL : POPUP_BG;
             return (
               <PopupRow key={provider.id} bg={bg} w={innerW}>
-                <Text backgroundColor={bg} color={isActive ? "#FF0040" : "#555"}>
+                <text bg={bg} fg={isActive ? "#FF0040" : "#555"}>
                   {isActive ? "› " : "  "}
-                </Text>
-                <Text backgroundColor={bg} color={isActive ? "#FF0040" : "#aaa"} bold={isActive}>
+                </text>
+                <text
+                  bg={bg}
+                  fg={isActive ? "#FF0040" : "#aaa"}
+                  attributes={isActive ? TextAttributes.BOLD : undefined}
+                >
                   {providerIcon(provider.id)} {provider.name}
-                </Text>
-                <Text backgroundColor={bg}> </Text>
-                <Text backgroundColor={bg} color={available ? "#00FF00" : "#FF0040"}>
+                </text>
+                <text bg={bg}> </text>
+                <text bg={bg} fg={available ? "#00FF00" : "#FF0040"}>
                   {available ? "●" : "○"}
-                </Text>
+                </text>
               </PopupRow>
             );
           })}
 
-          {/* Empty row for spacing */}
           <PopupRow w={innerW}>
-            <Text>{""}</Text>
+            <text>{""}</text>
           </PopupRow>
-          {/* Hints */}
           <PopupRow w={innerW}>
-            <Text color="#555" backgroundColor={POPUP_BG}>
-              ↑↓ navigate ⏎ select esc close
-            </Text>
+            <text fg="#555" bg={POPUP_BG}>
+              {"↑↓"} navigate | {"⏎"} select | esc close
+            </text>
           </PopupRow>
-        </Box>
-      </Box>
+        </box>
+      </box>
     );
   }
 
@@ -256,7 +305,7 @@ export function LlmSelector({ visible, activeModel, onSelect, onClose }: Props) 
       PROVIDER_CONFIGS.find((p) => p.id === expandedProvider)?.name ?? expandedProvider ?? "";
 
     return (
-      <Box
+      <box
         position="absolute"
         flexDirection="column"
         alignItems="center"
@@ -264,102 +313,126 @@ export function LlmSelector({ visible, activeModel, onSelect, onClose }: Props) 
         width="100%"
         height="100%"
       >
-        <Box flexDirection="column" borderStyle="round" borderColor="#8B5CF6" width={POPUP_WIDTH}>
-          {/* Title */}
+        <box
+          flexDirection="column"
+          borderStyle="rounded"
+          border={true}
+          borderColor="#8B5CF6"
+          width={popupWidth}
+        >
           <PopupRow w={innerW}>
-            <Text color="white" bold backgroundColor={POPUP_BG}>
+            <text fg="white" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
               {providerIcon(expandedProvider ?? "")} {providerName}
-            </Text>
+            </text>
             {!groupedLoading && subProviders.length > 0 && (
-              <Text color="#555" dimColor backgroundColor={POPUP_BG}>
+              <text fg="#555" attributes={TextAttributes.DIM} bg={POPUP_BG}>
                 {" "}
                 {String(totalModels)} models
-              </Text>
+              </text>
             )}
           </PopupRow>
-          {/* Subscription badge for proxy */}
           {expandedProvider === "proxy" && !groupedLoading && subProviders.length > 0 && (
-            <PopupRow w={innerW}>
-              <Text color="#8B5CF6" backgroundColor={POPUP_BG}>
-                {"  "}󰄬 Claude subscription
-              </Text>
-              <Text color="#555" backgroundColor={POPUP_BG}>
-                {" "}
-                · local proxy
-              </Text>
-            </PopupRow>
+            <>
+              <PopupRow w={innerW}>
+                <text fg="#8B5CF6" bg={POPUP_BG}>
+                  {"  "}󰄬 Claude subscription
+                </text>
+                <text fg="#555" bg={POPUP_BG}>
+                  {" "}
+                  · local proxy
+                </text>
+              </PopupRow>
+              <PopupRow w={innerW}>
+                <text fg="#a5650a" bg={POPUP_BG}>
+                  {"  "}⚠ Unofficial — uses CLIProxyAPI. Use at your own risk.
+                </text>
+              </PopupRow>
+            </>
           )}
-          {/* Separator */}
           <PopupRow w={innerW}>
-            <Text color="#333" backgroundColor={POPUP_BG}>
+            <text fg="#333" bg={POPUP_BG}>
               {"─".repeat(innerW - 4)}
-            </Text>
+            </text>
           </PopupRow>
-          {/* Back */}
           <PopupRow w={innerW}>
-            <Text color="#666" backgroundColor={POPUP_BG}>
+            <text fg="#666" bg={POPUP_BG}>
               {" "}
               esc to go back
-            </Text>
+            </text>
           </PopupRow>
-          {/* Empty row */}
           <PopupRow w={innerW}>
-            <Text>{""}</Text>
+            <text>{""}</text>
           </PopupRow>
 
-          {/* Error warning */}
           {groupedError && (
             <PopupRow w={innerW}>
-              <Text color="#f44" backgroundColor={POPUP_BG}>
+              <text fg="#f44" bg={POPUP_BG}>
                 ⚠ {groupedError}
-              </Text>
+              </text>
             </PopupRow>
           )}
 
           {groupedLoading ? (
             <PopupRow w={innerW}>
-              <Text color="#9B30FF" backgroundColor={POPUP_BG}>
+              <text fg="#9B30FF" bg={POPUP_BG}>
                 {SPINNER_FRAMES_FILLED[spinnerIdx]} fetching providers...
-              </Text>
+              </text>
             </PopupRow>
           ) : (
-            subProviders.map((sub, i) => {
-              const isActive = i === subproviderCursor;
-              const modelCount = groupedModelsByProvider[sub.id]?.length ?? 0;
-              const bg = isActive ? POPUP_HL : POPUP_BG;
-              return (
-                <PopupRow key={sub.id} bg={bg} w={innerW}>
-                  <Text backgroundColor={bg} color={isActive ? "#FF0040" : "#555"}>
-                    {isActive ? "› " : "  "}
-                  </Text>
-                  <Text backgroundColor={bg} color={isActive ? "#FF0040" : "#aaa"} bold={isActive}>
-                    {providerIcon(sub.id)} {sub.name}
-                  </Text>
-                  <Text backgroundColor={bg} color="#555" dimColor>
-                    {" "}
-                    ({String(modelCount)})
-                  </Text>
-                </PopupRow>
-              );
-            })
+            <box
+              flexDirection="column"
+              height={Math.min(subProviders.length || 1, maxVisible)}
+              overflow="hidden"
+            >
+              {subProviders.slice(subScrollOffset, subScrollOffset + maxVisible).map((sub, vi) => {
+                const i = vi + subScrollOffset;
+                const isActive = i === subproviderCursor;
+                const modelCount = groupedModelsByProvider[sub.id]?.length ?? 0;
+                const bg = isActive ? POPUP_HL : POPUP_BG;
+                return (
+                  <PopupRow key={sub.id} bg={bg} w={innerW}>
+                    <text bg={bg} fg={isActive ? "#FF0040" : "#555"}>
+                      {isActive ? "› " : "  "}
+                    </text>
+                    <text
+                      bg={bg}
+                      fg={isActive ? "#FF0040" : "#aaa"}
+                      attributes={isActive ? TextAttributes.BOLD : undefined}
+                    >
+                      {providerIcon(sub.id)} {sub.name}
+                    </text>
+                    <text bg={bg} fg="#555" attributes={TextAttributes.DIM}>
+                      {" "}
+                      ({String(modelCount)})
+                    </text>
+                  </PopupRow>
+                );
+              })}
+            </box>
+          )}
+          {!groupedLoading && subProviders.length > maxVisible && (
+            <PopupRow w={innerW}>
+              <text fg="#555" bg={POPUP_BG}>
+                {subScrollOffset > 0 ? "↑ " : "  "}
+                {subproviderCursor + 1}/{subProviders.length}
+                {subScrollOffset + maxVisible < subProviders.length ? " ↓" : ""}
+              </text>
+            </PopupRow>
           )}
 
-          {/* Empty row */}
           <PopupRow w={innerW}>
-            <Text>{""}</Text>
+            <text>{""}</text>
           </PopupRow>
-          {/* Hints */}
           <PopupRow w={innerW}>
-            <Text color="#555" backgroundColor={POPUP_BG}>
-              ↑↓ navigate ⏎ select esc back
-            </Text>
+            <text fg="#555" bg={POPUP_BG}>
+              {"↑↓"} navigate | {"⏎"} select | esc back
+            </text>
           </PopupRow>
-        </Box>
-      </Box>
+        </box>
+      </box>
     );
   }
 
-  // Level: model
   const headerIcon = isGrouped
     ? providerIcon(expandedSubprovider ?? "")
     : providerIcon(expandedProvider ?? "");
@@ -368,7 +441,7 @@ export function LlmSelector({ visible, activeModel, onSelect, onClose }: Props) 
     : (PROVIDER_CONFIGS.find((p) => p.id === expandedProvider)?.name ?? expandedProvider ?? "");
 
   return (
-    <Box
+    <box
       position="absolute"
       flexDirection="column"
       alignItems="center"
@@ -376,97 +449,116 @@ export function LlmSelector({ visible, activeModel, onSelect, onClose }: Props) 
       width="100%"
       height="100%"
     >
-      <Box flexDirection="column" borderStyle="round" borderColor="#8B5CF6" width={POPUP_WIDTH}>
-        {/* Title */}
+      <box
+        flexDirection="column"
+        borderStyle="rounded"
+        border={true}
+        borderColor="#8B5CF6"
+        width={popupWidth}
+      >
         <PopupRow w={innerW}>
-          <Text color="white" bold backgroundColor={POPUP_BG}>
+          <text fg="white" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
             {headerIcon} {headerName}
-          </Text>
+          </text>
           {isGrouped && (
-            <Text color="#555" dimColor backgroundColor={POPUP_BG}>
+            <text fg="#555" attributes={TextAttributes.DIM} bg={POPUP_BG}>
               {" "}
               via {expandedProvider}
-            </Text>
+            </text>
           )}
         </PopupRow>
-        {/* Separator */}
         <PopupRow w={innerW}>
-          <Text color="#333" backgroundColor={POPUP_BG}>
+          <text fg="#333" bg={POPUP_BG}>
             {"─".repeat(innerW - 4)}
-          </Text>
+          </text>
         </PopupRow>
-        {/* Back */}
         <PopupRow w={innerW}>
-          <Text color="#666" backgroundColor={POPUP_BG}>
+          <text fg="#666" bg={POPUP_BG}>
             {" "}
             esc to go back
-          </Text>
+          </text>
         </PopupRow>
-        {/* Empty row */}
         <PopupRow w={innerW}>
-          <Text>{""}</Text>
+          <text>{""}</text>
         </PopupRow>
 
-        {/* Error warning */}
         {currentError && (
           <PopupRow w={innerW}>
-            <Text color="#f44" backgroundColor={POPUP_BG}>
+            <text fg="#f44" bg={POPUP_BG}>
               ⚠ {currentError}
-            </Text>
+            </text>
           </PopupRow>
         )}
 
         {loading ? (
           <PopupRow w={innerW}>
-            <Text color="#9B30FF" backgroundColor={POPUP_BG}>
+            <text fg="#9B30FF" bg={POPUP_BG}>
               {SPINNER_FRAMES_FILLED[spinnerIdx]} fetching models...
-            </Text>
+            </text>
           </PopupRow>
         ) : (
-          currentModels.map((model, i) => {
-            const isActive = i === modelCursor;
-            const isCurrent = isGrouped
-              ? activeProvider === expandedProvider && model.id === activeModelId
-              : expandedProvider === activeProvider && model.id === activeModelId;
-            const bg = isActive ? POPUP_HL : POPUP_BG;
-            // Strip provider prefix for display (gateway models have "anthropic/..." IDs)
-            const displayId = model.id.includes("/")
-              ? model.id.slice(model.id.indexOf("/") + 1)
-              : model.id;
-            return (
-              <PopupRow key={model.id} bg={bg} w={innerW}>
-                <Text backgroundColor={bg} color={isActive ? "#FF0040" : "#555"}>
-                  {isActive ? "› " : "  "}
-                </Text>
-                <Text
-                  backgroundColor={bg}
-                  color={isActive ? "#FF0040" : isCurrent ? "#00FF00" : "#aaa"}
-                  bold={isActive}
-                >
-                  {displayId}
-                </Text>
-                {isCurrent && (
-                  <Text backgroundColor={bg} color="#00FF00">
-                    {" "}
-                    ✓
-                  </Text>
-                )}
-              </PopupRow>
-            );
-          })
+          <box
+            flexDirection="column"
+            height={Math.min(currentModels.length || 1, maxVisible)}
+            overflow="hidden"
+          >
+            {currentModels
+              .slice(modelScrollOffset, modelScrollOffset + maxVisible)
+              .map((model, vi) => {
+                const i = vi + modelScrollOffset;
+                const isActive = i === modelCursor;
+                const isCurrent = isGrouped
+                  ? activeProvider === expandedProvider && model.id === activeModelId
+                  : expandedProvider === activeProvider && model.id === activeModelId;
+                const bg = isActive ? POPUP_HL : POPUP_BG;
+                const displayId = model.id.includes("/")
+                  ? model.id.slice(model.id.indexOf("/") + 1)
+                  : model.id;
+                return (
+                  <PopupRow key={model.id} bg={bg} w={innerW}>
+                    <text bg={bg} fg={isActive ? "#FF0040" : "#555"}>
+                      {isActive ? "› " : "  "}
+                    </text>
+                    <text
+                      bg={bg}
+                      fg={isActive ? "#FF0040" : isCurrent ? "#00FF00" : "#aaa"}
+                      attributes={isActive ? TextAttributes.BOLD : undefined}
+                      truncate
+                    >
+                      {displayId.length > innerW - 8
+                        ? `${displayId.slice(0, innerW - 11)}…`
+                        : displayId}
+                    </text>
+                    {isCurrent && (
+                      <text bg={bg} fg="#00FF00">
+                        {" "}
+                        ✓
+                      </text>
+                    )}
+                  </PopupRow>
+                );
+              })}
+          </box>
+        )}
+        {!loading && currentModels.length > maxVisible && (
+          <PopupRow w={innerW}>
+            <text fg="#555" bg={POPUP_BG}>
+              {modelScrollOffset > 0 ? "↑ " : "  "}
+              {modelCursor + 1}/{currentModels.length}
+              {modelScrollOffset + maxVisible < currentModels.length ? " ↓" : ""}
+            </text>
+          </PopupRow>
         )}
 
-        {/* Empty row */}
         <PopupRow w={innerW}>
-          <Text>{""}</Text>
+          <text>{""}</text>
         </PopupRow>
-        {/* Hints */}
         <PopupRow w={innerW}>
-          <Text color="#555" backgroundColor={POPUP_BG}>
+          <text fg="#555" bg={POPUP_BG}>
             ↑↓ navigate ⏎ select esc back
-          </Text>
+          </text>
         </PopupRow>
-      </Box>
-    </Box>
+      </box>
+    </box>
   );
-}
+});

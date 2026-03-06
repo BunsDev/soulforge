@@ -1,31 +1,19 @@
-// ─── Forge Diff — Bracketed Rail Diff Viewer ───
-
 import { readFileSync } from "node:fs";
-import { Box, Text } from "ink";
-import { useMemo } from "react";
-import { computeDiff, type DiffLine, langFromPath } from "../core/diff.js";
-import { highlightCode, TOKEN_COLORS } from "../core/highlight.js";
-
-// ─── Colors ───
-
-const RAIL_COLORS = {
-  context: "#333",
-  add: "#2d5",
-  remove: "#f44",
-  collapsed: "#555",
-} as const;
+import { memo, useMemo } from "react";
+import { computeDiff, langFromPath } from "../core/diff.js";
+import { getSyntaxStyle, getTSClient } from "./syntax.js";
 
 const HEADER_ACCENT = "#9B30FF";
-const HEADER_SEP = "#333";
+const BORDER_COLOR = "#333";
 const HEADER_PATH = "#ccc";
-const GUTTER_COLOR = "#444";
-const COLLAPSED_COLOR = "#555";
-const FOOTER_COLOR = "#333";
 const ERROR_COLOR = "#f44";
-
 const LARGE_DIFF_THRESHOLD = 50;
 
-// ─── Props ───
+const ADD_COLOR = "#2d5";
+const REMOVE_COLOR = "#f44";
+const COLLAPSED_COLOR = "#555";
+
+type DiffMode = "default" | "sidebyside" | "compact";
 
 interface Props {
   filePath: string;
@@ -33,73 +21,74 @@ interface Props {
   newString: string;
   success: boolean;
   errorMessage?: string;
+  mode?: DiffMode;
 }
 
-// ─── DiffLineRow ───
+function toUnifiedDiff(filePath: string, oldStr: string, newStr: string): string {
+  const oldLines = oldStr.split("\n");
+  const newLines = newStr.split("\n");
+  const header = [
+    `--- a/${filePath}`,
+    `+++ b/${filePath}`,
+    `@@ -1,${String(oldLines.length)} +1,${String(newLines.length)} @@`,
+  ];
+  const body: string[] = [];
+  const maxOld = oldLines.length;
+  const maxNew = newLines.length;
 
-function DiffLineRow({ line, lang }: { line: DiffLine; lang: string }) {
-  if (line.kind === "collapsed") {
-    return (
-      <Box minHeight={1} flexShrink={0}>
-        <Text color={RAIL_COLORS.context}>│</Text>
-        <Text color={COLLAPSED_COLOR}>
-          {"       ⋯ "}
-          {line.collapsedCount} lines
-        </Text>
-      </Box>
-    );
+  let oi = 0;
+  let ni = 0;
+  while (oi < maxOld && ni < maxNew) {
+    if (oldLines[oi] === newLines[ni]) {
+      body.push(` ${oldLines[oi]}`);
+      oi++;
+      ni++;
+    } else {
+      body.push(`-${oldLines[oi]}`);
+      oi++;
+    }
+  }
+  while (ni < maxNew) {
+    body.push(`+${newLines[ni]}`);
+    ni++;
+  }
+  while (oi < maxOld) {
+    body.push(`-${oldLines[oi]}`);
+    oi++;
   }
 
-  const railColor = RAIL_COLORS[line.kind];
-  const marker = line.kind === "remove" ? "-" : line.kind === "add" ? "+" : " ";
-  const markerColor =
-    line.kind === "remove"
-      ? RAIL_COLORS.remove
-      : line.kind === "add"
-        ? RAIL_COLORS.add
-        : RAIL_COLORS.context;
-  const lineNum = line.kind === "remove" ? line.oldNum : line.newNum;
-  const numStr = lineNum != null ? String(lineNum).padStart(4, " ") : "    ";
-  const dim = line.kind !== "add";
-
-  // Syntax highlight the content
-  const tokens = highlightCode(line.content, lang)[0] ?? [
-    { text: line.content, role: "plain" as const },
-  ];
-
-  return (
-    <Box minHeight={1} flexShrink={0}>
-      <Text>
-        <Text color={railColor}>│</Text>
-        <Text color={markerColor}>{marker}</Text>
-        <Text color={GUTTER_COLOR}>{numStr} </Text>
-        {tokens.map((tok, i) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: stable token order
-          <Text key={i} color={TOKEN_COLORS[tok.role]} dimColor={dim}>
-            {tok.text}
-          </Text>
-        ))}
-      </Text>
-    </Box>
-  );
+  return [...header, ...body].join("\n");
 }
 
-// ─── Main Component ───
+const DIFF_COLORS = {
+  addedBg: "transparent",
+  removedBg: "#1a0f0f",
+  contextBg: "transparent",
+  addedContentBg: "transparent",
+  removedContentBg: "#1a0f0f",
+  contextContentBg: "transparent",
+  addedLineNumberBg: "transparent",
+  removedLineNumberBg: "#1a0f0f",
+  addedSignColor: ADD_COLOR,
+  removedSignColor: "#633",
+} as const;
 
-export function DiffView({ filePath, oldString, newString, success, errorMessage }: Props) {
-  // Compute actual file line number where the edit starts
+export const DiffView = memo(function DiffView({
+  filePath,
+  oldString,
+  newString,
+  success,
+  errorMessage,
+  mode = "default",
+}: Props) {
   const startLine = useMemo(() => {
     try {
       const content = readFileSync(filePath, "utf-8");
-      // File now contains newString (edit already applied)
       const idx = content.indexOf(newString);
       if (idx >= 0) return content.slice(0, idx).split("\n").length;
-      // Fallback: try oldString (file may have been reverted)
       const idx2 = content.indexOf(oldString);
       if (idx2 >= 0) return content.slice(0, idx2).split("\n").length;
-    } catch {
-      // File not readable
-    }
+    } catch {}
     return 1;
   }, [filePath, oldString, newString]);
 
@@ -109,86 +98,85 @@ export function DiffView({ filePath, oldString, newString, success, errorMessage
   }, [oldString, newString, success, startLine]);
 
   const lang = useMemo(() => langFromPath(filePath), [filePath]);
-
   const isLarge = computed != null && computed.added + computed.removed > LARGE_DIFF_THRESHOLD;
 
-  // ─── Header ───
   const verb = !success ? "Edit" : computed?.isCreation ? "New" : "Edit";
   const icon = !success ? "✗" : "✎";
   const iconColor = !success ? ERROR_COLOR : HEADER_ACCENT;
 
-  // Count text
-  let counts = "";
-  if (success && computed) {
-    const parts: string[] = [];
-    if (computed.added > 0) parts.push(`+${computed.added}`);
-    if (computed.removed > 0) parts.push(`─${computed.removed}`);
-    counts = parts.join(" ");
+  const unifiedDiff = useMemo(() => {
+    if (!success || !computed || isLarge) return null;
+    return toUnifiedDiff(filePath, oldString, newString);
+  }, [success, computed, isLarge, filePath, oldString, newString]);
+
+  const viewMode = mode === "sidebyside" ? "split" : "unified";
+
+  if (mode === "compact") {
+    return (
+      <box minHeight={1} flexShrink={0}>
+        <text truncate>
+          <span fg={iconColor}>{icon} </span>
+          <span fg={HEADER_PATH}>{filePath}</span>
+          {!success ? (
+            <span fg={ERROR_COLOR}> {errorMessage ?? "failed"}</span>
+          ) : computed ? (
+            <>
+              {computed.added > 0 ? <span fg={ADD_COLOR}> +{computed.added}</span> : null}
+              {computed.removed > 0 ? <span fg={REMOVE_COLOR}> -{computed.removed}</span> : null}
+            </>
+          ) : null}
+        </text>
+      </box>
+    );
   }
 
   return (
-    <Box flexDirection="column">
-      {/* Header */}
-      <Box minHeight={1} flexShrink={0}>
-        <Text>
-          <Text color={HEADER_SEP}>┌ </Text>
-          <Text color={iconColor}>{icon} </Text>
-          <Text color={HEADER_ACCENT} bold>
-            {verb}
-          </Text>
-          <Text color={HEADER_SEP}> ─── </Text>
-          <Text color={HEADER_PATH}>{filePath}</Text>
-          {counts ? (
-            <Text>
-              <Text color={HEADER_SEP}> ─── </Text>
-              {computed && computed.added > 0 ? (
-                <Text color={RAIL_COLORS.add}>+{computed.added}</Text>
-              ) : null}
-              {computed && computed.added > 0 && computed.removed > 0 ? (
-                <Text color={HEADER_SEP}> </Text>
-              ) : null}
-              {computed && computed.removed > 0 ? (
-                <Text color={RAIL_COLORS.remove}>─{computed.removed}</Text>
-              ) : null}
-            </Text>
+    <box
+      flexDirection="column"
+      flexShrink={0}
+      border
+      borderStyle="rounded"
+      borderColor={BORDER_COLOR}
+    >
+      <box
+        height={1}
+        flexShrink={0}
+        paddingX={1}
+        backgroundColor="#1a1a1a"
+        alignSelf="flex-start"
+        marginTop={-1}
+      >
+        <text truncate>
+          <span fg={iconColor}>{icon}</span> <span fg={HEADER_ACCENT}>{verb}</span>
+          <span fg={BORDER_COLOR}> ─ </span>
+          <span fg={HEADER_PATH}>{filePath}</span>
+          {success && computed ? (
+            <>
+              {computed.added > 0 ? <span fg={ADD_COLOR}> +{computed.added}</span> : null}
+              {computed.removed > 0 ? <span fg={REMOVE_COLOR}> -{computed.removed}</span> : null}
+            </>
           ) : null}
-        </Text>
-      </Box>
-
-      {/* Body */}
+        </text>
+      </box>
       {!success ? (
-        // Failed edit
-        <Box minHeight={1} flexShrink={0}>
-          <Text>
-            <Text color={HEADER_SEP}>│</Text>
-            <Text color={ERROR_COLOR}> {errorMessage ?? "old_string not found in file"}</Text>
-          </Text>
-        </Box>
+        <box paddingX={1}>
+          <text fg={ERROR_COLOR}>{errorMessage ?? "old_string not found in file"}</text>
+        </box>
       ) : isLarge ? (
-        // Large diff — summary only
-        <Box minHeight={1} flexShrink={0}>
-          <Text>
-            <Text color={HEADER_SEP}>│</Text>
-            <Text color={COLLAPSED_COLOR}> {computed.added + computed.removed} lines changed</Text>
-          </Text>
-        </Box>
-      ) : computed ? (
-        // Normal diff body
-        <>
-          <Box minHeight={1} flexShrink={0}>
-            <Text color={HEADER_SEP}>│</Text>
-          </Box>
-          {computed.lines.map((line, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: stable diff lines
-            <DiffLineRow key={i} line={line} lang={lang} />
-          ))}
-        </>
+        <box paddingX={1}>
+          <text fg={COLLAPSED_COLOR}>{computed.added + computed.removed} lines changed</text>
+        </box>
+      ) : unifiedDiff ? (
+        <diff
+          diff={unifiedDiff}
+          view={viewMode}
+          filetype={lang}
+          syntaxStyle={getSyntaxStyle()}
+          treeSitterClient={getTSClient()}
+          showLineNumbers
+          {...DIFF_COLORS}
+        />
       ) : null}
-
-      {/* Footer */}
-      <Box minHeight={1} flexShrink={0}>
-        <Text color={FOOTER_COLOR}>└───────</Text>
-      </Box>
-    </Box>
+    </box>
   );
-}
+});

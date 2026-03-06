@@ -2,18 +2,23 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { logBackgroundError } from "../../../../stores/errors.js";
 import {
   decode,
   encode,
   filePathToUri,
   type JsonRpcMessage,
   type JsonRpcResponse,
+  type LspCallHierarchyItem,
+  type LspCodeAction,
   type LspDiagnostic,
   type LspDocumentSymbol,
   type LspHover,
   type LspLocation,
   type LspLocationLink,
   type LspSymbolInformation,
+  type LspTextEdit,
+  type LspTypeHierarchyItem,
   type LspWorkspaceEdit,
 } from "./protocol.js";
 import type { LspServerConfig } from "./server-registry.js";
@@ -51,9 +56,13 @@ export class StandaloneLspClient {
     });
 
     this.process.stdout?.on("data", (chunk: Buffer) => this.onData(chunk));
-    this.process.on("exit", () => {
+    this.process.on("exit", (code, signal) => {
       this.process = null;
-      // Reject all pending requests
+      if (code != null && code !== 0) {
+        logBackgroundError(`LSP:${this.config.command}`, `exited with code ${code}`);
+      } else if (signal) {
+        logBackgroundError(`LSP:${this.config.command}`, `killed by ${signal}`);
+      }
       for (const [, pending] of this.pending) {
         pending.reject(new Error("LSP server exited"));
       }
@@ -72,6 +81,15 @@ export class StandaloneLspClient {
           hover: { dynamicRegistration: false },
           rename: { dynamicRegistration: false },
           publishDiagnostics: { relatedInformation: true },
+          codeAction: { dynamicRegistration: false },
+          formatting: { dynamicRegistration: false },
+          rangeFormatting: { dynamicRegistration: false },
+          implementation: { dynamicRegistration: false },
+          callHierarchy: { dynamicRegistration: false },
+          typeHierarchy: { dynamicRegistration: false },
+        },
+        workspace: {
+          symbol: { dynamicRegistration: false },
         },
       },
       rootUri: this.rootUri,
@@ -272,9 +290,152 @@ export class StandaloneLspClient {
     });
   }
 
+  /** Get code actions */
+  async textDocumentCodeAction(
+    filePath: string,
+    startLine: number,
+    startChar: number,
+    endLine: number,
+    endChar: number,
+    only?: string[],
+  ): Promise<LspCodeAction[]> {
+    this.ensureDocumentOpen(filePath);
+    const result = (await this.request("textDocument/codeAction", {
+      textDocument: { uri: filePathToUri(filePath) },
+      range: {
+        start: { line: startLine, character: startChar },
+        end: { line: endLine, character: endChar },
+      },
+      context: { diagnostics: [], ...(only ? { only } : {}) },
+    })) as LspCodeAction[] | null;
+    return result ?? [];
+  }
+
+  /** Search workspace symbols */
+  async workspaceSymbol(query: string): Promise<LspSymbolInformation[]> {
+    const result = (await this.request("workspace/symbol", {
+      query,
+    })) as LspSymbolInformation[] | null;
+    return result ?? [];
+  }
+
+  /** Format a document */
+  async textDocumentFormatting(filePath: string): Promise<LspTextEdit[]> {
+    this.ensureDocumentOpen(filePath);
+    const result = (await this.request("textDocument/formatting", {
+      textDocument: { uri: filePathToUri(filePath) },
+      options: { tabSize: 2, insertSpaces: true },
+    })) as LspTextEdit[] | null;
+    return result ?? [];
+  }
+
+  /** Format a range */
+  async textDocumentRangeFormatting(
+    filePath: string,
+    startLine: number,
+    startChar: number,
+    endLine: number,
+    endChar: number,
+  ): Promise<LspTextEdit[]> {
+    this.ensureDocumentOpen(filePath);
+    const result = (await this.request("textDocument/rangeFormatting", {
+      textDocument: { uri: filePathToUri(filePath) },
+      range: {
+        start: { line: startLine, character: startChar },
+        end: { line: endLine, character: endChar },
+      },
+      options: { tabSize: 2, insertSpaces: true },
+    })) as LspTextEdit[] | null;
+    return result ?? [];
+  }
+
+  /** Find implementations */
+  async textDocumentImplementation(
+    filePath: string,
+    line: number,
+    character: number,
+  ): Promise<LspLocation[]> {
+    this.ensureDocumentOpen(filePath);
+    const result = (await this.request("textDocument/implementation", {
+      textDocument: { uri: filePathToUri(filePath) },
+      position: { line, character },
+    })) as LspDefinitionResult;
+    return normalizeLocations(result);
+  }
+
+  /** Prepare call hierarchy */
+  async prepareCallHierarchy(
+    filePath: string,
+    line: number,
+    character: number,
+  ): Promise<LspCallHierarchyItem[]> {
+    this.ensureDocumentOpen(filePath);
+    const result = (await this.request("textDocument/prepareCallHierarchy", {
+      textDocument: { uri: filePathToUri(filePath) },
+      position: { line, character },
+    })) as LspCallHierarchyItem[] | null;
+    return result ?? [];
+  }
+
+  /** Get incoming calls */
+  async callHierarchyIncomingCalls(item: LspCallHierarchyItem): Promise<LspCallHierarchyItem[]> {
+    const result = (await this.request("callHierarchy/incomingCalls", {
+      item,
+    })) as Array<{ from: LspCallHierarchyItem }> | null;
+    return result?.map((r) => r.from) ?? [];
+  }
+
+  /** Get outgoing calls */
+  async callHierarchyOutgoingCalls(item: LspCallHierarchyItem): Promise<LspCallHierarchyItem[]> {
+    const result = (await this.request("callHierarchy/outgoingCalls", {
+      item,
+    })) as Array<{ to: LspCallHierarchyItem }> | null;
+    return result?.map((r) => r.to) ?? [];
+  }
+
+  /** Prepare type hierarchy */
+  async prepareTypeHierarchy(
+    filePath: string,
+    line: number,
+    character: number,
+  ): Promise<LspTypeHierarchyItem[]> {
+    this.ensureDocumentOpen(filePath);
+    const result = (await this.request("textDocument/prepareTypeHierarchy", {
+      textDocument: { uri: filePathToUri(filePath) },
+      position: { line, character },
+    })) as LspTypeHierarchyItem[] | null;
+    return result ?? [];
+  }
+
+  /** Get supertypes */
+  async typeHierarchySupertypes(item: LspTypeHierarchyItem): Promise<LspTypeHierarchyItem[]> {
+    const result = (await this.request("typeHierarchy/supertypes", {
+      item,
+    })) as LspTypeHierarchyItem[] | null;
+    return result ?? [];
+  }
+
+  /** Get subtypes */
+  async typeHierarchySubtypes(item: LspTypeHierarchyItem): Promise<LspTypeHierarchyItem[]> {
+    const result = (await this.request("typeHierarchy/subtypes", {
+      item,
+    })) as LspTypeHierarchyItem[] | null;
+    return result ?? [];
+  }
+
   /** Check if the client has been initialized */
   get isReady(): boolean {
     return this.initialized && this.process !== null;
+  }
+
+  /** The server command name (e.g. "typescript-language-server") */
+  get serverCommand(): string {
+    return this.config.command;
+  }
+
+  /** PID of the spawned server process, or null if not running */
+  get pid(): number | null {
+    return this.process?.pid ?? null;
   }
 
   /** Graceful shutdown */

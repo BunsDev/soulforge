@@ -1,5 +1,4 @@
-import { Box } from "ink";
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { Markdown } from "./Markdown.js";
 import { ReasoningBlock } from "./ReasoningBlock.js";
 import { type LiveToolCall, ToolCallDisplay } from "./ToolCallDisplay.js";
@@ -7,35 +6,58 @@ import { type LiveToolCall, ToolCallDisplay } from "./ToolCallDisplay.js";
 type StreamSegment =
   | { type: "text"; content: string }
   | { type: "tools"; callIds: string[] }
-  | { type: "reasoning"; content: string; id: string };
+  | { type: "reasoning"; content: string; id: string; done?: boolean };
 
 export type { StreamSegment };
 
-export function StreamSegmentList({
+function trimToCompleteLines(text: string): string {
+  return text;
+}
+
+export const StreamSegmentList = memo(function StreamSegmentList({
   segments,
   toolCalls,
+  verbose = false,
+  diffStyle = "default",
+  showReasoning = true,
+  reasoningExpanded = false,
 }: {
   segments: StreamSegment[];
   toolCalls: LiveToolCall[];
+  verbose?: boolean;
+  diffStyle?: "default" | "sidebyside" | "compact";
+  showReasoning?: boolean;
+  reasoningExpanded?: boolean;
 }) {
   const toolCallMap = useMemo(() => new Map(toolCalls.map((tc) => [tc.id, tc])), [toolCalls]);
+
+  let lastVisibleType: string | null = null;
   return (
     <>
       {segments.map((seg, i) => {
-        const prev = i > 0 ? segments[i - 1] : null;
-        const needsGap = prev && prev.type !== seg.type ? 1 : 0;
+        if (seg.type === "reasoning" && !showReasoning) return null;
+
+        const needsGap = lastVisibleType !== null && lastVisibleType !== seg.type ? 1 : 0;
+        lastVisibleType = seg.type;
         if (seg.type === "text") {
+          const display = trimToCompleteLines(seg.content);
+          if (display.length === 0) return null;
           return (
-            <Box key={`text-${String(i)}`} marginTop={needsGap}>
-              <Markdown text={seg.content} color="#ccc" />
-            </Box>
+            <box key={`text-${String(i)}`} flexDirection="column" marginTop={needsGap}>
+              <Markdown text={display} streaming />
+            </box>
           );
         }
         if (seg.type === "reasoning") {
+          const rKey = `${seg.id}-${reasoningExpanded ? "exp" : "col"}`;
           return (
-            <Box key={seg.id} marginTop={needsGap}>
-              <ReasoningBlock content={seg.content} expanded isStreaming />
-            </Box>
+            <box key={rKey} marginTop={needsGap}>
+              <ReasoningBlock
+                content={seg.content}
+                expanded={reasoningExpanded}
+                isStreaming={!seg.done}
+              />
+            </box>
           );
         }
         const calls = seg.callIds
@@ -43,11 +65,11 @@ export function StreamSegmentList({
           .filter((tc): tc is LiveToolCall => tc != null);
         if (calls.length === 0) return null;
         return (
-          <Box key={seg.callIds[0]} marginTop={needsGap}>
-            <ToolCallDisplay calls={calls} />
-          </Box>
+          <box key={seg.callIds[0]} marginTop={needsGap}>
+            <ToolCallDisplay calls={calls} verbose={verbose} diffStyle={diffStyle} />
+          </box>
         );
       })}
     </>
   );
-}
+});

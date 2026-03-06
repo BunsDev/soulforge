@@ -4,18 +4,24 @@
 // - When Neovim is running → bridges to Neovim's LSP (nvim-bridge)
 // - When Neovim is NOT running → spawns servers directly (standalone-client)
 
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import type {
+  CallHierarchyResult,
+  CodeAction,
   Diagnostic,
+  FormatEdit,
   IntelligenceBackend,
   Language,
   RefactorResult,
   SourceLocation,
   SymbolInfo,
+  TypeHierarchyResult,
   TypeInfo,
 } from "../../types.js";
 import * as nvimBridge from "./nvim-bridge.js";
 import {
+  type LspCallHierarchyItem,
   type LspDocumentSymbol,
   type LspHover,
   type LspLocation,
@@ -23,6 +29,7 @@ import {
   type LspSymbolInformation,
   type LspTextDocumentEdit,
   type LspTextEdit,
+  type LspTypeHierarchyItem,
   type LspWorkspaceEdit,
   lspSeverityToSeverity,
   lspSymbolKindToSymbolKind,
@@ -41,7 +48,7 @@ const SUPPORTED_LANGUAGES: Set<Language> = new Set([
 
 export class LspBackend implements IntelligenceBackend {
   readonly name = "lsp";
-  readonly tier = 2;
+  readonly tier = 1;
 
   private cwd = "";
   /** language:cwd → client */
@@ -51,6 +58,50 @@ export class LspBackend implements IntelligenceBackend {
 
   async initialize(cwd: string): Promise<void> {
     this.cwd = cwd;
+  }
+
+  /** Find a real source file to use as LSP buffer anchor (for workspace-wide queries) */
+  private findAnchorFile(): string | null {
+    // Common entry points that are likely to exist
+    const candidates = [
+      "src/index.ts",
+      "src/main.ts",
+      "src/app.ts",
+      "index.ts",
+      "main.ts",
+      "src/index.js",
+      "src/main.js",
+      "index.js",
+      "main.py",
+      "src/main.py",
+      "main.go",
+      "src/main.go",
+      "src/lib.rs",
+      "src/main.rs",
+    ];
+    for (const candidate of candidates) {
+      const full = join(this.cwd, candidate);
+      if (existsSync(full)) return full;
+    }
+    // Fallback: find any source file in src/ or root
+    for (const dir of [join(this.cwd, "src"), this.cwd]) {
+      if (!existsSync(dir)) continue;
+      try {
+        const files = readdirSync(dir);
+        const source = files.find(
+          (f) =>
+            f.endsWith(".ts") ||
+            f.endsWith(".js") ||
+            f.endsWith(".py") ||
+            f.endsWith(".go") ||
+            f.endsWith(".rs"),
+        );
+        if (source) return join(dir, source);
+      } catch {
+        /* ignore */
+      }
+    }
+    return null;
   }
 
   supportsLanguage(language: Language): boolean {
@@ -198,6 +249,252 @@ export class LspBackend implements IntelligenceBackend {
     return { symbol, type: typeStr };
   }
 
+  // ─── Code Actions ───
+
+  async getCodeActions(
+    file: string,
+    startLine: number,
+    endLine: number,
+    diagnosticCodes?: (string | number)[],
+  ): Promise<CodeAction[] | null> {
+    if (nvimBridge.isNvimAvailable()) {
+      const actions = await nvimBridge.getCodeActions(
+        file,
+        startLine - 1,
+        0,
+        endLine - 1,
+        0,
+        diagnosticCodes,
+      );
+      if (actions && actions.length > 0) {
+        return actions.map((a) => ({
+          title: a.title,
+          kind: a.kind,
+          isPreferred: a.isPreferred,
+        }));
+      }
+      return null;
+    }
+
+    const client = await this.getStandaloneClient(file);
+    if (!client) return null;
+    try {
+      const actions = await client.textDocumentCodeAction(file, startLine - 1, 0, endLine - 1, 0);
+      if (actions.length > 0) {
+        return actions.map((a) => ({
+          title: a.title,
+          kind: a.kind,
+          isPreferred: a.isPreferred,
+        }));
+      }
+    } catch {
+      /* fall through */
+    }
+    return null;
+  }
+
+  // ─── Workspace Symbols ───
+
+  async findWorkspaceSymbols(query: string): Promise<SymbolInfo[] | null> {
+    // Need a real file buffer to get an LSP client attached
+    if (nvimBridge.isNvimAvailable()) {
+      // Find a real file to use as the buffer anchor (LSP won't attach to ".")
+      const anchorFile = this.findAnchorFile();
+      if (anchorFile) {
+        const raw = await nvimBridge.workspaceSymbols(anchorFile, query);
+        if (raw && raw.length > 0) {
+          return flattenDocumentSymbols(raw, anchorFile, query);
+        }
+      }
+      return null;
+    }
+
+    // Standalone: try any existing client
+    for (const client of this.standaloneClients.values()) {
+      if (!client.isReady) continue;
+      try {
+        const symbols = await client.workspaceSymbol(query);
+        if (symbols.length > 0) {
+          return symbols.map((s) => ({
+            name: s.name,
+            kind: lspSymbolKindToSymbolKind(s.kind),
+            location: lspLocationToSourceLocation(s.location),
+            containerName: s.containerName,
+          }));
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+    return null;
+  }
+
+  // ─── Formatting ───
+
+  async formatDocument(file: string): Promise<FormatEdit | null> {
+    let edits: LspTextEdit[] | null = null;
+
+    if (nvimBridge.isNvimAvailable()) {
+      edits = await nvimBridge.formatDocument(file);
+    } else {
+      const client = await this.getStandaloneClient(file);
+      if (!client) return null;
+      try {
+        edits = await client.textDocumentFormatting(file);
+      } catch {
+        /* fall through */
+      }
+    }
+
+    if (!edits || edits.length === 0) return null;
+    return lspTextEditsToFormatEdit(file, edits);
+  }
+
+  async formatRange(file: string, startLine: number, endLine: number): Promise<FormatEdit | null> {
+    let edits: LspTextEdit[] | null = null;
+
+    if (nvimBridge.isNvimAvailable()) {
+      edits = await nvimBridge.formatRange(file, startLine - 1, 0, endLine - 1, 0);
+    } else {
+      const client = await this.getStandaloneClient(file);
+      if (!client) return null;
+      try {
+        edits = await client.textDocumentRangeFormatting(file, startLine - 1, 0, endLine - 1, 0);
+      } catch {
+        /* fall through */
+      }
+    }
+
+    if (!edits || edits.length === 0) return null;
+    return lspTextEditsToFormatEdit(file, edits);
+  }
+
+  // ─── Organize Imports ───
+
+  async organizeImports(file: string): Promise<RefactorResult | null> {
+    if (nvimBridge.isNvimAvailable()) {
+      const actions = await nvimBridge.organizeImports(file);
+      if (actions && actions.length > 0) {
+        const action = actions[0] as (typeof actions)[0];
+        if (action?.edit) {
+          return workspaceEditToRefactorResult(action.edit, "imports", "organized");
+        }
+      }
+      return null;
+    }
+
+    const client = await this.getStandaloneClient(file);
+    if (!client) return null;
+    try {
+      const actions = await client.textDocumentCodeAction(file, 0, 0, 0, 0, [
+        "source.organizeImports",
+      ]);
+      const first = actions[0];
+      if (first?.edit) {
+        return workspaceEditToRefactorResult(first.edit, "imports", "organized");
+      }
+    } catch {
+      /* fall through */
+    }
+    return null;
+  }
+
+  // ─── Call Hierarchy ───
+
+  async getCallHierarchy(
+    file: string,
+    symbol: string,
+    line?: number,
+    column?: number,
+  ): Promise<CallHierarchyResult | null> {
+    const pos = this.resolvePosition(file, symbol, line, column);
+    if (!pos) return null;
+
+    if (nvimBridge.isNvimAvailable()) {
+      const result = await nvimBridge.callHierarchy(file, pos.line, pos.col);
+      if (!result) return null;
+      return lspCallHierarchyToResult(result);
+    }
+
+    const client = await this.getStandaloneClient(file);
+    if (!client) return null;
+    try {
+      const items = await client.prepareCallHierarchy(file, pos.line, pos.col);
+      const item = items[0];
+      if (!item) return null;
+      const [incoming, outgoing] = await Promise.all([
+        client.callHierarchyIncomingCalls(item),
+        client.callHierarchyOutgoingCalls(item),
+      ]);
+      return lspCallHierarchyToResult({ item, incoming, outgoing });
+    } catch {
+      /* fall through */
+    }
+    return null;
+  }
+
+  // ─── Implementation ───
+
+  async findImplementation(
+    file: string,
+    symbol: string,
+    line?: number,
+    column?: number,
+  ): Promise<SourceLocation[] | null> {
+    const pos = this.resolvePosition(file, symbol, line, column);
+    if (!pos) return null;
+
+    if (nvimBridge.isNvimAvailable()) {
+      const locations = await nvimBridge.findImplementation(file, pos.line, pos.col);
+      if (locations && locations.length > 0) return locations.map(lspLocationToSourceLocation);
+      return null;
+    }
+
+    const client = await this.getStandaloneClient(file);
+    if (!client) return null;
+    try {
+      const locations = await client.textDocumentImplementation(file, pos.line, pos.col);
+      if (locations.length > 0) return locations.map(lspLocationToSourceLocation);
+    } catch {
+      /* fall through */
+    }
+    return null;
+  }
+
+  // ─── Type Hierarchy ───
+
+  async getTypeHierarchy(
+    file: string,
+    symbol: string,
+    line?: number,
+    column?: number,
+  ): Promise<TypeHierarchyResult | null> {
+    const pos = this.resolvePosition(file, symbol, line, column);
+    if (!pos) return null;
+
+    if (nvimBridge.isNvimAvailable()) {
+      const result = await nvimBridge.typeHierarchy(file, pos.line, pos.col);
+      if (!result) return null;
+      return lspTypeHierarchyToResult(result);
+    }
+
+    const client = await this.getStandaloneClient(file);
+    if (!client) return null;
+    try {
+      const items = await client.prepareTypeHierarchy(file, pos.line, pos.col);
+      const item = items[0];
+      if (!item) return null;
+      const [supertypes, subtypes] = await Promise.all([
+        client.typeHierarchySupertypes(item),
+        client.typeHierarchySubtypes(item),
+      ]);
+      return lspTypeHierarchyToResult({ item, supertypes, subtypes });
+    } catch {
+      /* fall through */
+    }
+    return null;
+  }
+
   // ─── Refactoring ───
 
   async rename(
@@ -218,6 +515,9 @@ export class LspBackend implements IntelligenceBackend {
       const client = await this.getStandaloneClient(file);
       if (!client) return null;
       try {
+        // Wait for diagnostics first — ensures the LSP has loaded the full project
+        // from tsconfig before we request a cross-file rename.
+        await client.getDiagnostics(file);
         edit = await client.textDocumentRename(file, pos.line, pos.col, newName);
       } catch {
         /* fall through */
@@ -226,6 +526,32 @@ export class LspBackend implements IntelligenceBackend {
 
     if (!edit) return null;
     return workspaceEditToRefactorResult(edit, symbol, newName);
+  }
+
+  /** Ensure a standalone LSP server is running for a file, regardless of Neovim state. */
+  async ensureStandaloneReady(file: string): Promise<void> {
+    await this.getStandaloneClient(file);
+  }
+
+  /** Get info about active standalone LSP servers */
+  getActiveServers(): Array<{ language: string; command: string }> {
+    const servers: Array<{ language: string; command: string }> = [];
+    for (const [key, client] of this.standaloneClients) {
+      if (!client.isReady) continue;
+      const language = key.split(":")[0] ?? "unknown";
+      servers.push({ language, command: client.serverCommand });
+    }
+    return servers;
+  }
+
+  /** Get PIDs of all running LSP server processes */
+  getChildPids(): number[] {
+    const pids: number[] = [];
+    for (const client of this.standaloneClients.values()) {
+      const pid = client.pid;
+      if (pid != null) pids.push(pid);
+    }
+    return pids;
   }
 
   // ─── Lifecycle ───
@@ -289,12 +615,13 @@ export class LspBackend implements IntelligenceBackend {
     return null;
   }
 
-  /** Get or create a standalone LSP client for the file's language */
+  /** Get or create a standalone LSP client for the file's project */
   private async getStandaloneClient(file: string): Promise<StandaloneLspClient | null> {
     const language = detectLanguage(file);
     if (!language || this.failedLanguages.has(language)) return null;
 
-    const key = `${language}:${this.cwd}`;
+    const projectRoot = findProjectRootForLanguage(file, language) ?? this.cwd;
+    const key = `${language}:${projectRoot}`;
     const existing = this.standaloneClients.get(key);
     if (existing?.isReady) return existing;
 
@@ -305,7 +632,7 @@ export class LspBackend implements IntelligenceBackend {
       return null;
     }
 
-    const client = new StandaloneLspClient(config, this.cwd);
+    const client = new StandaloneLspClient(config, projectRoot);
     try {
       await client.start();
       this.standaloneClients.set(key, client);
@@ -516,6 +843,82 @@ function workspaceEditToRefactorResult(
   }
 
   return result;
+}
+
+/** Convert LSP TextEdits to FormatEdit */
+function lspTextEditsToFormatEdit(file: string, edits: LspTextEdit[]): FormatEdit {
+  return {
+    file,
+    edits: edits.map((e) => ({
+      startLine: e.range.start.line + 1,
+      startCol: e.range.start.character + 1,
+      endLine: e.range.end.line + 1,
+      endCol: e.range.end.character + 1,
+      newText: e.newText,
+    })),
+  };
+}
+
+/** Convert LSP call hierarchy result to our type */
+function lspCallHierarchyToResult(raw: {
+  item: LspCallHierarchyItem;
+  incoming: LspCallHierarchyItem[];
+  outgoing: LspCallHierarchyItem[];
+}): CallHierarchyResult {
+  const convert = (i: LspCallHierarchyItem) => ({
+    name: i.name,
+    kind: lspSymbolKindToSymbolKind(i.kind),
+    file: uriToFilePath(i.uri),
+    line: i.range.start.line + 1,
+    column: i.range.start.character + 1,
+  });
+  return {
+    item: convert(raw.item),
+    incoming: raw.incoming.map(convert),
+    outgoing: raw.outgoing.map(convert),
+  };
+}
+
+/** Convert LSP type hierarchy result to our type */
+function lspTypeHierarchyToResult(raw: {
+  item: LspTypeHierarchyItem;
+  supertypes: LspTypeHierarchyItem[];
+  subtypes: LspTypeHierarchyItem[];
+}): TypeHierarchyResult {
+  const convert = (i: LspTypeHierarchyItem) => ({
+    name: i.name,
+    kind: lspSymbolKindToSymbolKind(i.kind),
+    file: uriToFilePath(i.uri),
+    line: i.range.start.line + 1,
+  });
+  return {
+    item: convert(raw.item),
+    supertypes: raw.supertypes.map(convert),
+    subtypes: raw.subtypes.map(convert),
+  };
+}
+
+const PROJECT_FILES: Partial<Record<Language, string[]>> = {
+  typescript: ["tsconfig.json"],
+  javascript: ["jsconfig.json", "tsconfig.json"],
+  python: ["pyproject.toml", "setup.py"],
+  go: ["go.mod"],
+  rust: ["Cargo.toml"],
+};
+
+function findProjectRootForLanguage(file: string, language: Language): string | null {
+  const markers = PROJECT_FILES[language];
+  if (!markers) return null;
+
+  let dir = dirname(resolve(file));
+  const root = resolve("/");
+  while (dir !== root) {
+    for (const marker of markers) {
+      if (existsSync(join(dir, marker))) return dir;
+    }
+    dir = dirname(dir);
+  }
+  return null;
 }
 
 function escapeRegex(str: string): string {

@@ -1,7 +1,8 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { Box, Text, useInput } from "ink";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { TextAttributes } from "@opentui/core";
+import { useKeyboard, useTerminalDimensions } from "@opentui/react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import type { ContextManager } from "../core/context/manager.js";
 import {
   type InstalledSkill,
@@ -14,8 +15,8 @@ import {
 
 import { POPUP_BG, POPUP_HL, PopupRow } from "./shared.js";
 
-const POPUP_WIDTH = 90;
-const MAX_VISIBLE = 12;
+const MAX_POPUP_WIDTH = 90;
+const CHROME_ROWS = 9;
 
 type Tab = "search" | "installed" | "active";
 const TABS: Tab[] = ["search", "installed", "active"];
@@ -32,7 +33,12 @@ interface Props {
   onSystemMessage: (msg: string) => void;
 }
 
-export function SkillSearch({ visible, contextManager, onClose, onSystemMessage }: Props) {
+export const SkillSearch = memo(function SkillSearch({
+  visible,
+  contextManager,
+  onClose,
+  onSystemMessage,
+}: Props) {
   const [tab, setTab] = useState<Tab>("search");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SkillSearchResult[]>([]);
@@ -47,10 +53,13 @@ export function SkillSearch({ visible, contextManager, onClose, onSystemMessage 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isInProject = existsSync(join(process.cwd(), ".git"));
+  const { width: termCols, height: termRows } = useTerminalDimensions();
 
-  const innerW = POPUP_WIDTH - 2;
+  const containerRows = termRows - 2;
+  const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.7));
+  const maxVisible = Math.max(4, Math.floor(containerRows * 0.7) - CHROME_ROWS);
+  const innerW = popupWidth - 2;
 
-  // Local filtering for installed/active tabs
   const filterQuery = query.toLowerCase().trim();
   const filteredInstalled = filterQuery
     ? installed.filter((s) => s.name.toLowerCase().includes(filterQuery))
@@ -67,7 +76,6 @@ export function SkillSearch({ visible, contextManager, onClose, onSystemMessage 
     setActiveSkills(contextManager.getActiveSkills());
   }, [contextManager]);
 
-  // Reset state when popup opens
   useEffect(() => {
     if (visible) {
       setTab("search");
@@ -79,7 +87,6 @@ export function SkillSearch({ visible, contextManager, onClose, onSystemMessage 
     }
   }, [visible, refreshInstalled, refreshActive]);
 
-  // Debounced search
   useEffect(() => {
     if (!visible || tab !== "search") return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -108,7 +115,6 @@ export function SkillSearch({ visible, contextManager, onClose, onSystemMessage 
     };
   }, [query, visible, tab]);
 
-  // Reset filter + refresh when switching tabs
   useEffect(() => {
     setQuery("");
     setResults([]);
@@ -127,89 +133,81 @@ export function SkillSearch({ visible, contextManager, onClose, onSystemMessage 
   const adjustScroll = (nextCursor: number) => {
     setScrollOffset((prev) => {
       if (nextCursor < prev) return nextCursor;
-      if (nextCursor >= prev + MAX_VISIBLE) return nextCursor - MAX_VISIBLE + 1;
+      if (nextCursor >= prev + maxVisible) return nextCursor - maxVisible + 1;
       return prev;
     });
   };
 
-  useInput(
-    (_input, key) => {
-      // Scope picker mode
-      if (pendingInstall) {
-        if (key.escape) {
-          setPendingInstall(null);
-          return;
-        }
-        if (key.upArrow || key.downArrow) {
-          setScopeCursor((prev) => (prev === 0 ? 1 : 0));
-          return;
-        }
-        if (key.return) {
-          const isGlobal = isInProject ? scopeCursor === 1 : true;
-          doInstall(pendingInstall, isGlobal);
-          setPendingInstall(null);
-          return;
-        }
-        return;
-      }
+  useKeyboard((evt) => {
+    if (!visible) return;
 
-      // Escape to close
-      if (key.escape) {
-        onClose();
+    if (pendingInstall) {
+      if (evt.name === "escape") {
+        setPendingInstall(null);
         return;
       }
+      if (evt.name === "up" || evt.name === "down") {
+        setScopeCursor((prev) => (prev === 0 ? 1 : 0));
+        return;
+      }
+      if (evt.name === "return") {
+        const isGlobal = isInProject ? scopeCursor === 1 : true;
+        doInstall(pendingInstall, isGlobal);
+        setPendingInstall(null);
+        return;
+      }
+      return;
+    }
 
-      // Tab to cycle tabs
-      if (key.tab) {
-        const idx = TABS.indexOf(tab);
-        const next = TABS[(idx + 1) % TABS.length] as Tab;
-        setTab(next);
-        return;
-      }
+    if (evt.name === "escape") {
+      onClose();
+      return;
+    }
 
-      // Navigation
-      if (key.upArrow) {
-        const len = currentList();
-        setCursor((prev) => {
-          const next = prev > 0 ? prev - 1 : Math.max(0, len - 1);
-          adjustScroll(next);
-          return next;
-        });
-        return;
-      }
-      if (key.downArrow) {
-        const len = currentList();
-        setCursor((prev) => {
-          const next = prev < len - 1 ? prev + 1 : 0;
-          adjustScroll(next);
-          return next;
-        });
-        return;
-      }
+    if (evt.name === "tab") {
+      const idx = TABS.indexOf(tab);
+      const next = TABS[(idx + 1) % TABS.length] as Tab;
+      setTab(next);
+      return;
+    }
 
-      // Enter action
-      if (key.return) {
-        handleAction();
-        return;
-      }
+    if (evt.name === "up") {
+      const len = currentList();
+      setCursor((prev) => {
+        const next = prev > 0 ? prev - 1 : Math.max(0, len - 1);
+        adjustScroll(next);
+        return next;
+      });
+      return;
+    }
+    if (evt.name === "down") {
+      const len = currentList();
+      setCursor((prev) => {
+        const next = prev < len - 1 ? prev + 1 : 0;
+        adjustScroll(next);
+        return next;
+      });
+      return;
+    }
 
-      // Backspace / delete for filter input
-      if (key.backspace || key.delete) {
-        setQuery((prev) => prev.slice(0, -1));
-        setCursor(0);
-        setScrollOffset(0);
-        return;
-      }
+    if (evt.name === "return") {
+      handleAction();
+      return;
+    }
 
-      // Typing for filter input
-      if (_input && !key.ctrl && !key.meta) {
-        setQuery((prev) => prev + _input);
-        setCursor(0);
-        setScrollOffset(0);
-      }
-    },
-    { isActive: visible },
-  );
+    if (evt.name === "backspace" || evt.name === "delete") {
+      setQuery((prev) => prev.slice(0, -1));
+      setCursor(0);
+      setScrollOffset(0);
+      return;
+    }
+
+    if (evt.name && evt.name.length === 1 && !evt.ctrl && !evt.meta) {
+      setQuery((prev) => prev + evt.name);
+      setCursor(0);
+      setScrollOffset(0);
+    }
+  });
 
   const doInstall = (skill: SkillSearchResult, global: boolean) => {
     setInstalling(true);
@@ -230,11 +228,9 @@ export function SkillSearch({ visible, contextManager, onClose, onSystemMessage 
       const skill = results[cursor];
       if (!skill || installing) return;
       if (isInProject) {
-        // Show scope picker
         setPendingInstall(skill);
         setScopeCursor(0);
       } else {
-        // No project — install globally
         doInstall(skill, true);
       }
     } else if (tab === "installed") {
@@ -258,7 +254,7 @@ export function SkillSearch({ visible, contextManager, onClose, onSystemMessage 
   const tabIdx = TABS.indexOf(tab);
 
   return (
-    <Box
+    <box
       position="absolute"
       flexDirection="column"
       alignItems="center"
@@ -266,149 +262,168 @@ export function SkillSearch({ visible, contextManager, onClose, onSystemMessage 
       width="100%"
       height="100%"
     >
-      <Box flexDirection="column" borderStyle="round" borderColor="#8B5CF6" width={POPUP_WIDTH}>
-        {/* Title */}
+      <box
+        flexDirection="column"
+        borderStyle="rounded"
+        border={true}
+        borderColor="#8B5CF6"
+        width={popupWidth}
+      >
         <PopupRow w={innerW}>
-          <Text color="white" bold backgroundColor={POPUP_BG}>
+          <text fg="white" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
             {"\uDB82\uDD2A"} Skills
-          </Text>
+          </text>
         </PopupRow>
 
-        {/* Tabs */}
         <PopupRow w={innerW}>
           {TABS.map((t, i) => (
-            <Text key={t} backgroundColor={POPUP_BG}>
+            <text key={t} bg={POPUP_BG}>
               {i > 0 ? (
-                <Text color="#333" backgroundColor={POPUP_BG}>
+                <span fg="#333" bg={POPUP_BG}>
                   {" │ "}
-                </Text>
+                </span>
               ) : (
                 ""
               )}
-              <Text
-                color={i === tabIdx ? "#FF0040" : "#666"}
-                bold={i === tabIdx}
-                backgroundColor={POPUP_BG}
+              <span
+                fg={i === tabIdx ? "#FF0040" : "#666"}
+                attributes={i === tabIdx ? TextAttributes.BOLD : undefined}
+                bg={POPUP_BG}
               >
                 {TAB_LABELS[t]}
-              </Text>
-            </Text>
+              </span>
+            </text>
           ))}
         </PopupRow>
 
-        {/* Separator */}
         <PopupRow w={innerW}>
-          <Text color="#333" backgroundColor={POPUP_BG}>
+          <text fg="#333" bg={POPUP_BG}>
             {"─".repeat(innerW - 4)}
-          </Text>
+          </text>
         </PopupRow>
 
-        {/* Filter input — shown on all tabs */}
         <PopupRow w={innerW}>
-          <Text color="#9B30FF" backgroundColor={POPUP_BG}>
+          <text fg="#9B30FF" bg={POPUP_BG}>
             {" "}
-          </Text>
-          <Text color={query ? "white" : "#555"} backgroundColor={POPUP_BG}>
-            {query ||
-              (tab === "search"
-                ? "type to search skills.sh..."
-                : tab === "installed"
-                  ? "type to filter installed..."
-                  : "type to filter active...")}
-          </Text>
-          <Text color="#FF0040" backgroundColor={POPUP_BG}>
-            {"█"}
-          </Text>
+          </text>
+          {query ? (
+            <>
+              <text fg="white" bg={POPUP_BG}>
+                {query}
+              </text>
+              <text fg="#FF0040" bg={POPUP_BG}>
+                {"█"}
+              </text>
+            </>
+          ) : (
+            <>
+              <text fg="#FF0040" bg={POPUP_BG}>
+                {"█"}
+              </text>
+              <text fg="#555" bg={POPUP_BG}>
+                {tab === "search"
+                  ? "type to search skills.sh..."
+                  : tab === "installed"
+                    ? "type to filter installed..."
+                    : "type to filter active..."}
+              </text>
+            </>
+          )}
         </PopupRow>
         <PopupRow w={innerW}>
-          <Text>{""}</Text>
+          <text>{""}</text>
         </PopupRow>
 
-        {/* Tab content */}
         {tab === "search" && (
           <>
-            {searching ? (
+            <box
+              flexDirection="column"
+              height={Math.min(results.length || 1, maxVisible)}
+              overflow="hidden"
+            >
+              {searching ? (
+                <PopupRow w={innerW}>
+                  <text fg="#9B30FF" bg={POPUP_BG}>
+                    searching...
+                  </text>
+                </PopupRow>
+              ) : results.length === 0 && query ? (
+                <PopupRow w={innerW}>
+                  <text fg="#555" bg={POPUP_BG}>
+                    no results
+                  </text>
+                </PopupRow>
+              ) : (
+                results.slice(scrollOffset, scrollOffset + maxVisible).map((skill, i) => {
+                  const idx = scrollOffset + i;
+                  const isActive = idx === cursor;
+                  const bg = isActive ? POPUP_HL : POPUP_BG;
+                  return (
+                    <PopupRow key={skill.id} bg={bg} w={innerW}>
+                      <text bg={bg} fg={isActive ? "#FF0040" : "#555"}>
+                        {isActive ? "› " : "  "}
+                      </text>
+                      <text
+                        bg={bg}
+                        fg={isActive ? "#FF0040" : "#aaa"}
+                        attributes={isActive ? TextAttributes.BOLD : undefined}
+                      >
+                        {skill.skillId}
+                      </text>
+                      <text bg={bg} fg="#555">
+                        {" "}
+                        {skill.source}
+                      </text>
+                      <text bg={bg} fg="#444">
+                        {" "}
+                        {skill.installs.toLocaleString()}↓
+                      </text>
+                    </PopupRow>
+                  );
+                })
+              )}
+            </box>
+            {results.length > maxVisible && (
               <PopupRow w={innerW}>
-                <Text color="#9B30FF" backgroundColor={POPUP_BG}>
-                  searching...
-                </Text>
-              </PopupRow>
-            ) : results.length === 0 && query ? (
-              <PopupRow w={innerW}>
-                <Text color="#555" backgroundColor={POPUP_BG}>
-                  no results
-                </Text>
-              </PopupRow>
-            ) : (
-              results.slice(scrollOffset, scrollOffset + MAX_VISIBLE).map((skill, i) => {
-                const idx = scrollOffset + i;
-                const isActive = idx === cursor;
-                const bg = isActive ? POPUP_HL : POPUP_BG;
-                return (
-                  <PopupRow key={skill.id} bg={bg} w={innerW}>
-                    <Text backgroundColor={bg} color={isActive ? "#FF0040" : "#555"}>
-                      {isActive ? "› " : "  "}
-                    </Text>
-                    <Text
-                      backgroundColor={bg}
-                      color={isActive ? "#FF0040" : "#aaa"}
-                      bold={isActive}
-                    >
-                      {skill.skillId}
-                    </Text>
-                    <Text backgroundColor={bg} color="#555">
-                      {" "}
-                      {skill.source}
-                    </Text>
-                    <Text backgroundColor={bg} color="#444">
-                      {" "}
-                      {skill.installs.toLocaleString()}↓
-                    </Text>
-                  </PopupRow>
-                );
-              })
-            )}
-            {results.length > MAX_VISIBLE && (
-              <PopupRow w={innerW}>
-                <Text color="#555" backgroundColor={POPUP_BG}>
+                <text fg="#555" bg={POPUP_BG}>
                   {scrollOffset > 0 ? "↑ " : "  "}
                   {cursor + 1}/{results.length}
-                  {scrollOffset + MAX_VISIBLE < results.length ? " ↓" : ""}
-                </Text>
+                  {scrollOffset + maxVisible < results.length ? " ↓" : ""}
+                </text>
               </PopupRow>
             )}
 
             {pendingInstall && (
               <>
                 <PopupRow w={innerW}>
-                  <Text>{""}</Text>
+                  <text>{""}</text>
                 </PopupRow>
                 <PopupRow w={innerW}>
-                  <Text color="white" bold backgroundColor={POPUP_BG}>
+                  <text fg="white" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
                     Install "{pendingInstall.skillId}" to:
-                  </Text>
+                  </text>
                 </PopupRow>
                 {(["Project", "Global"] as const).map((label, i) => {
                   const isActive = i === scopeCursor;
                   const bg = isActive ? POPUP_HL : POPUP_BG;
                   return (
                     <PopupRow key={label} bg={bg} w={innerW}>
-                      <Text backgroundColor={bg} color={isActive ? "#FF0040" : "#555"}>
+                      <text bg={bg} fg={isActive ? "#FF0040" : "#555"}>
                         {isActive ? "› " : "  "}
-                      </Text>
-                      <Text
-                        backgroundColor={bg}
-                        color={isActive ? "#FF0040" : "#aaa"}
-                        bold={isActive}
+                      </text>
+                      <text
+                        bg={bg}
+                        fg={isActive ? "#FF0040" : "#aaa"}
+                        attributes={isActive ? TextAttributes.BOLD : undefined}
                       >
                         {label}
-                      </Text>
-                      <Text backgroundColor={bg} color="#555">
+                      </text>
+                      <text bg={bg} fg="#555">
                         {" "}
                         {i === 0
                           ? ".agents/skills/ (this repo)"
                           : "~/.agents/skills/ (all projects)"}
-                      </Text>
+                      </text>
                     </PopupRow>
                   );
                 })}
@@ -417,105 +432,126 @@ export function SkillSearch({ visible, contextManager, onClose, onSystemMessage 
 
             {installing && (
               <PopupRow w={innerW}>
-                <Text color="#9B30FF" backgroundColor={POPUP_BG}>
+                <text fg="#9B30FF" bg={POPUP_BG}>
                   installing...
-                </Text>
+                </text>
               </PopupRow>
             )}
           </>
         )}
 
-        {tab === "installed" &&
-          (filteredInstalled.length === 0 ? (
-            <PopupRow w={innerW}>
-              <Text color="#555" backgroundColor={POPUP_BG}>
-                {query ? "no matching skills" : "no installed skills found"}
-              </Text>
-            </PopupRow>
-          ) : (
-            filteredInstalled.slice(scrollOffset, scrollOffset + MAX_VISIBLE).map((skill, i) => {
-              const idx = scrollOffset + i;
-              const isActive = idx === cursor;
-              const isLoaded = activeSkills.includes(skill.name);
-              const bg = isActive ? POPUP_HL : POPUP_BG;
-              return (
-                <PopupRow key={skill.path} bg={bg} w={innerW}>
-                  <Text backgroundColor={bg} color={isActive ? "#FF0040" : "#555"}>
-                    {isActive ? "› " : "  "}
-                  </Text>
-                  <Text backgroundColor={bg} color={isActive ? "#FF0040" : "#aaa"} bold={isActive}>
-                    {skill.name}
-                  </Text>
-                  {isLoaded && (
-                    <Text backgroundColor={bg} color="#00FF00">
-                      {" "}
-                      ●
-                    </Text>
-                  )}
+        {tab === "installed" && (
+          <>
+            <box
+              flexDirection="column"
+              height={Math.min(filteredInstalled.length || 1, maxVisible)}
+              overflow="hidden"
+            >
+              {filteredInstalled.length === 0 ? (
+                <PopupRow w={innerW}>
+                  <text fg="#555" bg={POPUP_BG}>
+                    {query ? "no matching skills" : "no installed skills found"}
+                  </text>
                 </PopupRow>
-              );
-            })
-          ))}
-        {tab === "installed" && filteredInstalled.length > MAX_VISIBLE && (
-          <PopupRow w={innerW}>
-            <Text color="#555" backgroundColor={POPUP_BG}>
-              {scrollOffset > 0 ? "↑ " : "  "}
-              {cursor + 1}/{filteredInstalled.length}
-              {scrollOffset + MAX_VISIBLE < filteredInstalled.length ? " ↓" : ""}
-            </Text>
-          </PopupRow>
+              ) : (
+                filteredInstalled.slice(scrollOffset, scrollOffset + maxVisible).map((skill, i) => {
+                  const idx = scrollOffset + i;
+                  const isActive = idx === cursor;
+                  const isLoaded = activeSkills.includes(skill.name);
+                  const bg = isActive ? POPUP_HL : POPUP_BG;
+                  return (
+                    <PopupRow key={skill.path} bg={bg} w={innerW}>
+                      <text bg={bg} fg={isActive ? "#FF0040" : "#555"}>
+                        {isActive ? "› " : "  "}
+                      </text>
+                      <text
+                        bg={bg}
+                        fg={isActive ? "#FF0040" : "#aaa"}
+                        attributes={isActive ? TextAttributes.BOLD : undefined}
+                      >
+                        {skill.name}
+                      </text>
+                      {isLoaded && (
+                        <text bg={bg} fg="#00FF00">
+                          {" "}
+                          ●
+                        </text>
+                      )}
+                    </PopupRow>
+                  );
+                })
+              )}
+            </box>
+            {filteredInstalled.length > maxVisible && (
+              <PopupRow w={innerW}>
+                <text fg="#555" bg={POPUP_BG}>
+                  {scrollOffset > 0 ? "↑ " : "  "}
+                  {cursor + 1}/{filteredInstalled.length}
+                  {scrollOffset + maxVisible < filteredInstalled.length ? " ↓" : ""}
+                </text>
+              </PopupRow>
+            )}
+          </>
         )}
 
-        {tab === "active" &&
-          (filteredActive.length === 0 ? (
-            <PopupRow w={innerW}>
-              <Text color="#555" backgroundColor={POPUP_BG}>
-                {query ? "no matching skills" : "no active skills — load from Installed tab"}
-              </Text>
-            </PopupRow>
-          ) : (
-            filteredActive.slice(scrollOffset, scrollOffset + MAX_VISIBLE).map((name, i) => {
-              const idx = scrollOffset + i;
-              const isActive = idx === cursor;
-              const bg = isActive ? POPUP_HL : POPUP_BG;
-              return (
-                <PopupRow key={name} bg={bg} w={innerW}>
-                  <Text backgroundColor={bg} color={isActive ? "#FF0040" : "#555"}>
-                    {isActive ? "› " : "  "}
-                  </Text>
-                  <Text
-                    backgroundColor={bg}
-                    color={isActive ? "#FF0040" : "#00FF00"}
-                    bold={isActive}
-                  >
-                    {name}
-                  </Text>
+        {tab === "active" && (
+          <>
+            <box
+              flexDirection="column"
+              height={Math.min(filteredActive.length || 1, maxVisible)}
+              overflow="hidden"
+            >
+              {filteredActive.length === 0 ? (
+                <PopupRow w={innerW}>
+                  <text fg="#555" bg={POPUP_BG}>
+                    {query ? "no matching skills" : "no active skills — load from Installed tab"}
+                  </text>
                 </PopupRow>
-              );
-            })
-          ))}
-        {tab === "active" && filteredActive.length > MAX_VISIBLE && (
-          <PopupRow w={innerW}>
-            <Text color="#555" backgroundColor={POPUP_BG}>
-              {scrollOffset > 0 ? "↑ " : "  "}
-              {cursor + 1}/{filteredActive.length}
-              {scrollOffset + MAX_VISIBLE < filteredActive.length ? " ↓" : ""}
-            </Text>
-          </PopupRow>
+              ) : (
+                filteredActive.slice(scrollOffset, scrollOffset + maxVisible).map((name, i) => {
+                  const idx = scrollOffset + i;
+                  const isActive = idx === cursor;
+                  const bg = isActive ? POPUP_HL : POPUP_BG;
+                  return (
+                    <PopupRow key={name} bg={bg} w={innerW}>
+                      <text bg={bg} fg={isActive ? "#FF0040" : "#555"}>
+                        {isActive ? "› " : "  "}
+                      </text>
+                      <text
+                        bg={bg}
+                        fg={isActive ? "#FF0040" : "#00FF00"}
+                        attributes={isActive ? TextAttributes.BOLD : undefined}
+                      >
+                        {name}
+                      </text>
+                    </PopupRow>
+                  );
+                })
+              )}
+            </box>
+            {filteredActive.length > maxVisible && (
+              <PopupRow w={innerW}>
+                <text fg="#555" bg={POPUP_BG}>
+                  {scrollOffset > 0 ? "↑ " : "  "}
+                  {cursor + 1}/{filteredActive.length}
+                  {scrollOffset + maxVisible < filteredActive.length ? " ↓" : ""}
+                </text>
+              </PopupRow>
+            )}
+          </>
         )}
 
-        {/* Spacer */}
         <PopupRow w={innerW}>
-          <Text>{""}</Text>
+          <text>{""}</text>
         </PopupRow>
-        {/* Hints */}
         <PopupRow w={innerW}>
-          <Text color="#555" backgroundColor={POPUP_BG}>
-            ↑↓ nav ⏎ {tab === "search" ? "install" : tab === "installed" ? "load" : "unload"} ⇥ tab
+          <text fg="#555" bg={POPUP_BG}>
+            {"↑↓"} nav | {"⏎"}{" "}
+            {tab === "search" ? "install" : tab === "installed" ? "load" : "unload"} | {"⇥"} tab |
             esc close
-          </Text>
+          </text>
         </PopupRow>
-      </Box>
-    </Box>
+      </box>
+    </box>
   );
-}
+});

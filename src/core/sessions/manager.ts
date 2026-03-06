@@ -1,14 +1,26 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import type { ChatMessage, Session } from "../../types/index.js";
+import { logBackgroundError } from "../../stores/errors.js";
+import type { ChatMessage } from "../../types/index.js";
+import { rebuildCoreMessages } from "./rebuild.js";
+import type { SessionMeta, TabMeta } from "./types.js";
 
-/** Lightweight metadata returned by listSessions (no heavy message arrays). */
-export interface SessionMeta {
+export interface SessionListEntry {
   id: string;
   title: string;
   messageCount: number;
   startedAt: number;
   updatedAt: number;
+  sizeBytes: number;
 }
 
 export class SessionManager {
@@ -24,77 +36,205 @@ export class SessionManager {
     }
   }
 
-  /** List all sessions, newest first. Only reads metadata, not full messages. */
-  listSessions(): SessionMeta[] {
-    if (!existsSync(this.dir)) return [];
+  private async dirSize(dirPath: string): Promise<number> {
+    let total = 0;
+    const entries = await readdir(dirPath);
+    for (const f of entries) {
+      const fp = join(dirPath, f);
+      const s = await stat(fp);
+      total += s.isDirectory() ? await this.dirSize(fp) : s.size;
+    }
+    return total;
+  }
+
+  saveSession(meta: SessionMeta, tabMessages: Map<string, ChatMessage[]>): void {
+    this.ensureDir();
+    const sessionDir = join(this.dir, meta.id);
+    if (!existsSync(sessionDir)) {
+      mkdirSync(sessionDir, { recursive: true });
+    }
+
+    const allMessages: ChatMessage[] = [];
+    const updatedTabs: TabMeta[] = [];
+
+    for (const tab of meta.tabs) {
+      const msgs = tabMessages.get(tab.id) ?? [];
+      const startLine = allMessages.length;
+      for (const msg of msgs) {
+        allMessages.push(msg);
+      }
+      const endLine = allMessages.length;
+      updatedTabs.push({ ...tab, messageRange: { startLine, endLine } });
+    }
+
+    const updatedMeta: SessionMeta = { ...meta, tabs: updatedTabs };
+    const metaPath = join(sessionDir, "meta.json");
+    writeFileSync(metaPath, JSON.stringify(updatedMeta, null, 2), "utf-8");
+
+    const jsonlPath = join(sessionDir, "messages.jsonl");
+    const lines = allMessages.map((m) => JSON.stringify(m)).join("\n");
+    writeFileSync(jsonlPath, lines ? `${lines}\n` : "", "utf-8");
+  }
+
+  loadSession(id: string): { meta: SessionMeta; tabMessages: Map<string, ChatMessage[]> } | null {
+    const sessionDir = join(this.dir, id);
+    const metaPath = join(sessionDir, "meta.json");
+    if (!existsSync(metaPath)) return null;
+
     try {
-      const files = readdirSync(this.dir).filter((f) => f.endsWith(".json"));
-      const metas: SessionMeta[] = [];
-      for (const file of files) {
-        try {
-          const raw = readFileSync(join(this.dir, file), "utf-8");
-          const session = JSON.parse(raw) as Session;
-          metas.push({
-            id: session.id,
-            title: session.title,
-            messageCount: session.messages.length,
-            startedAt: session.startedAt,
-            updatedAt: session.updatedAt,
-          });
-        } catch {
-          // Skip corrupted files
+      const meta = JSON.parse(readFileSync(metaPath, "utf-8")) as SessionMeta;
+      const jsonlPath = join(sessionDir, "messages.jsonl");
+      const allMessages: ChatMessage[] = [];
+
+      if (existsSync(jsonlPath)) {
+        const content = readFileSync(jsonlPath, "utf-8").trim();
+        if (content) {
+          for (const line of content.split("\n")) {
+            if (line.trim()) {
+              allMessages.push(JSON.parse(line) as ChatMessage);
+            }
+          }
         }
       }
+
+      const tabMessages = new Map<string, ChatMessage[]>();
+      for (const tab of meta.tabs) {
+        const { startLine, endLine } = tab.messageRange;
+        tabMessages.set(tab.id, allMessages.slice(startLine, endLine));
+      }
+
+      return { meta, tabMessages };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logBackgroundError("session-load", `Failed to load session ${id}: ${msg}`);
+      return null;
+    }
+  }
+
+  loadSessionMessages(
+    id: string,
+  ): { messages: ChatMessage[]; coreMessages: import("ai").ModelMessage[] } | null {
+    const data = this.loadSession(id);
+    if (!data) return null;
+    const firstTab = data.meta.tabs[0];
+    if (!firstTab) return null;
+    const msgs = data.tabMessages.get(firstTab.id) ?? [];
+    return { messages: msgs, coreMessages: rebuildCoreMessages(msgs) };
+  }
+
+  saveSessionMemory(sessionId: string, data: unknown): void {
+    const sessionDir = join(this.dir, sessionId);
+    if (!existsSync(sessionDir)) return;
+    writeFileSync(join(sessionDir, "memory.json"), JSON.stringify(data), "utf-8");
+  }
+
+  loadSessionMemory(sessionId: string): unknown | null {
+    const memPath = join(this.dir, sessionId, "memory.json");
+    if (!existsSync(memPath)) return null;
+    try {
+      return JSON.parse(readFileSync(memPath, "utf-8"));
+    } catch {
+      return null;
+    }
+  }
+
+  findByPrefix(prefix: string): string | null {
+    if (!existsSync(this.dir)) return null;
+    const normalizedPrefix = prefix.toLowerCase();
+
+    const entries = readdirSync(this.dir);
+    for (const entry of entries) {
+      if (entry.toLowerCase().startsWith(normalizedPrefix)) {
+        const metaPath = join(this.dir, entry, "meta.json");
+        if (existsSync(metaPath)) return entry;
+      }
+    }
+    return null;
+  }
+
+  async listSessions(): Promise<SessionListEntry[]> {
+    if (!existsSync(this.dir)) return [];
+    try {
+      const entries = readdirSync(this.dir);
+      const metas: SessionListEntry[] = [];
+
+      for (const entry of entries) {
+        try {
+          const fullPath = join(this.dir, entry);
+          const s = statSync(fullPath);
+          if (!s.isDirectory()) continue;
+
+          const metaPath = join(fullPath, "meta.json");
+          if (!existsSync(metaPath)) continue;
+
+          const raw = readFileSync(metaPath, "utf-8");
+          const meta = JSON.parse(raw) as SessionMeta;
+          const totalMessages = meta.tabs.reduce(
+            (sum, t) => sum + (t.messageRange.endLine - t.messageRange.startLine),
+            0,
+          );
+          metas.push({
+            id: meta.id,
+            title: meta.title,
+            messageCount: totalMessages,
+            startedAt: meta.startedAt,
+            updatedAt: meta.updatedAt,
+            sizeBytes: await this.dirSize(fullPath),
+          });
+        } catch {
+          // Skip corrupted entries
+        }
+      }
+
       return metas.sort((a, b) => b.updatedAt - a.updatedAt);
     } catch {
       return [];
     }
   }
 
-  /** Load a full session by id. Backfills missing message IDs for old sessions. */
-  loadSession(id: string): Session | null {
-    const path = join(this.dir, `${id}.json`);
-    if (!existsSync(path)) return null;
-    try {
-      const session = JSON.parse(readFileSync(path, "utf-8")) as Session;
-      // Backfill missing IDs for sessions saved before the id field was added
-      for (const msg of session.messages) {
-        if (!msg.id) {
-          msg.id = crypto.randomUUID();
-        }
-      }
-      return session;
-    } catch {
-      return null;
-    }
-  }
-
-  /** Save or update a session. */
-  saveSession(session: Session): void {
-    this.ensureDir();
-    const path = join(this.dir, `${session.id}.json`);
-    writeFileSync(path, JSON.stringify(session), "utf-8");
-  }
-
-  /** Delete a single session. */
   deleteSession(id: string): boolean {
-    const path = join(this.dir, `${id}.json`);
-    if (!existsSync(path)) return false;
-    rmSync(path);
+    const dir = join(this.dir, id);
+    if (!existsSync(dir)) return false;
+    rmSync(dir, { recursive: true });
     return true;
   }
 
-  /** Delete all sessions. Returns count deleted. */
   clearAllSessions(): number {
     if (!existsSync(this.dir)) return 0;
-    const files = readdirSync(this.dir).filter((f) => f.endsWith(".json"));
-    for (const file of files) {
-      rmSync(join(this.dir, file));
+    const entries = readdirSync(this.dir);
+    let count = 0;
+    for (const entry of entries) {
+      try {
+        const fullPath = join(this.dir, entry);
+        rmSync(fullPath, { recursive: true });
+        count++;
+      } catch {
+        // skip
+      }
     }
-    return files.length;
+    return count;
   }
 
-  /** Derive a short title from the first user message. */
+  async totalSizeBytes(): Promise<number> {
+    if (!existsSync(this.dir)) return 0;
+    return this.dirSize(this.dir);
+  }
+
+  sessionCount(): number {
+    if (!existsSync(this.dir)) return 0;
+    try {
+      return readdirSync(this.dir).filter((e) => {
+        try {
+          return statSync(join(this.dir, e)).isDirectory();
+        } catch {
+          return false;
+        }
+      }).length;
+    } catch {
+      return 0;
+    }
+  }
+
   static deriveTitle(messages: ChatMessage[]): string {
     const first = messages.find((m) => m.role === "user");
     if (!first) return "Empty session";

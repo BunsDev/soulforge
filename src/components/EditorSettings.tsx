@@ -1,10 +1,12 @@
-import { Box, Text, useInput } from "ink";
+import { TextAttributes } from "@opentui/core";
+import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useState } from "react";
 import type { EditorIntegration } from "../types/index.js";
-import { POPUP_BG, POPUP_HL, PopupRow } from "./shared.js";
+import type { ConfigScope } from "./shared.js";
+import { CONFIG_SCOPES, POPUP_BG, POPUP_HL, PopupRow } from "./shared.js";
 
-const POPUP_WIDTH = 60;
-const innerW = POPUP_WIDTH - 2;
+const MAX_POPUP_WIDTH = 60;
+const CHROME_ROWS = 8;
 
 interface ToggleItem {
   key: keyof EditorIntegration;
@@ -54,50 +56,83 @@ const ALL_OFF: EditorIntegration = {
 interface Props {
   visible: boolean;
   settings: EditorIntegration | undefined;
-  onUpdate: (settings: EditorIntegration) => void;
+  onUpdate: (settings: EditorIntegration, toScope: ConfigScope, fromScope?: ConfigScope) => void;
   onClose: () => void;
 }
 
 export function EditorSettings({ visible, settings, onUpdate, onClose }: Props) {
+  const { width: termCols, height: termRows } = useTerminalDimensions();
+  const containerRows = termRows - 2;
+  const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.7));
+  const innerW = popupWidth - 2;
+  const maxVisible = Math.max(4, Math.floor(containerRows * 0.7) - CHROME_ROWS);
   const [cursor, setCursor] = useState(0);
+  const [scrollOffset, setScrollOffset] = useState(0);
+  const [scope, setScope] = useState<ConfigScope>("session");
   const current = settings ?? ALL_ON;
 
-  useInput(
-    (input, key) => {
-      if (key.escape) {
-        onClose();
-        return;
+  const adjustScroll = (next: number) => {
+    setScrollOffset((prev) => {
+      if (next < prev) return next;
+      if (next >= prev + maxVisible) return next - maxVisible + 1;
+      return prev;
+    });
+  };
+
+  useKeyboard((evt) => {
+    if (!visible) return;
+    if (evt.name === "escape") {
+      onClose();
+      return;
+    }
+    if (evt.name === "up") {
+      setCursor((c) => {
+        const next = c > 0 ? c - 1 : ITEMS.length - 1;
+        adjustScroll(next);
+        return next;
+      });
+      return;
+    }
+    if (evt.name === "down") {
+      setCursor((c) => {
+        const next = c < ITEMS.length - 1 ? c + 1 : 0;
+        adjustScroll(next);
+        return next;
+      });
+      return;
+    }
+    if (evt.name === "return" || evt.name === " ") {
+      const item = ITEMS[cursor];
+      if (item) {
+        onUpdate({ ...current, [item.key]: !current[item.key] }, scope);
       }
-      if (key.upArrow) {
-        setCursor((c) => (c > 0 ? c - 1 : ITEMS.length - 1));
-        return;
-      }
-      if (key.downArrow) {
-        setCursor((c) => (c < ITEMS.length - 1 ? c + 1 : 0));
-        return;
-      }
-      if (key.return || input === " ") {
-        const item = ITEMS[cursor];
-        if (item) {
-          onUpdate({ ...current, [item.key]: !current[item.key] });
-        }
-        return;
-      }
-      if (input === "a") {
-        onUpdate({ ...ALL_ON });
-        return;
-      }
-      if (input === "n") {
-        onUpdate({ ...ALL_OFF });
-      }
-    },
-    { isActive: visible },
-  );
+      return;
+    }
+    if (evt.name === "a") {
+      onUpdate({ ...ALL_ON }, scope);
+      return;
+    }
+    if (evt.name === "n") {
+      onUpdate({ ...ALL_OFF }, scope);
+      return;
+    }
+    if (evt.name === "left" || evt.name === "right") {
+      setScope((prev) => {
+        const idx = CONFIG_SCOPES.indexOf(prev);
+        const next =
+          evt.name === "left"
+            ? CONFIG_SCOPES[(idx - 1 + CONFIG_SCOPES.length) % CONFIG_SCOPES.length]
+            : CONFIG_SCOPES[(idx + 1) % CONFIG_SCOPES.length];
+        return next ?? prev;
+      });
+      return;
+    }
+  });
 
   if (!visible) return null;
 
   return (
-    <Box
+    <box
       position="absolute"
       flexDirection="column"
       alignItems="center"
@@ -105,59 +140,91 @@ export function EditorSettings({ visible, settings, onUpdate, onClose }: Props) 
       width="100%"
       height="100%"
     >
-      <Box flexDirection="column" borderStyle="round" borderColor="#8B5CF6" width={POPUP_WIDTH}>
-        {/* Title */}
+      <box
+        flexDirection="column"
+        borderStyle="rounded"
+        border={true}
+        borderColor="#8B5CF6"
+        width={popupWidth}
+      >
         <PopupRow w={innerW}>
-          <Text backgroundColor={POPUP_BG} color="#9B30FF" bold></Text>
-          <Text backgroundColor={POPUP_BG} color="white" bold>
+          <text bg={POPUP_BG} fg="#9B30FF" attributes={TextAttributes.BOLD}></text>
+          <text bg={POPUP_BG} fg="white" attributes={TextAttributes.BOLD}>
             {" "}
             Editor Integrations
-          </Text>
+          </text>
         </PopupRow>
 
-        {/* Separator */}
         <PopupRow w={innerW}>
-          <Text backgroundColor={POPUP_BG} color="#333">
+          <text bg={POPUP_BG} fg="#333">
             {"─".repeat(innerW - 2)}
-          </Text>
+          </text>
         </PopupRow>
 
-        {/* Toggle items */}
-        {ITEMS.map((item, i) => {
-          const isSelected = i === cursor;
-          const isEnabled = current[item.key];
-          const bg = isSelected ? POPUP_HL : POPUP_BG;
-          return (
-            <PopupRow key={item.key} bg={bg} w={innerW}>
-              <Text backgroundColor={bg} color={isSelected ? "#FF0040" : "#555"}>
-                {isSelected ? "› " : "  "}
-              </Text>
-              <Text backgroundColor={bg} color={isEnabled ? "#2d5" : "#555"}>
-                [{isEnabled ? "x" : " "}]
-              </Text>
-              <Text backgroundColor={bg} color={isEnabled ? "white" : "#666"}>
-                {" "}
-                {item.label.padEnd(20)}
-              </Text>
-              <Text backgroundColor={bg} color="#555">
-                {item.desc}
-              </Text>
-            </PopupRow>
-          );
-        })}
+        <box flexDirection="column" height={Math.min(ITEMS.length, maxVisible)} overflow="hidden">
+          {ITEMS.slice(scrollOffset, scrollOffset + maxVisible).map((item, vi) => {
+            const i = vi + scrollOffset;
+            const isSelected = i === cursor;
+            const isEnabled = current[item.key];
+            const bg = isSelected ? POPUP_HL : POPUP_BG;
+            return (
+              <PopupRow key={item.key} bg={bg} w={innerW}>
+                <text bg={bg} fg={isSelected ? "#FF0040" : "#555"}>
+                  {isSelected ? "› " : "  "}
+                </text>
+                <text bg={bg} fg={isEnabled ? "#2d5" : "#555"}>
+                  [{isEnabled ? "x" : " "}]
+                </text>
+                <text bg={bg} fg={isEnabled ? "white" : "#666"}>
+                  {" "}
+                  {item.label.padEnd(20)}
+                </text>
+                <text bg={bg} fg="#555" truncate>
+                  {item.desc}
+                </text>
+              </PopupRow>
+            );
+          })}
+        </box>
+        {ITEMS.length > maxVisible && (
+          <PopupRow w={innerW}>
+            <text fg="#555" bg={POPUP_BG}>
+              {scrollOffset > 0 ? "↑ " : "  "}
+              {cursor + 1}/{ITEMS.length}
+              {scrollOffset + maxVisible < ITEMS.length ? " ↓" : ""}
+            </text>
+          </PopupRow>
+        )}
 
-        {/* Spacer */}
         <PopupRow w={innerW}>
-          <Text backgroundColor={POPUP_BG}>{""}</Text>
+          <text bg={POPUP_BG} fg="#333">
+            {"─".repeat(innerW - 2)}
+          </text>
         </PopupRow>
 
-        {/* Hints */}
         <PopupRow w={innerW}>
-          <Text backgroundColor={POPUP_BG} color="#555">
-            {"↑↓"} navigate {"⏎"}/space toggle {"a"} all on {"n"} all off esc close
-          </Text>
+          <text bg={POPUP_BG} fg="#555">
+            {"Scope: "}
+          </text>
+          {CONFIG_SCOPES.map((s) => (
+            <text
+              key={s}
+              bg={POPUP_BG}
+              fg={s === scope ? "#8B5CF6" : "#444"}
+              attributes={s === scope ? TextAttributes.BOLD : undefined}
+            >
+              {s === scope ? `[${s}]` : ` ${s} `}
+              {"  "}
+            </text>
+          ))}
         </PopupRow>
-      </Box>
-    </Box>
+
+        <PopupRow w={innerW}>
+          <text bg={POPUP_BG} fg="#555">
+            {"↑↓"} navigate | {"⏎"} toggle | a all on | n all off | {"← →"} scope | esc close
+          </text>
+        </PopupRow>
+      </box>
+    </box>
   );
 }

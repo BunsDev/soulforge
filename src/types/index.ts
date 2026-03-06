@@ -1,5 +1,3 @@
-import type { ModelMessage } from "ai";
-
 // ─── LLM Types ───
 
 export interface RouterRule {
@@ -15,6 +13,8 @@ export interface TaskRouter {
   planning: string | null;
   coding: string | null;
   exploration: string | null;
+  webSearch: string | null;
+  semantic: string | null;
   default: string | null;
 }
 
@@ -24,6 +24,8 @@ export interface ToolResult {
   success: boolean;
   output: string;
   error?: string;
+  /** Which intelligence backend handled this (ts-morph, lsp, tree-sitter, regex) */
+  backend?: string;
 }
 
 export interface ToolDefinition {
@@ -78,12 +80,20 @@ export interface PendingQuestion {
   resolve: (answer: string) => void;
 }
 
+export type PlanReviewAction = "execute" | "clear_execute" | "cancel" | string;
+
+export interface PendingPlanReview {
+  plan: Plan;
+  planFile: string;
+  resolve: (action: PlanReviewAction) => void;
+}
+
 export interface InteractiveCallbacks {
   onPlanCreate: (plan: Plan) => void;
   onPlanStepUpdate: (stepId: string, status: PlanStepStatus) => void;
+  onPlanReview: (plan: Plan, planFile: string) => Promise<PlanReviewAction>;
   onAskUser: (question: string, options: QuestionOption[], allowSkip: boolean) => Promise<string>;
   onOpenEditor: (file?: string) => Promise<void>;
-  /** Called before every web_search execution. Resolves true = proceed, false = deny. */
   onWebSearchApproval: (query: string) => Promise<boolean>;
 }
 
@@ -115,18 +125,6 @@ export interface ToolCall {
   name: string;
   args: Record<string, unknown>;
   result?: ToolResult;
-}
-
-export interface Session {
-  id: string;
-  title: string;
-  messages: ChatMessage[];
-  coreMessages: ModelMessage[];
-  cwd: string;
-  startedAt: number;
-  updatedAt: number;
-  /** Per-session config overrides (highest priority). */
-  configOverrides?: Partial<AppConfig>;
 }
 
 // ─── Config Types ───
@@ -189,6 +187,26 @@ export interface AppConfig {
   codeExecution?: boolean;
   /** Enable web search tool for all LLMs. Always prompts for approval before searching. Default: true */
   webSearch?: boolean;
+  /** Show vim keybinding hints in the editor panel. Default: true */
+  vimHints?: boolean;
+  /** Show verbose tool output (plan updates, etc.) in chat. Default: false */
+  verbose?: boolean;
+  /** Diff display style: "default" | "sidebyside" | "compact". Default: "default" */
+  diffStyle?: "default" | "sidebyside" | "compact";
+  /** Whether the terminal uses a Nerd Font. null = auto-detect from installed fonts. */
+  nerdFont?: boolean | null;
+  /** Chat layout style. Default: "accent" */
+  chatStyle?: ChatStyle;
+  /** Show reasoning/thinking content in chat. Default: true */
+  showReasoning?: boolean;
+  /** Add co-author trailer on AI-assisted commits. Default: true */
+  coAuthorCommits?: boolean;
+  /** Default forge mode for new sessions. Default: "default" */
+  defaultForgeMode?: ForgeMode;
+  /** Enable AST-based repo map in system prompt instead of file tree. Default: true */
+  repoMap?: boolean;
+  /** Enable AI-generated one-line descriptions for top symbols. Default: false */
+  semanticSummaries?: boolean;
 }
 
 // ─── Focus Types ───

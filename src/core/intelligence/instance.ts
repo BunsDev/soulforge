@@ -19,13 +19,13 @@ export function getIntelligenceRouter(
 
   router = new CodeIntelligenceRouter(cwd, config);
 
-  // Tier 1: ts-morph for TypeScript/JavaScript
-  const tsMorph = new TsMorphBackend();
-  router.registerBackend(tsMorph);
-
-  // Tier 2: LSP for semantic intelligence (any language with an LSP server)
+  // Tier 1: LSP for semantic intelligence (rename, diagnostics, references, etc.)
   const lsp = new LspBackend();
   router.registerBackend(lsp);
+
+  // Tier 2: ts-morph for TypeScript/JavaScript (fallback when LSP unavailable)
+  const tsMorph = new TsMorphBackend();
+  router.registerBackend(tsMorph);
 
   // Tier 3: tree-sitter for universal AST parsing
   const treeSitter = new TreeSitterBackend();
@@ -37,6 +37,34 @@ export function getIntelligenceRouter(
   router.registerBackend(regex);
 
   return router;
+}
+
+/**
+ * Eagerly warm up the intelligence system.
+ * Initializes all backends for the detected project language and
+ * spawns LSP servers so they're ready before the first tool call.
+ * Call this once at app startup — runs in the background.
+ */
+export function warmupIntelligence(cwd: string, config: CodeIntelligenceConfig = {}): void {
+  const r = getIntelligenceRouter(cwd, config);
+  r.warmup().catch(() => {
+    // Non-fatal — tools will lazy-init if warmup fails
+  });
+}
+
+/** Get the status of the intelligence system (null if not yet initialized) */
+export function getIntelligenceStatus(): {
+  initialized: string[];
+  lspServers: Array<{ language: string; command: string }>;
+} | null {
+  if (!router) return null;
+  return router.getStatus();
+}
+
+/** Get PIDs of all child processes managed by the intelligence system */
+export function getIntelligenceChildPids(): number[] {
+  if (!router) return [];
+  return router.getChildPids();
 }
 
 /** Dispose the singleton router and all backends */

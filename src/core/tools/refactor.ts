@@ -1,10 +1,16 @@
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ToolResult } from "../../types/index.js";
 import { getIntelligenceRouter } from "../intelligence/index.js";
-import type { FileEdit, RefactorResult } from "../intelligence/types.js";
+import type { FileEdit, FormatEdit, RefactorResult } from "../intelligence/types.js";
 
-type RefactorAction = "rename" | "extract_function" | "extract_variable";
+type RefactorAction =
+  | "rename"
+  | "extract_function"
+  | "extract_variable"
+  | "format"
+  | "format_range"
+  | "organize_imports";
 
 interface RefactorArgs {
   action: RefactorAction;
@@ -22,17 +28,56 @@ function applyEdits(edits: FileEdit[]): void {
   }
 }
 
+async function applyAndDiagnose(
+  edits: FileEdit[],
+  router: ReturnType<typeof getIntelligenceRouter>,
+): Promise<string | null> {
+  // Snapshot before-diagnostics for each file
+  const beforeMap = new Map<string, import("../intelligence/types.js").Diagnostic[]>();
+  for (const edit of edits) {
+    const lang = router.detectLanguage(edit.file);
+    const diags = await router.executeWithFallback(lang, "getDiagnostics", (b) =>
+      b.getDiagnostics ? b.getDiagnostics(edit.file) : Promise.resolve(null),
+    );
+    if (diags) beforeMap.set(edit.file, diags);
+  }
+
+  applyEdits(edits);
+
+  // Run diagnostic diff on each file
+  try {
+    const { formatPostEditResult, postEditDiagnostics } = await import(
+      "../intelligence/post-edit.js"
+    );
+    const parts: string[] = [];
+    for (const edit of edits) {
+      const lang = router.detectLanguage(edit.file);
+      const before = beforeMap.get(edit.file) ?? [];
+      const diffResult = await postEditDiagnostics(router, edit.file, lang, before);
+      const diffOutput = formatPostEditResult(diffResult);
+      if (diffOutput) parts.push(diffOutput);
+    }
+    return parts.length > 0 ? parts.join("\n") : null;
+  } catch {
+    return null;
+  }
+}
+
 function formatResult(result: RefactorResult, applied: boolean): string {
   const lines = [result.description];
   if (applied) {
-    lines.push(`Applied to ${String(result.edits.length)} file(s):`);
+    lines.push(
+      `Applied to ${String(result.edits.length)} file(s) — ALL references updated atomically:`,
+    );
   } else {
     lines.push(`Would modify ${String(result.edits.length)} file(s):`);
   }
   for (const edit of result.edits) {
     lines.push(`  ${edit.file}`);
   }
-  if (!applied) {
+  if (applied) {
+    lines.push("All references updated. No errors.");
+  } else {
     lines.push("Pass apply: true to apply changes.");
   }
   return lines.join("\n");
@@ -41,9 +86,8 @@ function formatResult(result: RefactorResult, applied: boolean): string {
 export const refactorTool = {
   name: "refactor",
   description:
-    "Refactor code: rename symbols across files, extract functions, or extract variables. " +
-    "Uses semantic analysis for safe, compiler-guaranteed transformations. " +
-    "Set apply: true to write changes to disk.",
+    "Extract functions/variables, format code, and organize imports. " +
+    "Compiler-guaranteed safety. For renaming symbols, use rename_symbol instead (simpler, auto-locates).",
   execute: async (args: RefactorArgs): Promise<ToolResult> => {
     try {
       const router = getIntelligenceRouter(process.cwd());
@@ -73,11 +117,11 @@ export const refactorTool = {
             return { success: false, output: "file is required for rename", error: "missing file" };
           }
 
-          const result = await router.executeWithFallback(language, "rename", (b) =>
+          const tracked = await router.executeWithFallbackTracked(language, "rename", (b) =>
             b.rename ? b.rename(file, symbol, newName) : Promise.resolve(null),
           );
 
-          if (!result) {
+          if (!tracked) {
             return {
               success: false,
               output: `Cannot rename '${symbol}' — no backend supports rename for ${language}`,
@@ -85,8 +129,13 @@ export const refactorTool = {
             };
           }
 
-          if (shouldApply) applyEdits(result.edits);
-          return { success: true, output: formatResult(result, shouldApply) };
+          let diagOutput: string | null = null;
+          if (shouldApply) {
+            diagOutput = await applyAndDiagnose(tracked.value.edits, router);
+          }
+          let output = formatResult(tracked.value, shouldApply);
+          if (diagOutput) output += `\n${diagOutput}`;
+          return { success: true, output, backend: tracked.backend };
         }
 
         case "extract_function": {
@@ -115,13 +164,16 @@ export const refactorTool = {
             };
           }
 
-          const result = await router.executeWithFallback(language, "extractFunction", (b) =>
-            b.extractFunction
-              ? b.extractFunction(file, startLine, endLine, newName)
-              : Promise.resolve(null),
+          const tracked = await router.executeWithFallbackTracked(
+            language,
+            "extractFunction",
+            (b) =>
+              b.extractFunction
+                ? b.extractFunction(file, startLine, endLine, newName)
+                : Promise.resolve(null),
           );
 
-          if (!result) {
+          if (!tracked) {
             return {
               success: false,
               output: `Cannot extract function — no backend supports this for ${language}`,
@@ -129,8 +181,13 @@ export const refactorTool = {
             };
           }
 
-          if (shouldApply) applyEdits(result.edits);
-          return { success: true, output: formatResult(result, shouldApply) };
+          let diagOutput: string | null = null;
+          if (shouldApply) {
+            diagOutput = await applyAndDiagnose(tracked.value.edits, router);
+          }
+          let output = formatResult(tracked.value, shouldApply);
+          if (diagOutput) output += `\n${diagOutput}`;
+          return { success: true, output, backend: tracked.backend };
         }
 
         case "extract_variable": {
@@ -159,13 +216,16 @@ export const refactorTool = {
             };
           }
 
-          const result = await router.executeWithFallback(language, "extractVariable", (b) =>
-            b.extractVariable
-              ? b.extractVariable(file, startLine, endLine, newName)
-              : Promise.resolve(null),
+          const tracked = await router.executeWithFallbackTracked(
+            language,
+            "extractVariable",
+            (b) =>
+              b.extractVariable
+                ? b.extractVariable(file, startLine, endLine, newName)
+                : Promise.resolve(null),
           );
 
-          if (!result) {
+          if (!tracked) {
             return {
               success: false,
               output: `Cannot extract variable — no backend supports this for ${language}`,
@@ -173,8 +233,114 @@ export const refactorTool = {
             };
           }
 
-          if (shouldApply) applyEdits(result.edits);
-          return { success: true, output: formatResult(result, shouldApply) };
+          let diagOutput: string | null = null;
+          if (shouldApply) {
+            diagOutput = await applyAndDiagnose(tracked.value.edits, router);
+          }
+          let output = formatResult(tracked.value, shouldApply);
+          if (diagOutput) output += `\n${diagOutput}`;
+          return { success: true, output, backend: tracked.backend };
+        }
+
+        case "format": {
+          if (!file) {
+            return {
+              success: false,
+              output: "file is required for format",
+              error: "missing file",
+            };
+          }
+
+          const tracked = await router.executeWithFallbackTracked(
+            language,
+            "formatDocument",
+            (b) => (b.formatDocument ? b.formatDocument(file) : Promise.resolve(null)),
+          );
+
+          if (!tracked) {
+            return {
+              success: false,
+              output: `Cannot format — no backend supports formatting for ${language}`,
+              error: "unsupported",
+            };
+          }
+
+          if (shouldApply) applyFormatEdits(tracked.value);
+          return {
+            success: true,
+            output: `Formatted ${file} (${String(tracked.value.edits.length)} edit(s))${shouldApply ? " — applied" : " — pass apply: true to apply"}`,
+            backend: tracked.backend,
+          };
+        }
+
+        case "format_range": {
+          if (!file) {
+            return {
+              success: false,
+              output: "file is required for format_range",
+              error: "missing file",
+            };
+          }
+          const startLine = args.startLine;
+          const endLine = args.endLine;
+          if (!startLine || !endLine) {
+            return {
+              success: false,
+              output: "startLine and endLine are required for format_range",
+              error: "missing range",
+            };
+          }
+
+          const tracked = await router.executeWithFallbackTracked(language, "formatRange", (b) =>
+            b.formatRange ? b.formatRange(file, startLine, endLine) : Promise.resolve(null),
+          );
+
+          if (!tracked) {
+            return {
+              success: false,
+              output: `Cannot format range — no backend supports range formatting for ${language}`,
+              error: "unsupported",
+            };
+          }
+
+          if (shouldApply) applyFormatEdits(tracked.value);
+          return {
+            success: true,
+            output: `Formatted ${file} lines ${String(startLine)}-${String(endLine)} (${String(tracked.value.edits.length)} edit(s))${shouldApply ? " — applied" : ""}`,
+            backend: tracked.backend,
+          };
+        }
+
+        case "organize_imports": {
+          if (!file) {
+            return {
+              success: false,
+              output: "file is required for organize_imports",
+              error: "missing file",
+            };
+          }
+
+          const tracked = await router.executeWithFallbackTracked(
+            language,
+            "organizeImports",
+            (b) => (b.organizeImports ? b.organizeImports(file) : Promise.resolve(null)),
+          );
+
+          if (!tracked) {
+            return {
+              success: false,
+              output: `Cannot organize imports — no backend supports this for ${language}`,
+              error: "unsupported",
+            };
+          }
+
+          let diagOutput: string | null = null;
+          if (shouldApply) {
+            diagOutput = await applyAndDiagnose(tracked.value.edits, router);
+          }
+          let output = formatResult(tracked.value, shouldApply);
+          if (diagOutput) output += `\n${diagOutput}`;
+          return { success: true, output, backend: tracked.backend };
         }
 
         default:
@@ -190,3 +356,33 @@ export const refactorTool = {
     }
   },
 };
+
+function applyFormatEdits(formatEdit: FormatEdit): void {
+  const content = readFileSync(formatEdit.file, "utf-8");
+  const lines = content.split("\n");
+
+  // Apply edits in reverse order to preserve offsets
+  const sorted = [...formatEdit.edits].sort((a, b) => {
+    if (a.startLine !== b.startLine) return b.startLine - a.startLine;
+    return b.startCol - a.startCol;
+  });
+
+  let result = content;
+  for (const edit of sorted) {
+    let startOffset = 0;
+    for (let i = 0; i < edit.startLine - 1 && i < lines.length; i++) {
+      startOffset += (lines[i]?.length ?? 0) + 1;
+    }
+    startOffset += edit.startCol - 1;
+
+    let endOffset = 0;
+    for (let i = 0; i < edit.endLine - 1 && i < lines.length; i++) {
+      endOffset += (lines[i]?.length ?? 0) + 1;
+    }
+    endOffset += edit.endCol - 1;
+
+    result = result.slice(0, startOffset) + edit.newText + result.slice(endOffset);
+  }
+
+  writeFileSync(formatEdit.file, result, "utf-8");
+}

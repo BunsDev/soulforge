@@ -11,4 +11,5 @@ export {
   onMultiAgentEvent,
   onSubagentStep,
 } from "./subagent-events.js";
-export { buildSubagentTools } from "./subagent-tools.js";
+export { buildSubagentTools, type SharedCacheRef } from "./subagent-tools.js";
+export { createWebSearchAgent } from "./web-search.js";

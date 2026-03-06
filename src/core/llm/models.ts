@@ -49,43 +49,155 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = getAllProviders().map((p) => (
 
 const DEFAULT_CONTEXT_TOKENS = 128_000;
 
+export type ContextWindowSource = "api" | "openrouter" | "fallback";
+
+interface ContextWindowResult {
+  tokens: number;
+  source: ContextWindowSource;
+}
+
 /**
  * Get the context window size (in tokens) for a model ID.
- * Checks cached API data first, then falls back to provider-defined patterns.
- * Accepts full "provider/model" format or just the model part.
- * Pattern order matters — specific patterns must come before general ones.
+ * Priority: provider API cache → OpenRouter cache → hardcoded patterns → default.
  */
 export function getModelContextWindow(modelId: string): number {
+  return getModelContextInfo(modelId).tokens;
+}
+
+export function getModelContextInfo(modelId: string): ContextWindowResult {
   const slashIdx = modelId.indexOf("/");
   const providerId = slashIdx >= 0 ? modelId.slice(0, slashIdx) : "";
   const model = slashIdx >= 0 ? modelId.slice(slashIdx + 1) : modelId;
 
-  // 1. Check cached API data (most accurate — comes from the provider)
+  // 1. Provider's own API data (most accurate)
   if (providerId && !getProvider(providerId)?.grouped) {
     const cached = modelCache.get(providerId);
     if (cached) {
       const match = cached.find((m) => m.id === model);
-      if (match?.contextWindow) return match.contextWindow;
+      if (match?.contextWindow) return { tokens: match.contextWindow, source: "api" };
     }
   }
-  // Check grouped provider caches (gateway, proxy, etc.)
   if (providerId) {
     const grouped = groupedCache.get(providerId);
     if (grouped) {
       for (const models of Object.values(grouped.modelsByProvider)) {
         const match = models.find((m) => m.id === model || modelId.endsWith(m.id));
-        if (match?.contextWindow) return match.contextWindow;
+        if (match?.contextWindow) return { tokens: match.contextWindow, source: "api" };
       }
     }
   }
 
-  // 2. Fallback to provider-defined context window patterns
+  // 2. OpenRouter metadata (accurate, covers all providers)
+  const orMatch = findOpenRouterModel(model);
+  if (orMatch?.context_length) return { tokens: orMatch.context_length, source: "openrouter" };
+
+  // 3. Hardcoded fallback patterns
   for (const provider of getAllProviders()) {
     for (const [pattern, tokens] of provider.contextWindows) {
-      if (model.includes(pattern)) return tokens;
+      if (model.includes(pattern)) return { tokens, source: "fallback" };
     }
   }
-  return DEFAULT_CONTEXT_TOKENS;
+  return { tokens: DEFAULT_CONTEXT_TOKENS, source: "fallback" };
+}
+
+// ─── OpenRouter Metadata ───
+
+interface OpenRouterModel {
+  id: string;
+  name: string;
+  context_length: number;
+}
+
+let openRouterCache: OpenRouterModel[] | null = null;
+let openRouterPromise: Promise<void> | null = null;
+
+export async function fetchOpenRouterMetadata(): Promise<void> {
+  if (openRouterCache) return;
+  if (openRouterPromise) return openRouterPromise;
+  openRouterPromise = (async () => {
+    try {
+      const res = await fetch("https://openrouter.ai/api/v1/models");
+      if (!res.ok) return;
+      const data = (await res.json()) as { data: OpenRouterModel[] };
+      openRouterCache = data.data;
+    } catch {
+      // silently fail — fallback patterns still work
+    } finally {
+      openRouterPromise = null;
+    }
+  })();
+  return openRouterPromise;
+}
+
+function findOpenRouterModel(model: string): OpenRouterModel | undefined {
+  if (!openRouterCache) return undefined;
+  const lower = model.toLowerCase();
+  return (
+    openRouterCache.find((m) => m.id.endsWith(`/${lower}`)) ??
+    openRouterCache.find((m) => m.id.endsWith(`/${model}`)) ??
+    openRouterCache.find((m) => {
+      const orModel = m.id.split("/").pop() ?? "";
+      return lower.startsWith(orModel.toLowerCase()) || orModel.toLowerCase().startsWith(lower);
+    })
+  );
+}
+
+export function getOpenRouterModelName(model: string): string | undefined {
+  const match = findOpenRouterModel(model);
+  if (!match) return undefined;
+  return match.name.replace(/^[^:]+:\s*/, "");
+}
+
+/**
+ * Get a short display label for a model ID (e.g. "Claude Sonnet 4", "GPT-4o Mini").
+ * Resolution: provider API cache → grouped cache → OpenRouter cache → smart fallback.
+ * No hardcoded model names — all labels come from API data or clean truncation.
+ */
+export function getShortModelLabel(modelId: string): string {
+  const slashIdx = modelId.indexOf("/");
+  const providerId = slashIdx >= 0 ? modelId.slice(0, slashIdx) : "";
+  const bareModel = slashIdx >= 0 ? modelId.slice(slashIdx + 1) : modelId;
+
+  // 1. Provider API cache (direct providers)
+  if (providerId) {
+    const cached = modelCache.get(providerId);
+    if (cached) {
+      const match = cached.find((m) => m.id === bareModel);
+      if (match) return match.name;
+    }
+  }
+
+  // 2. Grouped provider cache (gateway, proxy)
+  for (const grouped of groupedCache.values()) {
+    for (const models of Object.values(grouped.modelsByProvider)) {
+      const match = models.find((m) => m.id === bareModel || m.id === modelId);
+      if (match && match.name !== match.id) return match.name;
+    }
+  }
+
+  // 3. Fallback models from provider definitions
+  const stripped = bareModel.replace(/-\d{8}$/, "");
+  let bestFallback: { name: string; specificity: number } | null = null;
+  for (const provider of getAllProviders()) {
+    for (const m of provider.fallbackModels) {
+      if (m.id === bareModel || m.id === stripped) return m.name;
+      if (stripped.startsWith(m.id) || m.id.startsWith(stripped)) {
+        const specificity = m.id.length;
+        if (!bestFallback || specificity > bestFallback.specificity) {
+          bestFallback = { name: m.name, specificity };
+        }
+      }
+    }
+  }
+  if (bestFallback) return bestFallback.name;
+
+  // 4. OpenRouter metadata
+  const orName = getOpenRouterModelName(bareModel);
+  if (orName) return orName;
+
+  // 5. Smart fallback — strip date suffix, clean up
+  const clean = bareModel.replace(/-\d{8}$/, "");
+  return clean.length > 24 ? `${clean.slice(0, 21)}...` : clean;
 }
 
 // ─── Cache ───

@@ -1,17 +1,13 @@
-import { Box, Text } from "ink";
 import { useEffect, useState } from "react";
-
-// ─── Popup Colors ───
 
 export const POPUP_BG = "#111122";
 export const POPUP_HL = "#1a1a3e";
 
-// ─── Spinner Frames ───
+export type ConfigScope = "session" | "project" | "global";
+export const CONFIG_SCOPES: ConfigScope[] = ["session", "project", "global"];
 
-/** Standard braille spinner (⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏) */
 export const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-/** Filled braille spinner (⣋⣙⣹⣸⣼⣴⣦⣧⣇⣏) */
 export const SPINNER_FRAMES_FILLED = [
   "\u28CB",
   "\u28D9",
@@ -25,34 +21,51 @@ export const SPINNER_FRAMES_FILLED = [
   "\u28CF",
 ];
 
-// ─── Spinner Component ───
+let globalFrame = 0;
+const listeners = new Set<() => void>();
+let tickTimer: ReturnType<typeof setInterval> | null = null;
+
+function startTick() {
+  if (tickTimer) return;
+  tickTimer = setInterval(() => {
+    globalFrame = (globalFrame + 1) % SPINNER_FRAMES.length;
+    for (const cb of listeners) cb();
+  }, 120);
+}
+
+function stopTick() {
+  if (tickTimer !== null && listeners.size === 0) {
+    clearInterval(tickTimer);
+    tickTimer = null;
+  }
+}
+
+export function useSpinnerFrame(enabled = true): number {
+  const [frame, setFrame] = useState(globalFrame);
+  useEffect(() => {
+    if (!enabled) return;
+    const cb = () => setFrame(globalFrame);
+    listeners.add(cb);
+    startTick();
+    return () => {
+      listeners.delete(cb);
+      stopTick();
+    };
+  }, [enabled]);
+  return frame;
+}
 
 export function Spinner({
   frames = SPINNER_FRAMES,
   color = "#FF0040",
-  interval = 80,
 }: {
   frames?: string[];
   color?: string;
-  interval?: number;
 } = {}) {
-  const [idx, setIdx] = useState(0);
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setIdx((prev) => (prev + 1) % frames.length);
-    }, interval);
-    return () => clearInterval(timer);
-  }, [frames.length, interval]);
-  return <Text color={color}>{frames[idx]}</Text>;
+  const frame = useSpinnerFrame();
+  return <text fg={color}>{frames[frame % frames.length]}</text>;
 }
 
-// ─── PopupRow Component ───
-
-/**
- * A single row inside a popup with a full-width solid background.
- * Uses position="absolute" to layer a background fill behind the content,
- * since Ink's Box doesn't support backgroundColor directly.
- */
 export function PopupRow({
   children,
   bg,
@@ -64,14 +77,14 @@ export function PopupRow({
 }) {
   const fill = bg ?? POPUP_BG;
   return (
-    <Box width={w} height={1}>
-      <Box position="absolute">
-        <Text backgroundColor={fill}>{" ".repeat(w)}</Text>
-      </Box>
-      <Box position="absolute">
-        <Text backgroundColor={fill}>{"  "}</Text>
+    <box width={w} height={1} overflow="hidden">
+      <box position="absolute">
+        <text bg={fill}>{" ".repeat(w)}</text>
+      </box>
+      <box position="absolute" width={w} flexDirection="row">
+        <text bg={fill}>{"  "}</text>
         {children}
-      </Box>
-    </Box>
+      </box>
+    </box>
   );
 }

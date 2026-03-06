@@ -4,45 +4,32 @@ import type { FocusMode } from "../types/index.js";
 interface UseEditorFocusReturn {
   focusMode: FocusMode;
   editorOpen: boolean;
-  toggleFocus: () => void;
-  setFocus: (mode: FocusMode) => void;
+  toggleEditor: () => void;
+  switchFocus: () => void;
   openEditor: () => void;
   closeEditor: () => void;
+  focusChat: () => void;
+  focusEditor: () => void;
 }
 
-/**
- * Focus mode state machine.
- * Ctrl+E 3-state cycle:
- *   1. Editor closed → open + focus editor
- *   2. Editor open, editor focused → switch to chat (editor stays visible)
- *   3. Editor open, chat focused → close editor
- */
 export function useEditorFocus(): UseEditorFocusReturn {
   const [focusMode, setFocusMode] = useState<FocusMode>("chat");
   const [editorOpen, setEditorOpen] = useState(false);
 
-  const toggleFocus = useCallback(() => {
-    if (!editorOpen) {
-      // State 1: editor closed → open + focus editor
-      setEditorOpen(true);
-      setFocusMode("editor");
-    } else if (focusMode === "editor") {
-      // State 2: editor focused → switch to chat
-      setFocusMode("chat");
-    } else {
-      // State 3: chat focused, editor open → close editor
+  const toggleEditor = useCallback(() => {
+    if (editorOpen) {
       setEditorOpen(false);
       setFocusMode("chat");
+    } else {
+      setEditorOpen(true);
+      setFocusMode("editor");
     }
-  }, [editorOpen, focusMode]);
+  }, [editorOpen]);
 
-  const setFocus = useCallback(
-    (mode: FocusMode) => {
-      if (mode === "editor" && !editorOpen) return;
-      setFocusMode(mode);
-    },
-    [editorOpen],
-  );
+  const switchFocus = useCallback(() => {
+    if (!editorOpen) return;
+    setFocusMode((prev) => (prev === "editor" ? "chat" : "editor"));
+  }, [editorOpen]);
 
   const openEditor = useCallback(() => {
     if (!editorOpen) {
@@ -56,5 +43,22 @@ export function useEditorFocus(): UseEditorFocusReturn {
     setFocusMode("chat");
   }, []);
 
-  return { focusMode, editorOpen, toggleFocus, setFocus, openEditor, closeEditor };
+  const focusChat = useCallback(() => {
+    setFocusMode("chat");
+  }, []);
+
+  const focusEditor = useCallback(() => {
+    if (editorOpen) setFocusMode("editor");
+  }, [editorOpen]);
+
+  return {
+    focusMode,
+    editorOpen,
+    toggleEditor,
+    switchFocus,
+    openEditor,
+    closeEditor,
+    focusChat,
+    focusEditor,
+  };
 }

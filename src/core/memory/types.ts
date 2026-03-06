@@ -1,21 +1,48 @@
-export interface ArchitecturalDecision {
+export type MemoryScope = "global" | "project" | "session";
+
+export interface MemoryScopeConfig {
+  writeScope: MemoryScope | "none";
+  readScope: MemoryScope | "all" | "none";
+}
+
+export type MemoryCategory =
+  | "decision"
+  | "convention"
+  | "preference"
+  | "architecture"
+  | "pattern"
+  | "fact";
+
+export const MEMORY_CATEGORIES: MemoryCategory[] = [
+  "decision",
+  "convention",
+  "preference",
+  "architecture",
+  "pattern",
+  "fact",
+];
+
+export interface MemoryRecord {
   id: string;
-  timestamp: number;
-  summary: string;
-  rationale: string;
-  tags?: string[];
+  title: string;
+  content: string;
+  category: MemoryCategory;
+  tags: string[];
+  created_at: string;
+  updated_at: string;
 }
 
-export interface Invariant {
-  name: string;
-  rule: string;
-  scope?: string;
+export interface MemorySummary {
+  id: string;
+  title: string;
+  category: MemoryCategory;
+  tags: string[];
+  updated_at: string;
 }
 
-export interface Constraint {
-  name: string;
-  metric: string; // "file_lines" | "import_count" | "export_count"
-  limit: number;
-  scope?: string;
-  action: "warn" | "block";
+export interface MemoryIndex {
+  scope: MemoryScope;
+  total: number;
+  byCategory: Record<string, number>;
+  recent: string[];
 }

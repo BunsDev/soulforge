@@ -1,4 +1,4 @@
-import { Box, Text } from "ink";
+import { TextAttributes } from "@opentui/core";
 import { providerIcon, UI_ICONS } from "../core/icons.js";
 
 interface Props {
@@ -10,24 +10,27 @@ interface Props {
 
 export function StatusBar({ provider, model, cwd, messageCount }: Props) {
   return (
-    <Box flexDirection="row" justifyContent="space-between" paddingX={1} height={1} width="100%">
-      <Box gap={1}>
-        <Text backgroundColor="#6A0DAD" color="white" bold wrap="truncate">
+    <box flexDirection="row" justifyContent="space-between" paddingX={1} height={1} width="100%">
+      <box gap={1} flexDirection="row">
+        <text bg="#6A0DAD" fg="white" attributes={TextAttributes.BOLD} truncate>
           {` ${providerIcon(provider)} ${provider.toUpperCase()} `}
-        </Text>
-        <Text color="#555">{UI_ICONS.brain}</Text>
-        <Text color="#666" wrap="truncate">
+        </text>
+        <text fg="#555">{UI_ICONS.brain}</text>
+        <text fg="#666" truncate>
           {model}
-        </Text>
-      </Box>
-      <Box gap={1}>
-        <Text color="#555">{UI_ICONS.folder}</Text>
-        <Text color="#444" wrap="truncate">
+        </text>
+      </box>
+      <box gap={1} flexDirection="row">
+        <text fg="#555">{UI_ICONS.folder}</text>
+        <text fg="#444" truncate>
           {cwd}
-        </Text>
-        <Text color="#333">│</Text>
-        <Text color="#DC143C">{messageCount} msgs</Text>
-      </Box>
-    </Box>
+        </text>
+        <text fg="#333">│</text>
+        <text fg="#DC143C">
+          {messageCount >= 1000 ? `${(messageCount / 1000).toFixed(1)}k` : String(messageCount)}{" "}
+          msgs
+        </text>
+      </box>
+    </box>
   );
 }

@@ -51,6 +51,91 @@ const QUERIES: Record<string, string> = {
     (use_declaration) @import
     (impl_item) @impl
   `,
+  java: `
+    (method_declaration name: (identifier) @name) @func
+    (class_declaration name: (identifier) @name) @class
+    (interface_declaration name: (identifier) @name) @iface
+    (enum_declaration name: (identifier) @name) @type
+    (import_declaration) @import
+  `,
+  c: `
+    (function_definition declarator: (function_declarator declarator: (identifier) @name)) @func
+    (struct_specifier name: (type_identifier) @name) @struct
+    (enum_specifier name: (type_identifier) @name) @type
+    (type_definition declarator: (type_identifier) @name) @type
+    (preproc_include) @import
+  `,
+  cpp: `
+    (function_definition declarator: (function_declarator declarator: (identifier) @name)) @func
+    (class_specifier name: (type_identifier) @name) @class
+    (struct_specifier name: (type_identifier) @name) @struct
+    (enum_specifier name: (type_identifier) @name) @type
+    (namespace_definition name: (namespace_identifier) @name) @type
+    (preproc_include) @import
+  `,
+  csharp: `
+    (method_declaration name: (identifier) @name) @func
+    (class_declaration name: (identifier) @name) @class
+    (interface_declaration name: (identifier) @name) @iface
+    (struct_declaration name: (identifier) @name) @struct
+    (enum_declaration name: (identifier) @name) @type
+    (namespace_declaration name: (identifier) @name) @type
+    (using_directive) @import
+  `,
+  ruby: `
+    (method name: (identifier) @name) @func
+    (class name: (constant) @name) @class
+    (module name: (constant) @name) @type
+    (call method: (identifier) @name) @import
+  `,
+  php: `
+    (function_definition name: (name) @name) @func
+    (method_declaration name: (name) @name) @func
+    (class_declaration name: (name) @name) @class
+    (interface_declaration name: (name) @name) @iface
+    (trait_declaration name: (name) @name) @trait
+    (namespace_use_declaration) @import
+  `,
+  swift: `
+    (function_declaration (simple_identifier) @name) @func
+    (class_declaration name: (type_identifier) @name) @class
+    (protocol_declaration name: (type_identifier) @name) @iface
+    (import_declaration) @import
+  `,
+  kotlin: `
+    (function_declaration (simple_identifier) @name) @func
+    (class_declaration (type_identifier) @name) @class
+    (object_declaration (type_identifier) @name) @class
+    (import_header) @import
+  `,
+  scala: `
+    (function_definition name: (identifier) @name) @func
+    (class_definition name: (identifier) @name) @class
+    (trait_definition name: (identifier) @name) @trait
+    (object_definition name: (identifier) @name) @class
+    (import_declaration) @import
+  `,
+  lua: `
+    (function_definition_statement name: (identifier) @name) @func
+    (local_function_definition_statement name: (identifier) @name) @func
+  `,
+  elixir: `
+    (call target: (identifier) @name) @func
+  `,
+  dart: `
+    (function_signature (identifier) @name) @func
+    (class_definition name: (identifier) @name) @class
+    (enum_declaration name: (identifier) @name) @type
+    (mixin_declaration name: (identifier) @name) @class
+    (import_or_export) @import
+  `,
+  zig: `
+    (function_declaration name: (identifier) @name) @func
+    (variable_declaration name: (identifier) @name) @var
+  `,
+  bash: `
+    (function_definition name: (word) @name) @func
+  `,
 };
 
 const GRAMMAR_FILES: Record<string, string> = {
@@ -59,6 +144,20 @@ const GRAMMAR_FILES: Record<string, string> = {
   python: "tree-sitter-python.wasm",
   go: "tree-sitter-go.wasm",
   rust: "tree-sitter-rust.wasm",
+  java: "tree-sitter-java.wasm",
+  c: "tree-sitter-c.wasm",
+  cpp: "tree-sitter-cpp.wasm",
+  csharp: "tree-sitter-c_sharp.wasm",
+  ruby: "tree-sitter-ruby.wasm",
+  php: "tree-sitter-php.wasm",
+  swift: "tree-sitter-swift.wasm",
+  kotlin: "tree-sitter-kotlin.wasm",
+  scala: "tree-sitter-scala.wasm",
+  lua: "tree-sitter-lua.wasm",
+  elixir: "tree-sitter-elixir.wasm",
+  dart: "tree-sitter-dart.wasm",
+  zig: "tree-sitter-zig.wasm",
+  bash: "tree-sitter-bash.wasm",
 };
 
 // Dynamically import web-tree-sitter types
@@ -68,6 +167,44 @@ type TSTree = import("web-tree-sitter").Tree;
 type TSQuery = import("web-tree-sitter").Query;
 type TSQueryCapture = import("web-tree-sitter").QueryCapture;
 type TSNode = import("web-tree-sitter").Node;
+
+const EXT_TO_LANG: Record<string, Language> = {
+  ".ts": "typescript",
+  ".tsx": "typescript",
+  ".mts": "typescript",
+  ".cts": "typescript",
+  ".js": "javascript",
+  ".jsx": "javascript",
+  ".mjs": "javascript",
+  ".cjs": "javascript",
+  ".py": "python",
+  ".go": "go",
+  ".rs": "rust",
+  ".java": "java",
+  ".c": "c",
+  ".h": "c",
+  ".cpp": "cpp",
+  ".cc": "cpp",
+  ".cxx": "cpp",
+  ".hpp": "cpp",
+  ".hh": "cpp",
+  ".cs": "csharp",
+  ".rb": "ruby",
+  ".php": "php",
+  ".swift": "swift",
+  ".kt": "kotlin",
+  ".kts": "kotlin",
+  ".scala": "scala",
+  ".sc": "scala",
+  ".lua": "lua",
+  ".ex": "elixir",
+  ".exs": "elixir",
+  ".dart": "dart",
+  ".zig": "zig",
+  ".sh": "bash",
+  ".bash": "bash",
+  ".zsh": "bash",
+};
 
 // Store the module reference for Query construction
 let TSQueryClass: (new (lang: TSLanguage, source: string) => TSQuery) | null = null;
@@ -259,19 +396,20 @@ export class TreeSitterBackend implements IntelligenceBackend {
 
         // Try to find the exported name
         const decl = node.namedChildren.find(
-          (c: TSNode) =>
-            c.type === "function_declaration" ||
-            c.type === "class_declaration" ||
-            c.type === "interface_declaration" ||
-            c.type === "type_alias_declaration" ||
-            c.type === "lexical_declaration",
+          (c: TSNode | null) =>
+            c != null &&
+            (c.type === "function_declaration" ||
+              c.type === "class_declaration" ||
+              c.type === "interface_declaration" ||
+              c.type === "type_alias_declaration" ||
+              c.type === "lexical_declaration"),
         );
 
         if (decl) {
           const nameNode =
             decl.childForFieldName("name") ??
             decl.namedChildren
-              .find((c: TSNode) => c.type === "variable_declarator")
+              .find((c: TSNode | null) => c != null && c.type === "variable_declarator")
               ?.childForFieldName("name");
 
           if (nameNode) {
@@ -356,18 +494,19 @@ export class TreeSitterBackend implements IntelligenceBackend {
             const node = patternCapture.node;
             const isDefault = node.text.includes("export default");
             const decl = node.namedChildren.find(
-              (c: TSNode) =>
-                c.type === "function_declaration" ||
-                c.type === "class_declaration" ||
-                c.type === "interface_declaration" ||
-                c.type === "type_alias_declaration" ||
-                c.type === "lexical_declaration",
+              (c: TSNode | null) =>
+                c != null &&
+                (c.type === "function_declaration" ||
+                  c.type === "class_declaration" ||
+                  c.type === "interface_declaration" ||
+                  c.type === "type_alias_declaration" ||
+                  c.type === "lexical_declaration"),
             );
             if (decl) {
               const expNameNode =
                 decl.childForFieldName("name") ??
                 decl.namedChildren
-                  .find((c: TSNode) => c.type === "variable_declarator")
+                  .find((c: TSNode | null) => c != null && c.type === "variable_declarator")
                   ?.childForFieldName("name");
               if (expNameNode) {
                 let kind: SymbolKind = "variable";
@@ -597,22 +736,9 @@ export class TreeSitterBackend implements IntelligenceBackend {
   }
 
   private detectLang(file: string): Language {
-    const ext: Record<string, Language> = {
-      ".ts": "typescript",
-      ".tsx": "typescript",
-      ".mts": "typescript",
-      ".cts": "typescript",
-      ".js": "javascript",
-      ".jsx": "javascript",
-      ".mjs": "javascript",
-      ".cjs": "javascript",
-      ".py": "python",
-      ".go": "go",
-      ".rs": "rust",
-    };
     const dot = file.lastIndexOf(".");
     if (dot === -1) return "unknown";
-    return ext[file.slice(dot)] ?? "unknown";
+    return EXT_TO_LANG[file.slice(dot)] ?? "unknown";
   }
 
   private captureToKind(captureName: string): SymbolKind {

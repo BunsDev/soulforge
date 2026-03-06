@@ -1,15 +1,26 @@
 import { resolve } from "node:path";
 import type { ToolResult } from "../../types/index.js";
 import { getIntelligenceRouter } from "../intelligence/index.js";
-import type { SourceLocation, SymbolInfo } from "../intelligence/types.js";
+import type { CallHierarchyItem, SourceLocation, SymbolInfo } from "../intelligence/types.js";
 
-type NavigateAction = "definition" | "references" | "symbols" | "imports" | "exports";
+type NavigateAction =
+  | "definition"
+  | "references"
+  | "symbols"
+  | "imports"
+  | "exports"
+  | "workspace_symbols"
+  | "call_hierarchy"
+  | "implementation"
+  | "type_hierarchy"
+  | "search_symbols";
 
 interface NavigateArgs {
   action: NavigateAction;
   symbol?: string;
   file?: string;
   scope?: string;
+  query?: string;
 }
 
 function formatLocation(loc: SourceLocation): string {
@@ -26,7 +37,8 @@ function formatSymbol(s: SymbolInfo): string {
 export const navigateTool = {
   name: "navigate",
   description:
-    "Navigate code: find definitions, references, symbols, imports, and exports. " +
+    "Find where a symbol is defined, who calls it, what it imports/exports, and its type hierarchy. " +
+    "THE primary tool for understanding code structure — use BEFORE grep for code questions. " +
     "Works without neovim — uses static analysis of the codebase.",
   execute: async (args: NavigateArgs): Promise<ToolResult> => {
     try {
@@ -52,11 +64,13 @@ export const navigateTool = {
             };
           }
 
-          const locations = await router.executeWithFallback(language, "findDefinition", (b) =>
-            b.findDefinition ? b.findDefinition(file, symbol) : Promise.resolve(null),
+          const tracked = await router.executeWithFallbackTracked(
+            language,
+            "findDefinition",
+            (b) => (b.findDefinition ? b.findDefinition(file, symbol) : Promise.resolve(null)),
           );
 
-          if (!locations || locations.length === 0) {
+          if (!tracked || tracked.value.length === 0) {
             return {
               success: false,
               output: `No definition found for '${symbol}'`,
@@ -66,7 +80,8 @@ export const navigateTool = {
 
           return {
             success: true,
-            output: `Definition of '${symbol}':\n${locations.map(formatLocation).join("\n")}`,
+            output: `Definition of '${symbol}':\n${tracked.value.map(formatLocation).join("\n")}`,
+            backend: tracked.backend,
           };
         }
 
@@ -86,11 +101,13 @@ export const navigateTool = {
             };
           }
 
-          const refs = await router.executeWithFallback(language, "findReferences", (b) =>
-            b.findReferences ? b.findReferences(file, symbol) : Promise.resolve(null),
+          const tracked = await router.executeWithFallbackTracked(
+            language,
+            "findReferences",
+            (b) => (b.findReferences ? b.findReferences(file, symbol) : Promise.resolve(null)),
           );
 
-          if (!refs || refs.length === 0) {
+          if (!tracked || tracked.value.length === 0) {
             return {
               success: false,
               output: `No references found for '${symbol}'`,
@@ -100,7 +117,8 @@ export const navigateTool = {
 
           return {
             success: true,
-            output: `References to '${symbol}' (${String(refs.length)}):\n${refs.map(formatLocation).join("\n")}`,
+            output: `References to '${symbol}' (${String(tracked.value.length)}):\n${tracked.value.map(formatLocation).join("\n")}`,
+            backend: tracked.backend,
           };
         }
 
@@ -113,17 +131,18 @@ export const navigateTool = {
             };
           }
 
-          const symbols = await router.executeWithFallback(language, "findSymbols", (b) =>
+          const tracked = await router.executeWithFallbackTracked(language, "findSymbols", (b) =>
             b.findSymbols ? b.findSymbols(file, args.scope) : Promise.resolve(null),
           );
 
-          if (!symbols || symbols.length === 0) {
+          if (!tracked || tracked.value.length === 0) {
             return { success: true, output: "No symbols found" };
           }
 
           return {
             success: true,
-            output: `Symbols in ${file} (${String(symbols.length)}):\n${symbols.map(formatSymbol).join("\n")}`,
+            output: `Symbols in ${file} (${String(tracked.value.length)}):\n${tracked.value.map(formatSymbol).join("\n")}`,
+            backend: tracked.backend,
           };
         }
 
@@ -136,21 +155,22 @@ export const navigateTool = {
             };
           }
 
-          const imports = await router.executeWithFallback(language, "findImports", (b) =>
+          const tracked = await router.executeWithFallbackTracked(language, "findImports", (b) =>
             b.findImports ? b.findImports(file) : Promise.resolve(null),
           );
 
-          if (!imports || imports.length === 0) {
+          if (!tracked || tracked.value.length === 0) {
             return { success: true, output: "No imports found" };
           }
 
-          const lines = imports.map((imp) => {
+          const lines = tracked.value.map((imp) => {
             const specs = imp.specifiers.length > 0 ? ` { ${imp.specifiers.join(", ")} }` : "";
             return `${imp.source}${specs} — line ${String(imp.location.line)}`;
           });
           return {
             success: true,
-            output: `Imports in ${file} (${String(imports.length)}):\n${lines.join("\n")}`,
+            output: `Imports in ${file} (${String(tracked.value.length)}):\n${lines.join("\n")}`,
+            backend: tracked.backend,
           };
         }
 
@@ -163,21 +183,223 @@ export const navigateTool = {
             };
           }
 
-          const exports = await router.executeWithFallback(language, "findExports", (b) =>
+          const tracked = await router.executeWithFallbackTracked(language, "findExports", (b) =>
             b.findExports ? b.findExports(file) : Promise.resolve(null),
           );
 
-          if (!exports || exports.length === 0) {
+          if (!tracked || tracked.value.length === 0) {
             return { success: true, output: "No exports found" };
           }
 
-          const lines = exports.map((exp) => {
+          const lines = tracked.value.map((exp) => {
             const def = exp.isDefault ? " (default)" : "";
             return `${exp.kind} ${exp.name}${def} — line ${String(exp.location.line)}`;
           });
           return {
             success: true,
-            output: `Exports from ${file} (${String(exports.length)}):\n${lines.join("\n")}`,
+            output: `Exports from ${file} (${String(tracked.value.length)}):\n${lines.join("\n")}`,
+            backend: tracked.backend,
+          };
+        }
+
+        case "workspace_symbols": {
+          const query = args.query ?? args.symbol ?? "";
+          if (!query) {
+            return {
+              success: false,
+              output: "query or symbol is required for workspace_symbols",
+              error: "missing query",
+            };
+          }
+
+          const tracked = await router.executeWithFallbackTracked(
+            language,
+            "findWorkspaceSymbols",
+            (b) => (b.findWorkspaceSymbols ? b.findWorkspaceSymbols(query) : Promise.resolve(null)),
+          );
+
+          if (!tracked || tracked.value.length === 0) {
+            return { success: true, output: `No workspace symbols matching '${query}'` };
+          }
+
+          return {
+            success: true,
+            output: `Workspace symbols matching '${query}' (${String(tracked.value.length)}):\n${tracked.value.map(formatSymbol).join("\n")}`,
+            backend: tracked.backend,
+          };
+        }
+
+        case "call_hierarchy": {
+          if (!symbol) {
+            return {
+              success: false,
+              output: "symbol is required for call_hierarchy",
+              error: "missing symbol",
+            };
+          }
+          if (!file) {
+            return {
+              success: false,
+              output: "file is required for call_hierarchy",
+              error: "missing file",
+            };
+          }
+
+          const tracked = await router.executeWithFallbackTracked(
+            language,
+            "getCallHierarchy",
+            (b) => (b.getCallHierarchy ? b.getCallHierarchy(file, symbol) : Promise.resolve(null)),
+          );
+
+          if (!tracked) {
+            return {
+              success: false,
+              output: `No call hierarchy for '${symbol}'`,
+              error: "not found",
+            };
+          }
+
+          const ch = tracked.value;
+          const formatCH = (i: CallHierarchyItem) =>
+            `${i.kind} ${i.name} — ${i.file}:${String(i.line)}`;
+          const parts = [`Call hierarchy for ${ch.item.name}:`];
+          if (ch.incoming.length > 0) {
+            parts.push(`\nIncoming calls (${String(ch.incoming.length)}):`);
+            parts.push(...ch.incoming.map((i) => `  ${formatCH(i)}`));
+          }
+          if (ch.outgoing.length > 0) {
+            parts.push(`\nOutgoing calls (${String(ch.outgoing.length)}):`);
+            parts.push(...ch.outgoing.map((i) => `  ${formatCH(i)}`));
+          }
+          if (ch.incoming.length === 0 && ch.outgoing.length === 0) {
+            parts.push("  No incoming or outgoing calls found.");
+          }
+
+          return {
+            success: true,
+            output: parts.join("\n"),
+            backend: tracked.backend,
+          };
+        }
+
+        case "implementation": {
+          if (!symbol) {
+            return {
+              success: false,
+              output: "symbol is required for implementation lookup",
+              error: "missing symbol",
+            };
+          }
+          if (!file) {
+            return {
+              success: false,
+              output: "file is required for implementation lookup",
+              error: "missing file",
+            };
+          }
+
+          const tracked = await router.executeWithFallbackTracked(
+            language,
+            "findImplementation",
+            (b) =>
+              b.findImplementation ? b.findImplementation(file, symbol) : Promise.resolve(null),
+          );
+
+          if (!tracked || tracked.value.length === 0) {
+            return {
+              success: false,
+              output: `No implementations found for '${symbol}'`,
+              error: "not found",
+            };
+          }
+
+          return {
+            success: true,
+            output: `Implementations of '${symbol}' (${String(tracked.value.length)}):\n${tracked.value.map(formatLocation).join("\n")}`,
+            backend: tracked.backend,
+          };
+        }
+
+        case "type_hierarchy": {
+          if (!symbol) {
+            return {
+              success: false,
+              output: "symbol is required for type_hierarchy",
+              error: "missing symbol",
+            };
+          }
+          if (!file) {
+            return {
+              success: false,
+              output: "file is required for type_hierarchy",
+              error: "missing file",
+            };
+          }
+
+          const tracked = await router.executeWithFallbackTracked(
+            language,
+            "getTypeHierarchy",
+            (b) => (b.getTypeHierarchy ? b.getTypeHierarchy(file, symbol) : Promise.resolve(null)),
+          );
+
+          if (!tracked) {
+            return {
+              success: false,
+              output: `No type hierarchy for '${symbol}'`,
+              error: "not found",
+            };
+          }
+
+          const th = tracked.value;
+          const parts = [`Type hierarchy for ${th.item.name} (${th.item.kind}):`];
+          if (th.supertypes.length > 0) {
+            parts.push(`\nSupertypes (${String(th.supertypes.length)}):`);
+            for (const s of th.supertypes) {
+              parts.push(`  ${s.kind} ${s.name} — ${s.file}:${String(s.line)}`);
+            }
+          }
+          if (th.subtypes.length > 0) {
+            parts.push(`\nSubtypes (${String(th.subtypes.length)}):`);
+            for (const s of th.subtypes) {
+              parts.push(`  ${s.kind} ${s.name} — ${s.file}:${String(s.line)}`);
+            }
+          }
+          if (th.supertypes.length === 0 && th.subtypes.length === 0) {
+            parts.push("  No supertypes or subtypes found.");
+          }
+
+          return {
+            success: true,
+            output: parts.join("\n"),
+            backend: tracked.backend,
+          };
+        }
+
+        case "search_symbols": {
+          const query = args.query ?? args.symbol ?? "";
+          if (!query) {
+            return {
+              success: false,
+              output: "query or symbol is required for search_symbols",
+              error: "missing query",
+            };
+          }
+
+          // Try workspace symbols first (LSP), then fall back to symbol index
+          const tracked = await router.executeWithFallbackTracked(
+            language,
+            "findWorkspaceSymbols",
+            (b) => (b.findWorkspaceSymbols ? b.findWorkspaceSymbols(query) : Promise.resolve(null)),
+          );
+
+          if (!tracked || tracked.value.length === 0) {
+            return { success: true, output: `No symbols matching '${query}'` };
+          }
+
+          return {
+            success: true,
+            output: `Symbols matching '${query}' (${String(tracked.value.length)}):\n${tracked.value.map(formatSymbol).join("\n")}`,
+            backend: tracked.backend,
           };
         }
 

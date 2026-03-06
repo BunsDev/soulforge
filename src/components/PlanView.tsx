@@ -1,14 +1,12 @@
-import { Box, Text } from "ink";
+import { TextAttributes } from "@opentui/core";
 import type { Plan, PlanStepStatus } from "../types/index.js";
-import { POPUP_BG, PopupRow, Spinner } from "./shared.js";
-
-const POPUP_WIDTH = 32;
+import { PopupRow, Spinner } from "./shared.js";
 
 const STATUS_ICONS: Record<PlanStepStatus, string> = {
-  done: "\uF058", //  nf-fa-check_circle
-  active: "", // filled by spinner
-  pending: "\uDB80\uDD31", // 󰄱 nf-md-checkbox_blank_outline
-  skipped: "\uDB80\uDD56", // 󰅖 nf-md-close_circle_outline
+  done: "\uF058",
+  active: "",
+  pending: "\uDB80\uDD31",
+  skipped: "\uDB80\uDD56",
 };
 
 const STATUS_COLORS: Record<PlanStepStatus, string> = {
@@ -18,18 +16,21 @@ const STATUS_COLORS: Record<PlanStepStatus, string> = {
   skipped: "#444",
 };
 
+const MAX_VISIBLE = 5;
+
 interface Props {
   plan: Plan;
   mode: "overlay" | "inline";
+  bg?: string;
 }
 
-export function PlanView({ plan, mode }: Props) {
+export function PlanView({ plan, mode, bg }: Props) {
   const doneCount = plan.steps.filter((s) => s.status === "done").length;
   const totalCount = plan.steps.length;
   const allDone = doneCount === totalCount;
 
   if (mode === "overlay") {
-    return <OverlayPlan plan={plan} doneCount={doneCount} totalCount={totalCount} />;
+    return <OverlayPlan plan={plan} doneCount={doneCount} totalCount={totalCount} bg={bg} />;
   }
 
   return <InlinePlan plan={plan} doneCount={doneCount} totalCount={totalCount} allDone={allDone} />;
@@ -39,53 +40,91 @@ function OverlayPlan({
   plan,
   doneCount,
   totalCount,
+  bg,
 }: {
   plan: Plan;
   doneCount: number;
   totalCount: number;
+  bg?: string;
 }) {
-  const innerW = POPUP_WIDTH - 2;
-  const maxLabel = 22; // truncate labels to fit
+  const maxLabel = 22;
+  const w = 28;
+
+  if (bg) {
+    return (
+      <box flexDirection="column">
+        <PopupRow w={w} bg={bg}>
+          <text fg="#9B30FF" attributes={TextAttributes.BOLD} bg={bg}>
+            {"\uF0CB"} Plan
+          </text>
+          <text fg="#555" bg={bg}>
+            {"  "}
+            {String(doneCount)}/{String(totalCount)}
+          </text>
+        </PopupRow>
+        {plan.steps.slice(0, MAX_VISIBLE).map((step) => (
+          <PopupRow key={step.id} w={w} bg={bg}>
+            {step.status === "active" ? (
+              <Spinner />
+            ) : (
+              <text fg={STATUS_COLORS[step.status]} bg={bg}>
+                {STATUS_ICONS[step.status]}
+              </text>
+            )}
+            <text
+              fg={step.status === "active" ? "#eee" : STATUS_COLORS[step.status]}
+              attributes={step.status === "active" ? TextAttributes.BOLD : undefined}
+              bg={bg}
+            >
+              {" "}
+              {step.label.length > maxLabel ? `${step.label.slice(0, maxLabel - 1)}…` : step.label}
+            </text>
+          </PopupRow>
+        ))}
+        {plan.steps.length > MAX_VISIBLE && (
+          <PopupRow w={w} bg={bg}>
+            <text fg="#555" bg={bg}>
+              +{String(plan.steps.length - MAX_VISIBLE)} more
+            </text>
+          </PopupRow>
+        )}
+      </box>
+    );
+  }
 
   return (
-    <Box flexDirection="column">
-      {/* Title */}
-      <PopupRow w={innerW}>
-        <Text color="#9B30FF" bold backgroundColor={POPUP_BG}>
+    <box flexDirection="column">
+      <box height={1} paddingLeft={2}>
+        <text fg="#9B30FF" attributes={TextAttributes.BOLD}>
           {"\uF0CB"} Plan
-        </Text>
-        <Text color="#555" backgroundColor={POPUP_BG}>
+        </text>
+        <text fg="#555">
           {"  "}
           {String(doneCount)}/{String(totalCount)}
-        </Text>
-      </PopupRow>
-      {/* Separator */}
-      <PopupRow w={innerW}>
-        <Text color="#333" backgroundColor={POPUP_BG}>
-          {"─".repeat(innerW - 4)}
-        </Text>
-      </PopupRow>
-      {/* Steps */}
-      {plan.steps.map((step) => (
-        <PopupRow key={step.id} w={innerW}>
+        </text>
+      </box>
+      {plan.steps.slice(0, MAX_VISIBLE).map((step) => (
+        <box key={step.id} height={1} paddingLeft={2}>
           {step.status === "active" ? (
             <Spinner />
           ) : (
-            <Text color={STATUS_COLORS[step.status]} backgroundColor={POPUP_BG}>
-              {STATUS_ICONS[step.status]}
-            </Text>
+            <text fg={STATUS_COLORS[step.status]}>{STATUS_ICONS[step.status]}</text>
           )}
-          <Text
-            color={step.status === "active" ? "#eee" : STATUS_COLORS[step.status]}
-            bold={step.status === "active"}
-            backgroundColor={POPUP_BG}
+          <text
+            fg={step.status === "active" ? "#eee" : STATUS_COLORS[step.status]}
+            attributes={step.status === "active" ? TextAttributes.BOLD : undefined}
           >
             {" "}
             {step.label.length > maxLabel ? `${step.label.slice(0, maxLabel - 1)}…` : step.label}
-          </Text>
-        </PopupRow>
+          </text>
+        </box>
       ))}
-    </Box>
+      {plan.steps.length > MAX_VISIBLE && (
+        <box height={1} paddingLeft={2}>
+          <text fg="#555">+{String(plan.steps.length - MAX_VISIBLE)} more</text>
+        </box>
+      )}
+    </box>
   );
 }
 
@@ -101,48 +140,53 @@ function InlinePlan({
   allDone: boolean;
 }) {
   const counterText = allDone ? "done" : `${String(doneCount)}/${String(totalCount)}`;
-  // Compute inner width: widest label + icon padding, min 30
-  const titleLen = plan.title.length + 4; // icon + spaces
+  const titleLen = plan.title.length + 4;
   const maxLabel = Math.max(titleLen, ...plan.steps.map((s) => s.label.length + 4));
-  const counterLen = counterText.length + 4; // " ── done "
+  const counterLen = counterText.length + 4;
   const innerW = Math.max(30, Math.min(56, maxLabel + counterLen));
 
-  // Header: ╭──  Plan Title ──────────── 2/4 ╮
   const headerContent = `  \uF0CB ${plan.title} `;
   const headerRight = ` ${counterText} `;
   const headerFill = Math.max(0, innerW - headerContent.length - headerRight.length);
 
   return (
-    <Box flexDirection="column">
-      {/* Header */}
-      <Text>
-        <Text color="#6A0DAD">╭──</Text>
-        <Text color="#9B30FF" bold>
+    <box flexDirection="column">
+      <text>
+        <span fg="#6A0DAD">╭──</span>
+        <span fg="#9B30FF" attributes={TextAttributes.BOLD}>
           {headerContent}
-        </Text>
-        <Text color="#6A0DAD">{"─".repeat(headerFill)}</Text>
-        <Text color="#555">{headerRight}</Text>
-        <Text color="#6A0DAD">╮</Text>
-      </Text>
-      {/* Steps */}
-      {plan.steps.map((step) => {
+        </span>
+        <span fg="#6A0DAD">{"─".repeat(headerFill)}</span>
+        <span fg="#555">{headerRight}</span>
+        <span fg="#6A0DAD">╮</span>
+      </text>
+      {plan.steps.slice(0, MAX_VISIBLE).map((step) => {
         const label = `${STATUS_ICONS[step.status]} ${step.label}`;
         const pad = Math.max(0, innerW - label.length - 1);
         return (
-          <Box key={step.id} height={1}>
-            <Text wrap="truncate">
-              <Text color="#6A0DAD">│ </Text>
-              <Text color={STATUS_COLORS[step.status]}>{label}</Text>
-              <Text>{" ".repeat(pad)}</Text>
-              <Text color="#6A0DAD">│</Text>
-            </Text>
-          </Box>
+          <box key={step.id} height={1}>
+            <text truncate>
+              <span fg="#6A0DAD">│ </span>
+              <span fg={STATUS_COLORS[step.status]}>{label}</span>
+              <span>{" ".repeat(pad)}</span>
+              <span fg="#6A0DAD">│</span>
+            </text>
+          </box>
         );
       })}
-      {/* Footer */}
-      <Text>
-        <Text color="#6A0DAD">╰{"─".repeat(innerW)}╯</Text>
-      </Text>
-    </Box>
+      {plan.steps.length > MAX_VISIBLE && (
+        <box height={1}>
+          <text truncate>
+            <span fg="#6A0DAD">│ </span>
+            <span fg="#555">+{String(plan.steps.length - MAX_VISIBLE)} more</span>
+            <span>{" ".repeat(Math.max(0, innerW - 8))}</span>
+            <span fg="#6A0DAD">│</span>
+          </text>
+        </box>
+      )}
+      <text>
+        <span fg="#6A0DAD">╰{"─".repeat(innerW)}╯</span>
+      </text>
+    </box>
   );
 }

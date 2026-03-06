@@ -1,10 +1,12 @@
-import { Box, Text } from "ink";
-import { useEffect, useMemo, useState } from "react";
+import { TextAttributes } from "@opentui/core";
+import { memo, useEffect, useMemo, useState } from "react";
 import {
+  CATEGORY_COLORS,
   TOOL_CATEGORIES,
   TOOL_ICON_COLORS,
   TOOL_ICONS,
   TOOL_LABELS,
+  type ToolCategory,
 } from "../core/tool-display.js";
 import type {
   ChatMessage,
@@ -26,9 +28,25 @@ const USER_COLOR = "#FF0040";
 const ASSISTANT_COLOR = "#9B30FF";
 const SYSTEM_COLOR = "#555";
 const ERROR_COLOR = "#f44";
+export const RAIL_BORDER = {
+  topLeft: "▌",
+  topRight: "▌",
+  bottomLeft: "▌",
+  bottomRight: "▌",
+  horizontal: "▌",
+  vertical: "▌",
+  topT: "▌",
+  bottomT: "▌",
+  leftT: "▌",
+  rightT: "▌",
+  cross: "▌",
+};
 interface Props {
   messages: ChatMessage[];
   chatStyle: ChatStyle;
+  diffStyle?: "default" | "sidebyside" | "compact";
+  showReasoning?: boolean;
+  reasoningExpanded?: boolean;
 }
 
 // ─── Helpers ───
@@ -59,6 +77,45 @@ function formatToolSummary(tc: ToolCall): string {
   return "";
 }
 
+// ─── Error helpers ───
+
+const RETRY_COLOR = "#fa0";
+
+function cleanErrorDetail(msg: string): string {
+  let cleaned = msg.replace(/\[([^\]]+)\]\([^)]+\)/g, "");
+  cleaned = cleaned.replace(/https?:\/\/\S+/g, "");
+  cleaned = cleaned.replace(/For details,?\s*refer to:?\s*/gi, "");
+  cleaned = cleaned.replace(/You can see the response headers[^.]*\.\s*/g, "");
+  cleaned = cleaned.replace(/You may also contact sales[^.]*\.\s*/g, "");
+  cleaned = cleaned.replace(/\s{2,}/g, " ").trim();
+  cleaned = cleaned.replace(/[\s.]+$/, "");
+  return cleaned;
+}
+
+function categorizeError(msg: string): { category: string; detail: string } {
+  const raw = msg
+    .replace(/^Error:\s*/, "")
+    .replace(/^Request failed:\s*/, "")
+    .replace(/^Failed[^:]*:\s*/, "");
+  if (/rate.?limit|too many requests|429|529/i.test(raw))
+    return { category: "Rate Limited", detail: cleanErrorDetail(raw) };
+  if (/overloaded|503|capacity/i.test(raw))
+    return { category: "Service Overloaded", detail: cleanErrorDetail(raw) };
+  if (/unauthorized|401|403|api.?key|invalid.*key/i.test(raw))
+    return { category: "Auth Error", detail: cleanErrorDetail(raw) };
+  if (/not permitted|not supported|invalid parameter|unknown parameter/i.test(raw))
+    return { category: "Config Error", detail: cleanErrorDetail(raw) };
+  if (/network|ECONNREFUSED|ETIMEDOUT|fetch failed|502/i.test(raw))
+    return { category: "Network Error", detail: cleanErrorDetail(raw) };
+  return { category: "Error", detail: cleanErrorDetail(raw) };
+}
+
+function parseRetry(text: string): { attempt: string; reason: string; delay: string } | null {
+  const match = text.match(/^Retry (\d+\/\d+): (.+?) \[delay:(\d+)s\]$/);
+  if (!match) return null;
+  return { attempt: match[1] as string, reason: match[2] as string, delay: match[3] as string };
+}
+
 // ─── SystemMessage ───
 
 function SystemMessage({ msg, animate = true }: { msg: ChatMessage; animate?: boolean }) {
@@ -66,10 +123,20 @@ function SystemMessage({ msg, animate = true }: { msg: ChatMessage; animate?: bo
   const text = msg.content;
   const isError =
     text.startsWith("Error:") || text.startsWith("Request failed:") || text.startsWith("Failed");
-  const railColor = isError ? ERROR_COLOR : SYSTEM_COLOR;
-  const textColor = isError ? "#e88" : "#777";
-  const chunkSize = Math.max(1, Math.ceil(text.length / MAX_REVEAL_STEPS));
-  const totalSteps = Math.ceil(text.length / chunkSize);
+  const retry = parseRetry(text);
+  const isInterrupt = text === "Generation interrupted.";
+
+  const displayText = isError
+    ? categorizeError(text).detail
+    : retry
+      ? `${categorizeError(retry.reason).category.toLowerCase()} — waiting ~${retry.delay}s`
+      : text;
+
+  const railColor = isError ? ERROR_COLOR : retry ? RETRY_COLOR : SYSTEM_COLOR;
+  const textColor = isError ? "#e88" : retry ? "#777" : "#777";
+
+  const chunkSize = Math.max(1, Math.ceil(displayText.length / MAX_REVEAL_STEPS));
+  const totalSteps = Math.ceil(displayText.length / chunkSize);
   const [step, setStep] = useState(animate ? 0 : totalSteps);
   const [done, setDone] = useState(!animate);
 
@@ -83,38 +150,52 @@ function SystemMessage({ msg, animate = true }: { msg: ChatMessage; animate?: bo
     return () => clearTimeout(timer);
   }, [step, totalSteps, done]);
 
-  const visibleText = done ? text : text.slice(0, step * chunkSize);
+  const visibleText = done ? displayText : displayText.slice(0, step * chunkSize);
   const lines = visibleText.split("\n");
 
+  const headerLabel = isError
+    ? categorizeError(text).category
+    : retry
+      ? `Retry ${retry.attempt}`
+      : isInterrupt
+        ? "Interrupted"
+        : "System";
+  const headerIcon = isError ? "✗" : retry ? "↻" : isInterrupt ? "⊘" : "";
+
   return (
-    <Box flexDirection="column" marginBottom={1}>
-      {/* Header */}
-      <Box>
-        <Text color={railColor}>▏ </Text>
+    <box flexDirection="column" marginBottom={1}>
+      <box flexDirection="row">
+        <text fg={railColor}>{"▏  "}</text>
         {isError ? (
-          <Text color={ERROR_COLOR} bold>
-            ✗ Error
-          </Text>
+          <text fg={ERROR_COLOR} attributes={TextAttributes.BOLD}>
+            {headerIcon} {headerLabel}
+          </text>
+        ) : retry ? (
+          <text fg="#da0" attributes={TextAttributes.BOLD}>
+            {headerIcon} {headerLabel}
+          </text>
         ) : (
-          <Text color={SYSTEM_COLOR}> System</Text>
+          <text fg={SYSTEM_COLOR}>
+            {headerIcon ? `${headerIcon} ` : " "}
+            {headerLabel}
+          </text>
         )}
-        <Text color="#333"> · {time}</Text>
-      </Box>
-      {/* Content with rail */}
+        <text fg="#333"> · {time}</text>
+      </box>
       {lines.map((line, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: stable line order
-        <Box key={i}>
-          <Text color={railColor}>▏ </Text>
-          <Text color={textColor}>{line}</Text>
-        </Box>
+        <box key={i} flexDirection="row">
+          <text fg={railColor}>{"▏  "}</text>
+          <text fg={textColor}>{line}</text>
+        </box>
       ))}
       {!done && (
-        <Box>
-          <Text color={railColor}>▏ </Text>
-          <Text color={railColor}>{CURSOR_CHAR}</Text>
-        </Box>
+        <box flexDirection="row">
+          <text fg={railColor}>{"▏  "}</text>
+          <text fg={railColor}>{CURSOR_CHAR}</text>
+        </box>
       )}
-    </Box>
+    </box>
   );
 }
 
@@ -123,11 +204,25 @@ const META_TOOLS = new Set(["plan", "update_plan_step", "ask_user", "editor_pane
 
 // ─── ToolCallRow (non-edit) ───
 
+function parseBackend(result?: { output: string }): string | null {
+  if (!result) return null;
+  try {
+    const parsed = JSON.parse(result.output);
+    if (parsed.backend && typeof parsed.backend === "string") return parsed.backend as string;
+  } catch {
+    // not JSON
+  }
+  return null;
+}
+
 function ToolCallRow({ tc }: { tc: ToolCall }) {
   const icon = TOOL_ICONS[tc.name] ?? "\uF0AD";
   const iconColor = TOOL_ICON_COLORS[tc.name] ?? "#888";
   const label = TOOL_LABELS[tc.name] ?? tc.name;
-  const category = TOOL_CATEGORIES[tc.name];
+  const staticCategory = TOOL_CATEGORIES[tc.name];
+  const backend = parseBackend(tc.result);
+  const category = backend ?? staticCategory;
+  const categoryColor = category ? (CATEGORY_COLORS[category as ToolCategory] ?? "#444") : "#444";
   const argStr = formatToolSummary(tc);
   const statusIcon = tc.result ? (tc.result.success ? "✓" : "✗") : "●";
   const statusColor = tc.result ? (tc.result.success ? "#2d5" : "#f44") : "#666";
@@ -138,17 +233,17 @@ function ToolCallRow({ tc }: { tc: ToolCall }) {
     : "pending";
 
   return (
-    <Box height={1} flexShrink={0}>
-      <Text wrap="truncate">
-        <Text color={statusColor}>{statusIcon} </Text>
-        <Text color={iconColor}>{icon} </Text>
-        {category ? <Text color="#444">[{category}] </Text> : null}
-        <Text color="#999">{label}</Text>
-        {argStr ? <Text color="#777"> {argStr}</Text> : null}
-        <Text color="#555"> → </Text>
-        <Text color={statusColor}>{resultText}</Text>
-      </Text>
-    </Box>
+    <box height={1} flexShrink={0}>
+      <text truncate>
+        <span fg={statusColor}>{statusIcon} </span>
+        <span fg={iconColor}>{icon} </span>
+        {category ? <span fg={categoryColor}>[{category}] </span> : null}
+        <span fg="#999">{label}</span>
+        {argStr ? <span fg="#777"> {argStr}</span> : null}
+        <span fg="#555"> → </span>
+        <span fg={statusColor}>{resultText}</span>
+      </text>
+    </box>
   );
 }
 
@@ -158,21 +253,27 @@ function CollapsedToolGroup({ calls }: { calls: ToolCall[] }) {
   const count = calls.length;
   const allOk = calls.every((tc) => tc.result?.success);
   return (
-    <Box height={1} flexShrink={0}>
-      <Text wrap="truncate">
-        <Text color={allOk ? "#2d5" : "#f44"}>{allOk ? "✓" : "✗"} </Text>
-        <Text color="#777">
+    <box height={1} flexShrink={0}>
+      <text truncate>
+        <span fg={allOk ? "#2d5" : "#f44"}>{allOk ? "✓" : "✗"} </span>
+        <span fg="#777">
           {String(count)} tool call{count > 1 ? "s" : ""} (
           {calls.map((tc) => TOOL_LABELS[tc.name] ?? tc.name).join(", ")})
-        </Text>
-      </Text>
-    </Box>
+        </span>
+      </text>
+    </box>
   );
 }
 
 // ─── EditToolCall (with DiffView) ───
 
-function EditToolCall({ tc }: { tc: ToolCall }) {
+function EditToolCall({
+  tc,
+  diffStyle,
+}: {
+  tc: ToolCall;
+  diffStyle?: "default" | "sidebyside" | "compact";
+}) {
   const hasDiff =
     typeof tc.args.path === "string" &&
     typeof tc.args.oldString === "string" &&
@@ -187,6 +288,7 @@ function EditToolCall({ tc }: { tc: ToolCall }) {
       newString={tc.args.newString as string}
       success={tc.result?.success ?? false}
       errorMessage={tc.result?.error}
+      mode={diffStyle}
     />
   );
 }
@@ -194,7 +296,7 @@ function EditToolCall({ tc }: { tc: ToolCall }) {
 // ─── WritePlanCall (structured plan view) ───
 
 function parsePlanOutput(tc: ToolCall): PlanOutput | null {
-  if (tc.name !== "write_plan" || !tc.result?.success) return null;
+  if ((tc.name !== "write_plan" && tc.name !== "plan") || !tc.result?.success) return null;
   const a = tc.args;
   if (typeof a.title === "string" && Array.isArray(a.files) && Array.isArray(a.steps)) {
     return a as unknown as PlanOutput;
@@ -210,90 +312,112 @@ function WritePlanCall({ tc }: { tc: ToolCall }) {
 
 // ─── UserMessage (accent mode) ───
 
-function UserMessageAccent({ msg }: { msg: ChatMessage }) {
+const UserMessageAccent = memo(function UserMessageAccent({ msg }: { msg: ChatMessage }) {
   const time = formatTime(msg.timestamp);
-  const lines = msg.content.split("\n");
 
   return (
-    <Box flexDirection="column" marginBottom={1}>
-      <Box>
-        <Text color={USER_COLOR}>▌ </Text>
-        <Text color={USER_COLOR} bold>
+    <box
+      flexDirection="column"
+      marginBottom={1}
+      border={["left"]}
+      borderColor={USER_COLOR}
+      customBorderChars={RAIL_BORDER}
+      paddingLeft={2}
+    >
+      <box flexDirection="row">
+        <text fg={USER_COLOR} attributes={TextAttributes.BOLD}>
           You
-        </Text>
-        <Text color="#333"> · {time}</Text>
-      </Box>
-      {lines.map((line, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: stable line order
-        <Box key={i}>
-          <Text color={USER_COLOR}>▌ </Text>
-          <Text color="#eee">{line}</Text>
-        </Box>
-      ))}
-    </Box>
+        </text>
+        <text fg="#333"> · {time}</text>
+      </box>
+      <text>{msg.content}</text>
+    </box>
   );
-}
+});
 
 // ─── UserMessage (bubble mode) ───
 
-function UserMessageBubble({ msg }: { msg: ChatMessage }) {
+const UserMessageBubble = memo(function UserMessageBubble({ msg }: { msg: ChatMessage }) {
   const time = formatTime(msg.timestamp);
 
   return (
-    <Box flexDirection="column" alignItems="flex-end" marginBottom={1}>
-      <Box borderStyle="round" borderColor={USER_COLOR} paddingX={1}>
-        <Text color="#eee">{msg.content}</Text>
-      </Box>
-      <Text color="#555"> You · {time}</Text>
-    </Box>
+    <box flexDirection="column" alignItems="flex-end" marginBottom={1}>
+      <box borderStyle="rounded" border={true} borderColor={USER_COLOR} paddingX={2}>
+        <text>{msg.content}</text>
+      </box>
+      <text fg="#555"> You · {time}</text>
+    </box>
   );
-}
+});
 
 // ─── AssistantMessage ───
 
-function renderSegments(segments: MessageSegment[], toolCallMap: Map<string, ToolCall>) {
+function renderSegments(
+  segments: MessageSegment[],
+  toolCallMap: Map<string, ToolCall>,
+  diffStyle: "default" | "sidebyside" | "compact" = "default",
+  showReasoning = true,
+  reasoningExpanded = false,
+) {
+  let lastVisibleType: string | null = null;
   return segments.map((seg, i) => {
-    // Add spacing between different segment types (e.g. tools → text)
-    const prev = i > 0 ? segments[i - 1] : null;
-    const needsGap = prev && prev.type !== seg.type;
+    if (seg.type === "reasoning" && !showReasoning) return null;
+
+    const needsGap = lastVisibleType !== null && lastVisibleType !== seg.type;
+    lastVisibleType = seg.type;
 
     if (seg.type === "text") {
       return (
         // biome-ignore lint/suspicious/noArrayIndexKey: stable segment order
-        <Box key={`text-${i}`} flexDirection="column" marginTop={needsGap ? 1 : 0}>
-          <Markdown text={seg.content} color="#ccc" />
-        </Box>
+        <box key={`text-${i}`} flexDirection="column" marginTop={needsGap ? 1 : 0}>
+          <Markdown text={seg.content} />
+        </box>
       );
     }
     if (seg.type === "reasoning") {
-      return <ReasoningBlock key={seg.id} content={seg.content} expanded={false} />;
+      const rKey = `${seg.id}-${reasoningExpanded ? "exp" : "col"}`;
+      return <ReasoningBlock key={rKey} content={seg.content} expanded={reasoningExpanded} />;
     }
     if (seg.type === "plan") {
       const doneSteps = seg.plan.steps.filter((s) => s.status === "done").length;
       const totalSteps = seg.plan.steps.length;
+      const allDone = doneSteps === totalSteps;
       const planKey = `plan-${seg.plan.title.slice(0, 20)}-${String(seg.plan.createdAt)}`;
       return (
-        <Box
+        <box
           key={planKey}
+          flexDirection="column"
           flexShrink={0}
           marginTop={needsGap ? 1 : 0}
-          borderStyle="bold"
-          borderLeft
-          borderTop={false}
-          borderBottom={false}
-          borderRight={false}
-          borderColor="#00BFFF"
+          border={["left"]}
+          borderStyle="heavy"
+          borderColor={allDone ? "#2d5" : "#00BFFF"}
           paddingLeft={1}
         >
-          <Text wrap="truncate">
-            <Text color="#2d5">✓ </Text>
-            <Text color="#00BFFF">{TOOL_ICONS.plan} </Text>
-            <Text color="#999">Plan: {seg.plan.title} </Text>
-            <Text color="#666">
-              ({String(doneSteps)}/{String(totalSteps)} steps)
-            </Text>
-          </Text>
-        </Box>
+          <text truncate>
+            <span fg={allDone ? "#2d5" : "#00BFFF"}>{TOOL_ICONS.plan} </span>
+            <span fg="#ccc" attributes={TextAttributes.BOLD}>
+              {seg.plan.title}{" "}
+            </span>
+            <span fg="#555">
+              {String(doneSteps)}/{String(totalSteps)}
+            </span>
+          </text>
+          {seg.plan.steps.map((step) => {
+            const isDone = step.status === "done";
+            const isSkipped = step.status === "skipped";
+            const stepIcon = isDone ? "✓" : isSkipped ? "⊘" : "○";
+            const stepColor = isDone ? "#2d5" : isSkipped ? "#444" : "#555";
+            return (
+              <box key={step.id} height={1} flexShrink={0}>
+                <text truncate>
+                  <span fg={stepColor}>{stepIcon} </span>
+                  <span fg={isDone ? "#888" : "#666"}>{step.label}</span>
+                </text>
+              </box>
+            );
+          })}
+        </box>
       );
     }
     const calls = seg.toolCallIds
@@ -301,7 +425,6 @@ function renderSegments(segments: MessageSegment[], toolCallMap: Map<string, Too
       .filter(Boolean) as ToolCall[];
     if (calls.length === 0) return null;
 
-    // Group consecutive meta-tool calls for collapsing
     const groups: { type: "normal"; tc: ToolCall }[] | { type: "meta"; calls: ToolCall[] }[] = [];
     let metaBuf: ToolCall[] = [];
     const flushMeta = () => {
@@ -321,35 +444,46 @@ function renderSegments(segments: MessageSegment[], toolCallMap: Map<string, Too
     flushMeta();
 
     const toolsKey = `tools-${seg.toolCallIds[0] ?? String(i)}`;
+    const typedGroups = groups as (
+      | { type: "normal"; tc: ToolCall }
+      | { type: "meta"; calls: ToolCall[] }
+    )[];
     return (
-      <Box key={toolsKey} flexDirection="column" marginTop={needsGap ? 1 : 0}>
-        {(groups as ({ type: "normal"; tc: ToolCall } | { type: "meta"; calls: ToolCall[] })[]).map(
-          (g, gi) => {
-            if (g.type === "meta") {
-              return <CollapsedToolGroup key={`meta-${String(gi)}`} calls={g.calls} />;
-            }
-            return (
-              <Box key={g.tc.id} flexDirection="column">
-                {g.tc.name === "edit_file" ? (
-                  <EditToolCall tc={g.tc} />
-                ) : g.tc.name === "write_plan" ? (
-                  <WritePlanCall tc={g.tc} />
-                ) : (
-                  <ToolCallRow tc={g.tc} />
-                )}
-              </Box>
-            );
-          },
-        )}
-      </Box>
+      <box key={toolsKey} flexDirection="column" marginTop={needsGap ? 1 : 0}>
+        {typedGroups.map((g, gi) => {
+          if (g.type === "meta") {
+            return <CollapsedToolGroup key={`meta-${String(gi)}`} calls={g.calls} />;
+          }
+          return (
+            <box key={g.tc.id} flexDirection="column">
+              {g.tc.name === "edit_file" ? (
+                <EditToolCall tc={g.tc} diffStyle={diffStyle} />
+              ) : g.tc.name === "write_plan" || g.tc.name === "plan" ? (
+                <WritePlanCall tc={g.tc} />
+              ) : (
+                <ToolCallRow tc={g.tc} />
+              )}
+            </box>
+          );
+        })}
+      </box>
     );
   });
 }
 
-function AssistantMessage({ msg }: { msg: ChatMessage }) {
+const AssistantMessage = memo(function AssistantMessage({
+  msg,
+  diffStyle = "default",
+  showReasoning = true,
+  reasoningExpanded = false,
+}: {
+  msg: ChatMessage;
+  diffStyle?: "default" | "sidebyside" | "compact";
+  showReasoning?: boolean;
+  reasoningExpanded?: boolean;
+}) {
   const time = formatTime(msg.timestamp);
 
-  // Build tool call lookup
   const toolCallMap = useMemo(() => {
     const map = new Map<string, ToolCall>();
     for (const tc of msg.toolCalls ?? []) {
@@ -364,51 +498,102 @@ function AssistantMessage({ msg }: { msg: ChatMessage }) {
   const isEmpty = !hasSegments && !hasContent && !hasTools;
 
   return (
-    <Box
+    <box
       flexDirection="column"
       marginBottom={1}
-      borderStyle="bold"
-      borderLeft
-      borderTop={false}
-      borderBottom={false}
-      borderRight={false}
+      border={["left"]}
       borderColor={ASSISTANT_COLOR}
-      paddingLeft={1}
+      customBorderChars={RAIL_BORDER}
+      paddingLeft={2}
     >
-      {/* Header */}
-      <Box>
-        <Text color={ASSISTANT_COLOR}>󰚩 Forge</Text>
-        <Text color="#333"> · {time}</Text>
-      </Box>
+      <box flexDirection="row">
+        <text fg={ASSISTANT_COLOR}>󰚩 Forge</text>
+        <text fg="#333"> · {time}</text>
+      </box>
 
       {isEmpty ? (
-        <Text color="#555" italic>
+        <text fg="#555" attributes={TextAttributes.ITALIC}>
           Empty response — model returned no content.
-        </Text>
+        </text>
       ) : hasSegments ? (
-        renderSegments(msg.segments as MessageSegment[], toolCallMap)
+        renderSegments(
+          msg.segments as MessageSegment[],
+          toolCallMap,
+          diffStyle,
+          showReasoning,
+          reasoningExpanded,
+        )
       ) : (
         <>
-          {hasContent && <Markdown text={msg.content} color="#ccc" />}
+          {hasContent && <Markdown text={msg.content} />}
           {hasTools && (
-            <Box flexDirection="column">
+            <box flexDirection="column">
               {msg.toolCalls?.map((tc) => (
-                <Box key={tc.id} flexDirection="column">
-                  {tc.name === "edit_file" ? <EditToolCall tc={tc} /> : <ToolCallRow tc={tc} />}
-                </Box>
+                <box key={tc.id} flexDirection="column">
+                  {tc.name === "edit_file" ? (
+                    <EditToolCall tc={tc} diffStyle={diffStyle} />
+                  ) : (
+                    <ToolCallRow tc={tc} />
+                  )}
+                </box>
               ))}
-            </Box>
+            </box>
           )}
         </>
       )}
-    </Box>
+    </box>
   );
-}
+});
 
 // ─── Main Component ───
 
-export function MessageList({ messages, chatStyle }: Props) {
-  // Find the last system message index so only it gets the reveal animation
+export const StaticMessage = memo(function StaticMessage({
+  msg,
+  chatStyle,
+  diffStyle = "default",
+  showReasoning = true,
+  reasoningExpanded = false,
+  animate = false,
+}: {
+  msg: ChatMessage;
+  chatStyle: ChatStyle;
+  diffStyle?: "default" | "sidebyside" | "compact";
+  showReasoning?: boolean;
+  reasoningExpanded?: boolean;
+  animate?: boolean;
+}) {
+  if (msg.role === "system") {
+    return (
+      <box flexDirection="column" paddingX={1} width="100%">
+        <SystemMessage msg={msg} animate={animate} />
+      </box>
+    );
+  }
+  if (msg.role === "user") {
+    return (
+      <box flexDirection="column" paddingX={1} width="100%">
+        {chatStyle === "bubble" ? <UserMessageBubble msg={msg} /> : <UserMessageAccent msg={msg} />}
+      </box>
+    );
+  }
+  return (
+    <box flexDirection="column" paddingX={1} width="100%">
+      <AssistantMessage
+        msg={msg}
+        diffStyle={diffStyle}
+        showReasoning={showReasoning}
+        reasoningExpanded={reasoningExpanded}
+      />
+    </box>
+  );
+});
+
+export const MessageList = memo(function MessageList({
+  messages,
+  chatStyle,
+  diffStyle = "default",
+  showReasoning = true,
+}: Props) {
   const lastSystemIdx = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i]?.role === "system") return i;
@@ -418,18 +603,18 @@ export function MessageList({ messages, chatStyle }: Props) {
 
   if (messages.length === 0) {
     return (
-      <Box flexDirection="column" paddingX={1} width="100%">
-        <Box marginTop={1}>
-          <Text color="#555" italic>
+      <box flexDirection="column" paddingX={1} width="100%">
+        <box marginTop={1}>
+          <text fg="#555" attributes={TextAttributes.ITALIC}>
             No messages yet. Type below to start.
-          </Text>
-        </Box>
-      </Box>
+          </text>
+        </box>
+      </box>
     );
   }
 
   return (
-    <Box flexDirection="column" paddingX={1} width="100%">
+    <box flexDirection="column" paddingX={1} width="100%">
       {messages.map((msg, idx) => {
         if (msg.role === "system") {
           return <SystemMessage key={msg.id} msg={msg} animate={idx === lastSystemIdx} />;
@@ -443,8 +628,15 @@ export function MessageList({ messages, chatStyle }: Props) {
           );
         }
 
-        return <AssistantMessage key={msg.id} msg={msg} />;
+        return (
+          <AssistantMessage
+            key={msg.id}
+            msg={msg}
+            diffStyle={diffStyle}
+            showReasoning={showReasoning}
+          />
+        );
       })}
-    </Box>
+    </box>
   );
-}
+});

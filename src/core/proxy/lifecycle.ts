@@ -2,6 +2,7 @@ import { type ChildProcess, execSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { logBackgroundError } from "../../stores/errors.js";
 import { getVendoredPath, installProxy } from "../setup/install.js";
 
 let proxyProcess: ChildProcess | null = null;
@@ -82,7 +83,16 @@ export async function ensureProxy(): Promise<{ ok: boolean; error?: string }> {
       stdio: "ignore",
     });
     proxyProcess.unref();
-    proxyProcess.on("error", () => {
+    proxyProcess.on("error", (err) => {
+      logBackgroundError("CLIProxyAPI", err.message);
+      proxyProcess = null;
+    });
+    proxyProcess.on("exit", (code, signal) => {
+      if (code != null && code !== 0) {
+        logBackgroundError("CLIProxyAPI", `exited with code ${code}`);
+      } else if (signal) {
+        logBackgroundError("CLIProxyAPI", `killed by ${signal}`);
+      }
       proxyProcess = null;
     });
   } catch (err) {
@@ -114,6 +124,10 @@ export function stopProxy(): void {
   }
 }
 
+export function getProxyPid(): number | null {
+  return proxyProcess?.pid ?? null;
+}
+
 export function proxyLogin(): { command: string; args: string[] } {
   const binary = getProxyBinary();
   ensureConfig();
@@ -121,4 +135,89 @@ export function proxyLogin(): { command: string; args: string[] } {
     command: binary ?? "cli-proxy-api",
     args: ["-config", PROXY_CONFIG_PATH, "-claude-login"],
   };
+}
+
+export interface ProxyLoginHandle {
+  promise: Promise<{ ok: boolean }>;
+  abort: () => void;
+}
+
+export function runProxyLogin(onOutput: (line: string) => void): ProxyLoginHandle {
+  const binary = getProxyBinary();
+  if (!binary) {
+    onOutput("CLIProxyAPI binary not found. Run /proxy install first.");
+    return { promise: Promise.resolve({ ok: false }), abort: () => {} };
+  }
+  ensureConfig();
+
+  const proc = spawn(binary, ["-config", PROXY_CONFIG_PATH, "-claude-login"], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  const handleData = (data: Buffer) => {
+    const text = data.toString().trim();
+    if (!text) return;
+    for (const line of text.split("\n")) {
+      const trimmed = line.trim();
+      if (trimmed) onOutput(trimmed);
+    }
+  };
+
+  proc.stdout?.on("data", handleData);
+  proc.stderr?.on("data", handleData);
+
+  const promise = new Promise<{ ok: boolean }>((resolve) => {
+    proc.on("close", (code) => resolve({ ok: code === 0 }));
+    proc.on("error", (err) => {
+      onOutput(`Login failed: ${err.message}`);
+      resolve({ ok: false });
+    });
+  });
+
+  const abort = () => {
+    try {
+      proc.kill();
+    } catch {}
+  };
+
+  return { promise, abort };
+}
+
+export interface ProxyStatus {
+  installed: boolean;
+  binaryPath: string | null;
+  running: boolean;
+  endpoint: string;
+  pid: number | null;
+  models: string[];
+}
+
+export async function fetchProxyStatus(): Promise<ProxyStatus> {
+  const binaryPath = getProxyBinary();
+  const pid = getProxyPid();
+  const status: ProxyStatus = {
+    installed: !!binaryPath,
+    binaryPath,
+    running: false,
+    endpoint: PROXY_URL.replace(/\/v1$/, ""),
+    pid,
+    models: [],
+  };
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2000);
+    const res = await fetch(`${PROXY_URL}/models`, {
+      signal: controller.signal,
+      headers: { Authorization: `Bearer ${PROXY_API_KEY}` },
+    });
+    clearTimeout(timeout);
+    if (res.ok) {
+      status.running = true;
+      const data = (await res.json()) as { data?: { id: string }[] };
+      status.models = (data.data ?? []).map((m) => m.id);
+    }
+  } catch {}
+
+  return status;
 }

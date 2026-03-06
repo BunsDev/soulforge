@@ -29,10 +29,7 @@ const DEFAULT_CONFIG: AppConfig = {
     lspStatus: true,
     format: true,
   },
-  thinking: { mode: "auto" },
-  performance: { effort: "high" },
-  contextManagement: { compact: true, clearToolUses: true, clearThinking: true },
-  codeExecution: true,
+  codeExecution: false,
   webSearch: true,
 };
 
@@ -118,6 +115,100 @@ export function saveConfig(config: AppConfig): void {
   writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
 }
 
+/** Save a partial config to <cwd>/.soulforge/config.json (deep-merge). */
+export function saveProjectConfig(cwd: string, patch: Partial<AppConfig>): void {
+  const dir = join(cwd, ".soulforge");
+  const file = join(dir, "config.json");
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+
+  let existing: Partial<AppConfig> = {};
+  try {
+    existing = JSON.parse(readFileSync(file, "utf-8")) as Partial<AppConfig>;
+  } catch {
+    // no existing file
+  }
+
+  const merged: Partial<AppConfig> = { ...existing, ...patch };
+  if (patch.thinking) merged.thinking = { ...existing.thinking, ...patch.thinking };
+  if (patch.performance) merged.performance = { ...existing.performance, ...patch.performance };
+  if (patch.contextManagement)
+    merged.contextManagement = { ...existing.contextManagement, ...patch.contextManagement };
+
+  writeFileSync(file, JSON.stringify(merged, null, 2));
+}
+
+/** Save a partial config to ~/.soulforge/config.json (deep-merge). */
+export function saveGlobalConfig(patch: Partial<AppConfig>): void {
+  if (!existsSync(CONFIG_DIR)) mkdirSync(CONFIG_DIR, { recursive: true });
+
+  let existing: AppConfig = DEFAULT_CONFIG;
+  try {
+    existing = { ...DEFAULT_CONFIG, ...JSON.parse(readFileSync(CONFIG_FILE, "utf-8")) };
+  } catch {
+    // no existing file
+  }
+
+  const merged: AppConfig = { ...existing, ...patch };
+  if (patch.thinking) merged.thinking = { ...existing.thinking, ...patch.thinking };
+  if (patch.performance) merged.performance = { ...existing.performance, ...patch.performance };
+  if (patch.contextManagement)
+    merged.contextManagement = { ...existing.contextManagement, ...patch.contextManagement };
+
+  writeFileSync(CONFIG_FILE, JSON.stringify(merged, null, 2));
+}
+
+/** Remove specific top-level keys from project config. */
+export function removeProjectConfigKeys(cwd: string, keys: string[]): void {
+  const file = join(cwd, ".soulforge", "config.json");
+  if (!existsSync(file)) return;
+  try {
+    const existing = JSON.parse(readFileSync(file, "utf-8")) as Record<string, unknown>;
+    for (const k of keys) delete existing[k];
+    writeFileSync(file, JSON.stringify(existing, null, 2));
+  } catch {}
+}
+
+/** Remove specific top-level keys from global config. */
+export function removeGlobalConfigKeys(keys: string[]): void {
+  if (!existsSync(CONFIG_FILE)) return;
+  try {
+    const existing = JSON.parse(readFileSync(CONFIG_FILE, "utf-8")) as Record<string, unknown>;
+    for (const k of keys) delete existing[k];
+    writeFileSync(CONFIG_FILE, JSON.stringify(existing, null, 2));
+  } catch {}
+}
+
 export function getConfigDir(): string {
   return CONFIG_DIR;
+}
+
+const NESTED_KEYS = [
+  "editor",
+  "theme",
+  "editorIntegration",
+  "codeIntelligence",
+  "thinking",
+  "performance",
+  "contextManagement",
+] as const;
+
+export function applyConfigPatch<T extends Partial<AppConfig>>(
+  base: T,
+  patch: Partial<AppConfig>,
+): T {
+  const result = { ...base, ...patch } as Record<string, unknown>;
+  for (const key of NESTED_KEYS) {
+    const b = (base as Record<string, unknown>)[key];
+    const p = (patch as Record<string, unknown>)[key];
+    if (p && b && typeof b === "object" && typeof p === "object") {
+      result[key] = { ...b, ...p };
+    }
+  }
+  return result as T;
+}
+
+export function stripConfigKeys<T extends Partial<AppConfig>>(config: T, keys: string[]): T {
+  const result = { ...config };
+  for (const k of keys) delete (result as Record<string, unknown>)[k];
+  return result;
 }

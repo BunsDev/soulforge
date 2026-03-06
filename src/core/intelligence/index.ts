@@ -1,14 +1,26 @@
 export { FileCache } from "./cache.js";
-export { disposeIntelligenceRouter, getIntelligenceRouter } from "./instance.js";
+export {
+  disposeIntelligenceRouter,
+  getIntelligenceChildPids,
+  getIntelligenceRouter,
+  getIntelligenceStatus,
+  warmupIntelligence,
+} from "./instance.js";
+export type { RepoMapOptions } from "./repo-map.js";
+export { RepoMap } from "./repo-map.js";
 export { CodeIntelligenceRouter } from "./router.js";
 export type {
   BackendPreference,
+  CallHierarchyItem,
+  CallHierarchyResult,
+  CodeAction,
   CodeBlock,
   CodeIntelligenceConfig,
   Diagnostic,
   ExportInfo,
   FileEdit,
   FileOutline,
+  FormatEdit,
   ImportInfo,
   IntelligenceBackend,
   Language,
@@ -16,5 +28,8 @@ export type {
   SourceLocation,
   SymbolInfo,
   SymbolKind,
+  TypeHierarchyItem,
+  TypeHierarchyResult,
   TypeInfo,
+  UnusedItem,
 } from "./types.js";

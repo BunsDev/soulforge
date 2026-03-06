@@ -1,30 +1,72 @@
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { tool } from "ai";
 import { z } from "zod";
 import type { InteractiveCallbacks, Plan, PlanStepStatus } from "../../types/index.js";
 
-/**
- * Build interactive tools that bridge LLM tool calls to React UI via callbacks.
- * Only included when interactive callbacks are provided.
- */
-export function buildInteractiveTools(callbacks: InteractiveCallbacks) {
+function planFileName(sessionId?: string): string {
+  return sessionId ? `plan-${sessionId}.md` : "plan.md";
+}
+
+export function buildInteractiveTools(
+  callbacks: InteractiveCallbacks,
+  opts?: { cwd?: string; sessionId?: string },
+) {
+  const cwd = opts?.cwd ?? process.cwd();
+  const fname = planFileName(opts?.sessionId);
+
   return {
     plan: tool({
       description:
         "Create an implementation plan before executing multi-step tasks. " +
-        "Use this to outline your approach — each step will be displayed as a live checklist. " +
+        "Use this to outline your approach — each step will be displayed as a live checklist the user can see. " +
+        "The user MUST confirm before you proceed. " +
         "Call update_plan_step to mark steps as active/done/skipped as you progress.",
       inputSchema: z.object({
-        title: z.string().describe("Short plan title"),
+        title: z.string().describe("Short plan title (2-6 words)"),
+        context: z.string().describe("What problem this solves and why these changes are needed"),
+        files: z
+          .array(
+            z.object({
+              path: z.string().describe("File path relative to project root"),
+              action: z.enum(["create", "modify", "delete"]).describe("Type of change"),
+              description: z.string().describe("What changes to make in this file"),
+            }),
+          )
+          .optional()
+          .describe("Files to change"),
         steps: z
           .array(
             z.object({
-              id: z.string().describe("Unique step ID (e.g. 'step-1')"),
+              id: z.string().describe("Step ID (step-1, step-2, etc.)"),
               label: z.string().describe("Short step description"),
             }),
           )
-          .describe("Ordered list of steps"),
+          .describe("Ordered implementation steps"),
+        verification: z.array(z.string()).optional().describe("How to verify the changes work"),
       }),
       execute: async (args) => {
+        const lines = [`# ${args.title}`, "", `## Context`, "", args.context, "", `## Files`];
+        if (args.files) {
+          for (const f of args.files) {
+            lines.push(`- **${f.action}** \`${f.path}\` — ${f.description}`);
+          }
+        }
+        lines.push("", "## Steps");
+        for (const s of args.steps) {
+          lines.push(`${s.id}. ${s.label}`);
+        }
+        if (args.verification?.length) {
+          lines.push("", "## Verification");
+          for (const v of args.verification) {
+            lines.push(`- ${v}`);
+          }
+        }
+
+        const dir = join(cwd, ".soulforge", "plans");
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, fname), lines.join("\n"));
+
         const plan: Plan = {
           title: args.title,
           steps: args.steps.map((s) => ({
@@ -35,10 +77,29 @@ export function buildInteractiveTools(callbacks: InteractiveCallbacks) {
           createdAt: Date.now(),
         };
         callbacks.onPlanCreate(plan);
-        return {
-          success: true,
-          output: `Plan created: ${args.title} (${String(args.steps.length)} steps)`,
-        };
+
+        const action = await callbacks.onPlanReview(plan, `.soulforge/plans/${fname}`);
+
+        if (action === "execute") {
+          return {
+            success: true,
+            output:
+              "Plan confirmed by user. Proceed with execution step by step. Call update_plan_step to mark steps as active/done/skipped.",
+          };
+        }
+        if (action === "clear_execute") {
+          return {
+            success: true,
+            output: "Plan confirmed. Context will be cleared and plan re-submitted for execution.",
+          };
+        }
+        if (action === "cancel" || action === "__skipped__") {
+          return {
+            success: true,
+            output: "Plan cancelled by user. Wait for further instructions.",
+          };
+        }
+        return { success: true, output: `User wants changes to the plan: ${action}` };
       },
     }),
 

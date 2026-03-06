@@ -4,6 +4,7 @@ node_modules
 # output
 out
 dist
+bin
 *.tgz
 
 # code coverage
@@ -35,3 +36,10 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # SoulForge runtime data
 .soulforge/
+
+# Improvement plans
+improvements/
+
+# Benchmark artifacts
+bench/results-*.json
+benchmarks/results-*.json

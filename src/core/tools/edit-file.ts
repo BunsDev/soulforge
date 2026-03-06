@@ -1,10 +1,10 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ToolResult } from "../../types";
-import { analyzeFile, checkConstraints } from "../analysis/complexity";
-import { getNvimInstance } from "../editor/instance";
-import { MemoryManager } from "../memory/manager";
+import { analyzeFile } from "../analysis/complexity";
+import { getNvimInstance, readBufferContent } from "../editor/instance";
 import { isForbidden } from "../security/forbidden.js";
+import { emitFileEdited } from "./file-events.js";
 
 interface EditFileArgs {
   path: string;
@@ -19,10 +19,63 @@ function formatMetricDelta(label: string, before: number, after: number): string
   return `${label}: ${String(before)}→${String(after)} (${sign}${String(delta)})`;
 }
 
+/**
+ * When exact match fails, try normalizing leading whitespace (tabs↔spaces).
+ * Returns the corrected oldStr/newStr with the file's actual indentation,
+ * or null if no match is possible.
+ */
+function fuzzyWhitespaceMatch(
+  content: string,
+  oldStr: string,
+  newStr: string,
+): { oldStr: string; newStr: string } | null {
+  const contentLines = content.split("\n");
+  const oldLines = oldStr.split("\n");
+  if (oldLines.length === 0) return null;
+
+  const normalize = (line: string) => line.replace(/^[\t ]+/, "").trimEnd();
+  const normalizedOld = oldLines.map(normalize);
+
+  for (let i = 0; i <= contentLines.length - oldLines.length; i++) {
+    let match = true;
+    for (let j = 0; j < oldLines.length; j++) {
+      if (normalize(contentLines[i + j] as string) !== normalizedOld[j]) {
+        match = false;
+        break;
+      }
+    }
+    if (match) {
+      const actualOld = contentLines.slice(i, i + oldLines.length).join("\n");
+      if (content.split(actualOld).length - 1 !== 1) continue;
+
+      const newLines = newStr.split("\n");
+      const correctedNew = newLines
+        .map((newLine, idx) => {
+          const oldLine = oldLines[idx];
+          if (!oldLine) return newLine;
+          const oldIndent = oldLine.match(/^[\t ]*/)?.[0] ?? "";
+          const actualLine = contentLines[i + idx] as string;
+          const actualIndent = actualLine.match(/^[\t ]*/)?.[0] ?? "";
+          if (oldIndent === actualIndent) return newLine;
+          const newIndent = newLine.match(/^[\t ]*/)?.[0] ?? "";
+          if (newIndent === oldIndent) {
+            return actualIndent + newLine.slice(oldIndent.length);
+          }
+          return newLine;
+        })
+        .join("\n");
+
+      return { oldStr: actualOld, newStr: correctedNew };
+    }
+  }
+  return null;
+}
+
 export const editFileTool = {
   name: "edit_file",
   description:
-    "Edit a file on disk by replacing an exact string match with new content. Also supports creating new files. This is the primary tool for all file modifications.",
+    "Edit a file by replacing an exact string match with new content. Also creates new files (empty oldString). " +
+    "For renaming a symbol across files, use rename_symbol instead (atomic, one call).",
   execute: async (args: EditFileArgs): Promise<ToolResult> => {
     try {
       const filePath = resolve(args.path);
@@ -39,11 +92,12 @@ export const editFileTool = {
       // Create new file
       if (oldStr === "") {
         writeFileSync(filePath, newStr, "utf-8");
+        emitFileEdited(filePath, newStr);
         let openedInEditor = false;
         const nvim = getNvimInstance();
         if (nvim) {
           try {
-            await nvim.api.command(`edit ${filePath}`);
+            await nvim.api.executeLua("vim.cmd.edit(vim.fn.fnameescape(...))", [filePath]);
             openedInEditor = true;
           } catch {
             // Editor not available
@@ -63,51 +117,63 @@ export const editFileTool = {
         };
       }
 
-      const content = readFileSync(filePath, "utf-8");
+      const content = await readBufferContent(filePath);
+
+      let resolvedOld = oldStr;
+      let resolvedNew = newStr;
 
       if (!content.includes(oldStr)) {
-        const msg = "old_string not found in file. Make sure it matches exactly.";
-        return { success: false, output: msg, error: msg };
+        const fixed = fuzzyWhitespaceMatch(content, oldStr, newStr);
+        if (fixed) {
+          resolvedOld = fixed.oldStr;
+          resolvedNew = fixed.newStr;
+        } else {
+          const msg = "old_string not found in file. Make sure it matches exactly.";
+          return { success: false, output: msg, error: msg };
+        }
       }
 
-      const occurrences = content.split(oldStr).length - 1;
+      const occurrences = content.split(resolvedOld).length - 1;
       if (occurrences > 1) {
         const msg = `Found ${String(occurrences)} matches. Provide more context to make the match unique.`;
         return { success: false, output: msg, error: msg };
       }
 
       const beforeMetrics = analyzeFile(content);
-      const updated = content.replace(oldStr, newStr);
+      const updated = content.replace(resolvedOld, resolvedNew);
       const afterMetrics = analyzeFile(updated);
-
-      // Check constraints
-      const cwd = process.cwd();
-      const memory = new MemoryManager(cwd);
-      const constraints = memory.loadConstraints();
-      const violations = checkConstraints(afterMetrics, constraints, filePath);
-
-      const blockers = violations.filter((v) => v.constraint.action === "block");
-      if (blockers.length > 0) {
-        const msgs = blockers.map(
-          (v) =>
-            `${v.constraint.name}: ${v.constraint.metric} is ${String(v.actual)} (limit: ${String(v.constraint.limit)})`,
-        );
-        const constraintMsg = `Constraint violation(s): ${msgs.join("; ")}`;
-        return { success: false, output: constraintMsg, error: constraintMsg };
-      }
 
       // Calculate edit line before writing
       const editLine = content.slice(0, content.indexOf(oldStr)).split("\n").length;
 
-      writeFileSync(filePath, updated, "utf-8");
+      // Snapshot diagnostics BEFORE writing
+      let beforeDiags: import("../intelligence/types.js").Diagnostic[] = [];
+      let router: import("../intelligence/router.js").CodeIntelligenceRouter | null = null;
+      let language: import("../intelligence/types.js").Language = "unknown";
+      try {
+        const intel = await import("../intelligence/index.js");
+        router = intel.getIntelligenceRouter(process.cwd());
+        language = router.detectLanguage(filePath);
+        const diags = await router.executeWithFallback(language, "getDiagnostics", (b) =>
+          b.getDiagnostics ? b.getDiagnostics(filePath) : Promise.resolve(null),
+        );
+        if (diags) beforeDiags = diags;
+      } catch {
+        // Intelligence not available
+      }
 
-      // Open edited file in editor if available
+      writeFileSync(filePath, updated, "utf-8");
+      emitFileEdited(filePath, updated);
+
+      // Reload or open file in editor so buffer matches disk
       let openedInEditor = false;
       const nvim = getNvimInstance();
       if (nvim) {
         try {
-          await nvim.api.command(`edit ${filePath}`);
-          await nvim.api.command(`normal! ${String(editLine)}G`);
+          await nvim.api.executeLua(
+            "local p, l = ...; vim.cmd.edit({args={vim.fn.fnameescape(p)}, bang=true}); vim.api.nvim_win_set_cursor(0, {l, 0})",
+            [filePath, editLine],
+          );
           openedInEditor = true;
         } catch {
           // Editor not available
@@ -125,41 +191,22 @@ export const editFileTool = {
         output += ` (${deltas.join(", ")})`;
       }
 
-      // Append warnings
-      const warnings = violations.filter((v) => v.constraint.action === "warn");
-      if (warnings.length > 0) {
-        const warnMsgs = warnings.map(
-          (v) =>
-            `⚠ ${v.constraint.name}: ${v.constraint.metric} is ${String(v.actual)} (limit: ${String(v.constraint.limit)})`,
-        );
-        output += `\n${warnMsgs.join("\n")}`;
-      }
-
       if (openedInEditor) output += " → opened in editor";
 
-      // Post-edit diagnostics (soft — fails silently)
-      try {
-        const { getIntelligenceRouter } = await import("../intelligence/index.js");
-        const router = getIntelligenceRouter(cwd);
-        const language = router.detectLanguage(filePath);
-        const diags = await router.executeWithFallback(language, "getDiagnostics", (b) => {
-          if (!b.getDiagnostics) return Promise.resolve(null);
-          return b.getDiagnostics(filePath);
-        });
-        if (diags && diags.length > 0) {
-          const errors = diags.filter((d) => d.severity === "error");
-          if (errors.length > 0) {
-            output += `\n⚠ ${String(errors.length)} error(s) after edit:`;
-            for (const e of errors.slice(0, 3)) {
-              output += `\n  L${String(e.line)}: ${e.message}`;
-            }
-            if (errors.length > 3) {
-              output += `\n  ...and ${String(errors.length - 3)} more`;
-            }
+      // Diagnostic diff — only show NEW errors introduced by this edit
+      if (router) {
+        try {
+          const { formatPostEditResult, postEditDiagnostics } = await import(
+            "../intelligence/post-edit.js"
+          );
+          const diffResult = await postEditDiagnostics(router, filePath, language, beforeDiags);
+          const diffOutput = formatPostEditResult(diffResult);
+          if (diffOutput) {
+            output += `\n${diffOutput}`;
           }
+        } catch {
+          // Post-edit analysis unavailable
         }
-      } catch {
-        // Intelligence not available — that's fine
       }
 
       return { success: true, output };

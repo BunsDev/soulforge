@@ -51,18 +51,20 @@ let projectPatterns: string[] = [];
 const sessionPatternsMap = new Map<string, string[]>();
 let aiIgnorePatterns: string[] = [];
 let initialized = false;
+const regexCache = new Map<string, RegExp>();
 
 function globToRegex(pattern: string): RegExp {
-  // Convert a simple glob pattern to a regex
-  // Supports: * (any chars except /), ** (any path), ? (single char)
+  const cached = regexCache.get(pattern);
+  if (cached) return cached;
   const re = pattern
-    .replace(/[.+^${}()|[\]\\]/g, "\\$&") // escape regex special chars (except * and ?)
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
     .replace(/\*\*/g, "\0DOUBLESTAR\0")
     .replace(/\*/g, "[^/]*")
     .replace(/\0DOUBLESTAR\0/g, ".*")
     .replace(/\?/g, ".");
-  // Match the pattern against filename or full path
-  return new RegExp(`(^|/)${re}$`, "i");
+  const regex = new RegExp(`(^|/)${re}$`, "i");
+  regexCache.set(pattern, regex);
+  return regex;
 }
 
 function loadPatternsFromFile(filePath: string): string[] {

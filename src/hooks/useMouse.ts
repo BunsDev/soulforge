@@ -1,4 +1,3 @@
-import { useStdout } from "ink";
 import { useEffect, useRef } from "react";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: ESC character required for terminal mouse event parsing
@@ -13,28 +12,19 @@ interface UseMouseOptions {
   isActive?: boolean;
 }
 
-/**
- * Enable terminal mouse mode for scroll wheel and click events.
- *
- * Ink reads stdin via the 'readable' event and drains the buffer with
- * stdin.read(), so a plain 'data' listener never fires. We wrap
- * stdin.read() to intercept mouse escape sequences as Ink reads them.
- */
 export function useMouse({ onScroll, onClick, isActive = true }: UseMouseOptions): void {
-  const { stdout } = useStdout();
-
   const onScrollRef = useRef(onScroll);
   const onClickRef = useRef(onClick);
   onScrollRef.current = onScroll;
   onClickRef.current = onClick;
 
+  const needsTracking = !!onClick || !!onScroll;
+
   useEffect(() => {
-    if (!isActive || !stdout) return;
+    if (!isActive || !needsTracking) return;
 
-    // Enable mouse button tracking + SGR extended encoding
-    stdout.write("\x1b[?1000h\x1b[?1006h");
+    process.stdout.write("\x1b[?1000h\x1b[?1006h");
 
-    // Wrap stdin.read to piggyback on Ink's readable handler
     const stdin = process.stdin;
     const originalRead = stdin.read.bind(stdin);
 
@@ -44,11 +34,9 @@ export function useMouse({ onScroll, onClick, isActive = true }: UseMouseOptions
 
       const str = typeof chunk === "string" ? chunk : (chunk as Buffer).toString("utf-8");
 
-      // Fast path: no mouse data, pass through unchanged
       MOUSE_SGR_RE.lastIndex = 0;
       if (!MOUSE_SGR_RE.test(str)) return chunk;
 
-      // Parse and handle mouse events
       MOUSE_SGR_RE.lastIndex = 0;
       for (let m = MOUSE_SGR_RE.exec(str); m !== null; m = MOUSE_SGR_RE.exec(str)) {
         const button = Number(m[1]);
@@ -61,7 +49,6 @@ export function useMouse({ onScroll, onClick, isActive = true }: UseMouseOptions
         if (button === LEFT_CLICK && isPress && onClickRef.current) onClickRef.current(col, row);
       }
 
-      // Strip mouse sequences so Ink/neovim never see them
       const cleaned = str.replace(MOUSE_SGR_RE, "");
       if (cleaned.length === 0) return null;
       if (typeof chunk === "string") return cleaned;
@@ -72,7 +59,7 @@ export function useMouse({ onScroll, onClick, isActive = true }: UseMouseOptions
 
     return () => {
       stdin.read = originalRead;
-      stdout.write("\x1b[?1000l\x1b[?1006l");
+      process.stdout.write("\x1b[?1000l\x1b[?1006l");
     };
-  }, [isActive, stdout]);
+  }, [isActive, needsTracking]);
 }

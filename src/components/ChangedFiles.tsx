@@ -1,8 +1,8 @@
-import { relative } from "node:path";
-import { Box, Text } from "ink";
+import { basename, relative } from "node:path";
+import { TextAttributes } from "@opentui/core";
 import { useMemo } from "react";
+import { icon } from "../core/icons.js";
 import type { ChatMessage } from "../types/index.js";
-import { POPUP_BG, PopupRow } from "./shared.js";
 
 interface FileEntry {
   path: string;
@@ -40,7 +40,6 @@ function buildTree(files: FileEntry[], cwd: string): TreeNode {
     }
   }
 
-  // Collapse single-child directories: a/b/c → a/b/c
   const collapse = (node: TreeNode): TreeNode => {
     node.children = node.children.map(collapse);
     if (node.children.length === 1 && !node.file) {
@@ -68,24 +67,24 @@ function TreeRow({ node, prefix, isLast }: { node: TreeNode; prefix: string; isL
 
   return (
     <>
-      <Box height={1} flexShrink={0}>
-        <Text wrap="truncate">
-          <Text color="#333">
+      <box height={1} flexShrink={0}>
+        <text truncate>
+          <span fg="#333">
             {prefix}
             {connector}
-          </Text>
+          </span>
           {isDir ? (
-            <Text color="#8B5CF6">{node.name}/</Text>
+            <span fg="#8B5CF6">{node.name}/</span>
           ) : (
             <>
-              <Text color={node.file?.created ? "#2d5" : "#FF8C00"}>{node.name}</Text>
+              <span fg={node.file?.created ? "#2d5" : "#FF8C00"}>{node.name}</span>
               {node.file && node.file.editCount > 1 && (
-                <Text color="#555"> ({String(node.file.editCount)})</Text>
+                <span fg="#555"> ({String(node.file.editCount)})</span>
               )}
             </>
           )}
-        </Text>
-      </Box>
+        </text>
+      </box>
       {node.children.map((child, i) => (
         <TreeRow
           key={child.fullPath}
@@ -98,12 +97,46 @@ function TreeRow({ node, prefix, isLast }: { node: TreeNode; prefix: string; isL
   );
 }
 
+const PREVIEW_COUNT = 3;
+const MAX_COLUMNS = 3;
+
+function TreeColumn({ node }: { node: TreeNode }) {
+  const isDir = !node.file && node.children.length > 0;
+  return (
+    <box flexDirection="column" flexGrow={1} flexBasis={0} minWidth={0}>
+      <box height={1} flexShrink={0}>
+        <text truncate>
+          {isDir ? (
+            <span fg="#8B5CF6">{node.name}/</span>
+          ) : (
+            <>
+              <span fg={node.file?.created ? "#2d5" : "#FF8C00"}>{node.name}</span>
+              {node.file && node.file.editCount > 1 && (
+                <span fg="#555"> ({String(node.file.editCount)})</span>
+              )}
+            </>
+          )}
+        </text>
+      </box>
+      {node.children.map((child, i) => (
+        <TreeRow
+          key={child.fullPath}
+          node={child}
+          prefix=""
+          isLast={i === node.children.length - 1}
+        />
+      ))}
+    </box>
+  );
+}
+
 interface Props {
   messages: ChatMessage[];
   cwd: string;
+  expanded: boolean;
 }
 
-export function ChangedFiles({ messages, cwd }: Props) {
+export function ChangedFiles({ messages, cwd, expanded }: Props) {
   const files = useMemo(() => {
     const fileMap = new Map<string, FileEntry>();
 
@@ -130,36 +163,52 @@ export function ChangedFiles({ messages, cwd }: Props) {
   if (files.length === 0) return null;
 
   const tree = buildTree(files, cwd);
+  const preview = files.slice(0, PREVIEW_COUNT);
+  const remaining = files.length - preview.length;
 
   return (
-    <Box flexDirection="column">
-      {/* Title */}
-      <PopupRow w={30}>
-        <Text color="#9B30FF" bold backgroundColor={POPUP_BG}>
-          {"\uF07C"} Changes
-        </Text>
-        <Text color="#555" backgroundColor={POPUP_BG}>
-          {"  "}
-          {String(files.length)} file{files.length === 1 ? "" : "s"}
-        </Text>
-      </PopupRow>
-      {/* Separator */}
-      <PopupRow w={30}>
-        <Text color="#333" backgroundColor={POPUP_BG}>
-          {"─".repeat(26)}
-        </Text>
-      </PopupRow>
-      {/* Tree */}
-      <Box flexDirection="column" paddingLeft={1}>
-        {tree.children.map((child, i) => (
-          <TreeRow
-            key={child.fullPath}
-            node={child}
-            prefix=""
-            isLast={i === tree.children.length - 1}
-          />
-        ))}
-      </Box>
-    </Box>
+    <box
+      flexDirection="column"
+      borderStyle="rounded"
+      border={true}
+      borderColor="#FF8C00"
+      paddingX={1}
+      width="100%"
+    >
+      <box gap={1} flexDirection="row">
+        <text fg="#FF8C00" attributes={TextAttributes.BOLD}>
+          {icon("changes")} {String(files.length)} file{files.length === 1 ? "" : "s"} changed
+        </text>
+        {!expanded && (
+          <>
+            <text fg="#333">│</text>
+            {preview.map((f) => (
+              <text key={f.path} fg={f.created ? "#2d5" : "#888"}>
+                {basename(f.path)}
+              </text>
+            ))}
+            {remaining > 0 && <text fg="#555">+{String(remaining)}</text>}
+            <text fg="#444">/changes</text>
+          </>
+        )}
+      </box>
+      {expanded && (
+        <box flexDirection="column">
+          <box flexDirection="row" gap={2}>
+            {tree.children.slice(0, MAX_COLUMNS).map((child) => (
+              <TreeColumn key={child.fullPath} node={child} />
+            ))}
+          </box>
+          {tree.children.length > MAX_COLUMNS && (
+            <box>
+              <text fg="#555">
+                +{String(tree.children.length - MAX_COLUMNS)} more group
+                {tree.children.length - MAX_COLUMNS === 1 ? "" : "s"}
+              </text>
+            </box>
+          )}
+        </box>
+      )}
+    </box>
   );
 }

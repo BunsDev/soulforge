@@ -16,8 +16,8 @@ interface ReadCodeArgs {
 export const readCodeTool = {
   name: "read_code",
   description:
-    "Read a specific code block (function, class, type, interface, or scope) from a file. " +
-    "Returns just the targeted code, not the entire file. More precise and token-efficient " +
+    "Read a specific function, class, type, or interface by name from a file. " +
+    "Returns ONLY that symbol's code — use INSTEAD of read_file when you know the symbol name. " +
     "than read_file for understanding specific symbols.",
   execute: async (args: ReadCodeArgs): Promise<ToolResult> => {
     try {
@@ -35,18 +35,23 @@ export const readCodeTool = {
           };
         }
 
-        const block = await router.executeWithFallback(language, "readScope", (b) =>
+        const tracked = await router.executeWithFallbackTracked(language, "readScope", (b) =>
           b.readScope ? b.readScope(file, startLine, args.endLine) : Promise.resolve(null),
         );
 
-        if (!block) {
+        if (!tracked) {
           return { success: false, output: "Could not read scope", error: "failed" };
         }
 
+        const block = tracked.value;
         const range = block.location.endLine
           ? `${String(block.location.line)}-${String(block.location.endLine)}`
           : String(block.location.line);
-        return { success: true, output: `${file}:${range}\n\n${block.content}` };
+        return {
+          success: true,
+          output: `${file}:${range}\n\n${block.content}`,
+          backend: tracked.backend,
+        };
       }
 
       // Symbol-based targets
@@ -66,20 +71,17 @@ export const readCodeTool = {
         interface: "interface",
       };
 
-      // Try with the requested kind first
-      let block = await router.executeWithFallback(language, "readSymbol", (b) =>
+      let tracked = await router.executeWithFallbackTracked(language, "readSymbol", (b) =>
         b.readSymbol ? b.readSymbol(file, name, kindMap[args.target]) : Promise.resolve(null),
       );
 
-      // If not found with the specific kind, retry without kind filter.
-      // e.g. user asks for "type HelpPopup" but it's actually a function component
-      if (!block) {
-        block = await router.executeWithFallback(language, "readSymbol", (b) =>
+      if (!tracked) {
+        tracked = await router.executeWithFallbackTracked(language, "readSymbol", (b) =>
           b.readSymbol ? b.readSymbol(file, name) : Promise.resolve(null),
         );
       }
 
-      if (!block) {
+      if (!tracked) {
         return {
           success: false,
           output: `'${name}' not found in ${file}`,
@@ -87,11 +89,16 @@ export const readCodeTool = {
         };
       }
 
+      const block = tracked.value;
       const range = block.location.endLine
         ? `${String(block.location.line)}-${String(block.location.endLine)}`
         : String(block.location.line);
       const header = block.symbolKind ? `${block.symbolKind} ${block.symbolName ?? name}` : name;
-      return { success: true, output: `${header} — ${file}:${range}\n\n${block.content}` };
+      return {
+        success: true,
+        output: `${header} — ${file}:${range}\n\n${block.content}`,
+        backend: tracked.backend,
+      };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       return { success: false, output: msg, error: msg };

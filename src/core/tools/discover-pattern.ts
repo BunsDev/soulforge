@@ -1,0 +1,118 @@
+import { resolve } from "node:path";
+import type { ToolResult } from "../../types/index.js";
+import { getIntelligenceRouter } from "../intelligence/index.js";
+
+interface DiscoverPatternArgs {
+  query: string;
+  file?: string;
+}
+
+export const discoverPatternTool = {
+  name: "discover_pattern",
+  description:
+    "Discover implementation patterns in the codebase. Given a concept (e.g. 'provider', 'router', 'tool'), " +
+    "finds interfaces, implementations, and related files. Use this to understand how to implement new features " +
+    "that follow existing patterns.",
+  execute: async (args: DiscoverPatternArgs): Promise<ToolResult> => {
+    try {
+      const router = getIntelligenceRouter(process.cwd());
+      const file = args.file ? resolve(args.file) : undefined;
+      const language = router.detectLanguage(file);
+
+      const symbols = await router.executeWithFallback(language, "findWorkspaceSymbols", (b) =>
+        b.findWorkspaceSymbols ? b.findWorkspaceSymbols(args.query) : Promise.resolve(null),
+      );
+
+      if (!symbols || symbols.length === 0) {
+        return {
+          success: false,
+          output: `No symbols found matching '${args.query}'`,
+          error: "not found",
+        };
+      }
+
+      const interfaces = symbols.filter((s) => s.kind === "interface" || s.kind === "type");
+      const classes = symbols.filter((s) => s.kind === "class");
+      const functions = symbols.filter((s) => s.kind === "function");
+      const others = symbols.filter(
+        (s) => !["interface", "type", "class", "function"].includes(s.kind),
+      );
+
+      const parts: string[] = [
+        `Pattern discovery for "${args.query}" — ${String(symbols.length)} symbols found`,
+      ];
+
+      if (interfaces.length > 0) {
+        parts.push(`\n## Interfaces & Types (${String(interfaces.length)})`);
+        for (const iface of interfaces.slice(0, 3)) {
+          const block = await router.executeWithFallback(language, "readSymbol", (b) =>
+            b.readSymbol
+              ? b.readSymbol(iface.location.file, iface.name, iface.kind)
+              : Promise.resolve(null),
+          );
+          if (block) {
+            parts.push(
+              `\n### ${iface.kind} ${iface.name} — ${iface.location.file}:${String(iface.location.line)}`,
+            );
+            parts.push(`\`\`\`\n${block.content}\n\`\`\``);
+          } else {
+            parts.push(
+              `  ${iface.kind} ${iface.name} — ${iface.location.file}:${String(iface.location.line)}`,
+            );
+          }
+        }
+        if (interfaces.length > 3) {
+          parts.push(`  ... and ${String(interfaces.length - 3)} more`);
+        }
+      }
+
+      if (classes.length > 0) {
+        parts.push(`\n## Classes (${String(classes.length)})`);
+        for (const cls of classes.slice(0, 5)) {
+          parts.push(`  class ${cls.name} — ${cls.location.file}:${String(cls.location.line)}`);
+        }
+        if (classes.length > 5) {
+          parts.push(`  ... and ${String(classes.length - 5)} more`);
+        }
+      }
+
+      if (functions.length > 0) {
+        parts.push(`\n## Functions (${String(functions.length)})`);
+        for (const fn of functions.slice(0, 5)) {
+          parts.push(`  function ${fn.name} — ${fn.location.file}:${String(fn.location.line)}`);
+        }
+        if (functions.length > 5) {
+          parts.push(`  ... and ${String(functions.length - 5)} more`);
+        }
+      }
+
+      if (others.length > 0) {
+        parts.push(`\n## Other (${String(others.length)})`);
+        for (const o of others.slice(0, 5)) {
+          parts.push(`  ${o.kind} ${o.name} — ${o.location.file}:${String(o.location.line)}`);
+        }
+      }
+
+      const uniqueFiles = [...new Set(symbols.map((s) => s.location.file))].slice(0, 5);
+      parts.push(`\n## Related files (${String(uniqueFiles.length)})`);
+      for (const f of uniqueFiles) {
+        const exports = await router.executeWithFallback(language, "findExports", (b) =>
+          b.findExports ? b.findExports(f) : Promise.resolve(null),
+        );
+        if (exports && exports.length > 0) {
+          parts.push(`  ${f}:`);
+          for (const exp of exports.slice(0, 8)) {
+            parts.push(`    ${exp.kind} ${exp.name}`);
+          }
+        } else {
+          parts.push(`  ${f}`);
+        }
+      }
+
+      return { success: true, output: parts.join("\n") };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { success: false, output: msg, error: msg };
+    }
+  },
+};

@@ -9,8 +9,9 @@ import type { AgentBus } from "./agent-bus.js";
 
 /**
  * Build coordination tools for a specific agent on the bus.
+ * @param role — "explore" agents skip edit-conflict tools, "code" agents skip files-read tools
  */
-export function buildBusTools(bus: AgentBus, agentId: string) {
+export function buildBusTools(bus: AgentBus, agentId: string, role?: "explore" | "code") {
   return {
     report_finding: tool({
       description:
@@ -33,10 +34,10 @@ export function buildBusTools(bus: AgentBus, agentId: string) {
           content: args.content,
           timestamp: Date.now(),
         });
-        return JSON.stringify({
+        return {
           success: true,
           output: `Finding "${args.label}" shared with ${bus.findingCount - 1} other finding(s) on the bus.`,
-        });
+        };
       },
     }),
 
@@ -55,43 +56,81 @@ export function buildBusTools(bus: AgentBus, agentId: string) {
         const findings = args.peerId ? bus.getPeerFindings(args.peerId) : bus.getFindings(agentId);
 
         if (findings.length === 0) {
-          return JSON.stringify({
-            success: true,
-            output: "No findings from peers yet.",
-          });
+          return { success: true, output: "No findings from peers yet." };
         }
 
         const summary = findings
           .map((f) => `[${f.agentId}] ${f.label}:\n${f.content}`)
           .join("\n\n---\n\n");
 
-        return JSON.stringify({
-          success: true,
-          output: summary,
+        return { success: true, output: summary };
+      },
+    }),
+
+    check_peers: tool({
+      description:
+        "See peer agents — their ID, role, task, and live status (running/completed/errored).",
+      inputSchema: z.object({}),
+      execute: async () => {
+        const peers = bus.tasks.filter((t) => t.agentId !== agentId);
+        if (peers.length === 0) {
+          return { success: true, output: "No peer agents in this dispatch." };
+        }
+        const lines = peers.map((t) => {
+          const result = bus.getResult(t.agentId);
+          let status = "running";
+          if (result) status = result.success ? "completed" : "errored";
+          return `[${t.agentId}] (${t.role}) ${status} — ${t.task}`;
         });
+        return { success: true, output: lines.join("\n") };
       },
     }),
 
     check_agent_result: tool({
       description:
-        "Check if a specific peer agent has completed and get its final result. " +
-        "Useful when your task depends on another agent's output.",
+        "Get a completed peer agent's final result. " +
+        "Use when you need a peer's conclusion, not just interim findings.",
       inputSchema: z.object({
         peerId: z.string().describe("The agent ID to check"),
       }),
       execute: async (args) => {
         const result = bus.getResult(args.peerId);
         if (!result) {
-          return JSON.stringify({
+          return {
             success: true,
-            output: `Agent "${args.peerId}" has not completed yet. Check back later or use check_findings to see its interim findings.`,
-          });
+            output: `Agent "${args.peerId}" has not completed yet.`,
+          };
         }
-        return JSON.stringify({
+        return {
           success: true,
-          output: `Agent "${args.peerId}" (${result.role}) completed ${result.success ? "successfully" : "with errors"}:\n\n${result.result}`,
-        });
+          output: `[${args.peerId}] (${result.role}) ${result.success ? "✓" : "✗"}:\n${result.result}`,
+        };
       },
     }),
+
+    ...(role !== "explore"
+      ? {
+          check_edit_conflicts: tool({
+            description:
+              "See file ownership — which files are claimed by which agent. " +
+              "The first agent to edit a file owns it. Edits to owned files are serialized via a mutex. " +
+              "If you need changes in a file owned by another agent, use report_finding to describe the edit and let the owner apply it.",
+            inputSchema: z.object({}),
+            execute: async () => {
+              const edited = bus.getEditedFiles();
+              const entries: string[] = [];
+              for (const [path, editors] of edited) {
+                const owner = bus.getFileOwner(path);
+                const ownerTag = owner === agentId ? "(you)" : `(owner: ${owner})`;
+                entries.push(`${path} ${ownerTag} — editors: ${editors.join(", ")}`);
+              }
+              if (entries.length === 0) {
+                return { success: true, output: "No files edited by any agent yet." };
+              }
+              return { success: true, output: entries.join("\n") };
+            },
+          }),
+        }
+      : {}),
   };
 }

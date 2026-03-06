@@ -1,4 +1,3 @@
-import { Box, Text } from "ink";
 import { useEffect, useState } from "react";
 import { providerIcon } from "../core/icons.js";
 import { checkProviders, type ProviderStatus } from "../core/llm/provider.js";
@@ -6,38 +5,53 @@ import { checkPrerequisites } from "../core/setup/prerequisites.js";
 
 function Status({ ok, label, dim }: { ok: boolean; label: string; dim?: boolean }) {
   return (
-    <Text color={ok ? "#2d5" : dim ? "#FF8C00" : "#f44"}>
+    <text fg={ok ? "#2d5" : dim ? "#FF8C00" : "#f44"}>
       {ok ? "✓" : dim ? "○" : "✗"} {label}
-    </Text>
+    </text>
   );
 }
 
 export function HealthCheck() {
-  const [provs, setProvs] = useState<ProviderStatus[]>([]);
+  const [provs, setProvs] = useState<ProviderStatus[] | null>(null);
   const prereqs = checkPrerequisites();
 
   useEffect(() => {
     checkProviders().then(setProvs);
   }, []);
+
+  const loaded = provs !== null;
   const anyMissing =
-    prereqs.some((p) => !p.installed && p.prerequisite.required) ||
-    provs.every((p) => !p.available);
+    loaded &&
+    (prereqs.some((p) => !p.installed && p.prerequisite.required) ||
+      provs.every((p) => !p.available));
 
   return (
-    <Box flexDirection="column" gap={0}>
-      {/* Providers */}
-      <Box gap={1} justifyContent="center" flexWrap="wrap">
-        <Text color="#555">providers</Text>
-        {provs.map((p) => (
-          <Text key={p.id} color={p.available ? "#2d5" : "#555"}>
-            {p.available ? "✓" : "✗"} {providerIcon(p.id)}{" "}
-            <Text color={p.available ? "#2d5" : "#444"}>{p.name}</Text>
-          </Text>
-        ))}
-      </Box>
-      {/* Tools */}
-      <Box gap={1} justifyContent="center" flexWrap="wrap">
-        <Text color="#555">{"   tools"}</Text>
+    <box flexDirection="column" gap={0}>
+      <box gap={1} justifyContent="center" flexWrap="wrap" flexDirection="row">
+        <text fg="#555">providers</text>
+        {!loaded ? (
+          <text fg="#555">scanning…</text>
+        ) : (
+          (() => {
+            const active = provs.filter((p) => p.available);
+            const shown = active.slice(0, 5);
+            const extra = active.length - shown.length;
+            return (
+              <>
+                {shown.map((p) => (
+                  <text key={p.id} fg="#2d5">
+                    ✓ {providerIcon(p.id)} <span fg="#2d5">{p.name}</span>
+                  </text>
+                ))}
+                {extra > 0 && <text fg="#555">+{extra}</text>}
+                {active.length === 0 && <text fg="#555">none configured</text>}
+              </>
+            );
+          })()
+        )}
+      </box>
+      <box gap={1} justifyContent="center" flexWrap="wrap" flexDirection="row">
+        <text fg="#555">{"   tools"}</text>
         {prereqs.map((t) => (
           <Status
             key={t.prerequisite.name}
@@ -46,13 +60,12 @@ export function HealthCheck() {
             dim={!t.prerequisite.required}
           />
         ))}
-      </Box>
-      {/* Hint */}
+      </box>
       {anyMissing && (
-        <Box justifyContent="center" marginTop={1}>
-          <Text color="#444">/setup to install missing</Text>
-        </Box>
+        <box justifyContent="center" marginTop={1}>
+          <text fg="#444">/setup to install missing</text>
+        </box>
       )}
-    </Box>
+    </box>
   );
 }

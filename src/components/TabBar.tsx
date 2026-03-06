@@ -1,4 +1,4 @@
-import { Box, Text } from "ink";
+import { TextAttributes } from "@opentui/core";
 import type { Tab } from "../hooks/useTabs.js";
 
 interface TabBarProps {
@@ -15,22 +15,25 @@ export function TabBar({ tabs, activeTabId, onSwitch: _onSwitch }: TabBarProps) 
   if (tabs.length < 2) return null;
 
   return (
-    <Box flexShrink={0} paddingX={1} height={1}>
+    <box flexShrink={0} paddingX={1} height={1} flexDirection="row">
       {tabs.map((tab, i) => {
         const isActive = tab.id === activeTabId;
         const label = truncateLabel(tab.label, 16);
         const num = String(i + 1);
         return (
-          <Box key={tab.id}>
-            {i > 0 && <Text color="#333"> · </Text>}
-            <Text color={isActive ? "#8B5CF6" : "#555"} bold={isActive}>
+          <box key={tab.id} flexDirection="row">
+            {i > 0 && <text fg="#333"> · </text>}
+            <text
+              fg={isActive ? "#8B5CF6" : "#555"}
+              attributes={isActive ? TextAttributes.BOLD : undefined}
+            >
               {num} {label}
-            </Text>
-          </Box>
+            </text>
+          </box>
         );
       })}
-      <Text color="#333"> · </Text>
-      <Text color="#444">+ new Alt+T</Text>
-    </Box>
+      <text fg="#333"> · </text>
+      <text fg="#444">+ new Alt+T</text>
+    </box>
   );
 }

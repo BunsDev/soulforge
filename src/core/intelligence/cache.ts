@@ -17,7 +17,6 @@ export class FileCache {
     this.maxSize = maxSize;
   }
 
-  /** Get file content, re-reading only if mtime changed */
   get(filePath: string): string | null {
     try {
       const stat = statSync(filePath);
@@ -25,6 +24,8 @@ export class FileCache {
       const cached = this.entries.get(filePath);
 
       if (cached && cached.mtime === mtime) {
+        this.entries.delete(filePath);
+        this.entries.set(filePath, cached);
         return cached.content;
       }
 

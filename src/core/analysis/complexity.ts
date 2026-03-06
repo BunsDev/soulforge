@@ -1,4 +1,10 @@
-import type { Constraint } from "../memory/types.js";
+interface Constraint {
+  name: string;
+  metric: string;
+  limit: number;
+  scope?: string;
+  action: "warn" | "block";
+}
 
 export interface ComplexityMetrics {
   lineCount: number;

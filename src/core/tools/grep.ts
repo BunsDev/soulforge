@@ -1,17 +1,23 @@
 import { spawn } from "node:child_process";
+import { resolve } from "node:path";
 import type { ToolResult } from "../../types";
+import type { FileOutline, SymbolInfo } from "../intelligence/types.js";
 import { getVendoredPath } from "../setup/install.js";
 
 interface GrepArgs {
   pattern: string;
   path?: string;
   glob?: string;
+  maxCount?: number;
 }
+
+const ENRICHMENT_TIMEOUT_MS = 2000;
 
 export const grepTool = {
   name: "grep",
   description:
-    "Search file contents using ripgrep. Returns matching lines with file paths and line numbers.",
+    "Search for text patterns across files using ripgrep. Best for string literals, log messages, error text, and non-code patterns. " +
+    "For finding where a symbol is defined or used, prefer navigate (semantic, not text-based).",
   execute: async (args: GrepArgs): Promise<ToolResult> => {
     const pattern = args.pattern;
     const searchPath = args.path ?? ".";
@@ -20,13 +26,14 @@ export const grepTool = {
     const rgArgs = [
       "--line-number",
       "--color=never",
-      "--max-count=50",
+      "--max-filesize=256K",
+      `--max-count=${String(args.maxCount ?? 50)}`,
       ...(glob ? ["--glob", glob] : []),
       pattern,
       searchPath,
     ];
 
-    return new Promise((resolve) => {
+    const rawOutput = await new Promise<string>((res) => {
       const rgBin = getVendoredPath("rg") ?? "rg";
       const proc = spawn(rgBin, rgArgs, {
         cwd: process.cwd(),
@@ -39,12 +46,8 @@ export const grepTool = {
       proc.on("close", (code: number | null) => {
         const output = chunks.join("");
         if (code === 0 || code === 1) {
-          resolve({
-            success: true,
-            output: output || "No matches found.",
-          });
+          res(output || "No matches found.");
         } else {
-          // Fallback to grep
           const fallbackArgs = ["-rn", pattern, searchPath];
           if (glob) fallbackArgs.push("--include", glob);
 
@@ -56,13 +59,91 @@ export const grepTool = {
           const grepChunks: string[] = [];
           grepProc.stdout.on("data", (data: Buffer) => grepChunks.push(data.toString()));
           grepProc.on("close", () => {
-            resolve({
-              success: true,
-              output: grepChunks.join("") || "No matches found.",
-            });
+            res(grepChunks.join("") || "No matches found.");
           });
         }
       });
     });
+
+    const enriched = await Promise.race([
+      enrichWithSymbolContext(rawOutput).catch(() => rawOutput),
+      new Promise<string>((res) => setTimeout(() => res(rawOutput), ENRICHMENT_TIMEOUT_MS)),
+    ]);
+
+    return { success: true, output: enriched };
   },
 };
+
+async function enrichWithSymbolContext(output: string): Promise<string> {
+  if (output === "No matches found.") return output;
+
+  const { getIntelligenceRouter } = await import("../intelligence/index.js");
+  const router = getIntelligenceRouter(process.cwd());
+
+  const hitsByFile = new Map<string, number[]>();
+  for (const line of output.split("\n")) {
+    const m = line.match(/^(.+?):(\d+):/);
+    if (m?.[1] && m[2]) {
+      const hits = hitsByFile.get(m[1]);
+      if (hits) hits.push(parseInt(m[2], 10));
+      else hitsByFile.set(m[1], [parseInt(m[2], 10)]);
+    }
+  }
+
+  if (hitsByFile.size === 0 || hitsByFile.size > 10) return output;
+
+  const outlines = new Map<string, FileOutline>();
+  await Promise.all(
+    [...hitsByFile.keys()].map(async (file) => {
+      try {
+        const abs = resolve(file);
+        const lang = router.detectLanguage(abs);
+        const ol = await router.executeWithFallback(lang, "getFileOutline", (b) =>
+          b.getFileOutline ? b.getFileOutline(abs) : Promise.resolve(null),
+        );
+        if (ol) outlines.set(file, ol);
+      } catch {}
+    }),
+  );
+
+  if (outlines.size === 0) return output;
+
+  const sections: string[] = [];
+  for (const [file, lines] of hitsByFile) {
+    const outline = outlines.get(file);
+    if (!outline || outline.symbols.length === 0) continue;
+
+    const symbolHits = new Map<string, { sym: SymbolInfo; count: number }>();
+    for (const lineNum of lines) {
+      const enclosing = findEnclosingSymbol(outline.symbols, lineNum);
+      if (enclosing) {
+        const key = `${enclosing.name}:${String(enclosing.location.line)}`;
+        const existing = symbolHits.get(key);
+        if (existing) existing.count++;
+        else symbolHits.set(key, { sym: enclosing, count: 1 });
+      }
+    }
+
+    if (symbolHits.size === 0) continue;
+    sections.push(`${file}:`);
+    for (const { sym, count } of symbolHits.values()) {
+      const end = sym.location.endLine ? `-${String(sym.location.endLine)}` : "";
+      const hits = count > 1 ? ` (${String(count)} hits)` : "";
+      sections.push(`  ${sym.kind} ${sym.name} — ${String(sym.location.line)}${end}${hits}`);
+    }
+  }
+
+  if (sections.length === 0) return output;
+  return `${output}\n\n[Symbol context — use read_code(target, name, file) for precise reading]\n${sections.join("\n")}`;
+}
+
+function findEnclosingSymbol(symbols: SymbolInfo[], line: number): SymbolInfo | null {
+  let best: SymbolInfo | null = null;
+  for (const sym of symbols) {
+    const end = sym.location.endLine ?? sym.location.line;
+    if (sym.location.line <= line && end >= line) {
+      if (!best || sym.location.line > best.location.line) best = sym;
+    }
+  }
+  return best;
+}

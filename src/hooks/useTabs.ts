@@ -1,4 +1,7 @@
 import { useCallback, useRef, useState } from "react";
+import { rebuildCoreMessages } from "../core/sessions/rebuild.js";
+import type { TabMeta } from "../core/sessions/types.js";
+import type { ChatMessage } from "../types/index.js";
 import type { ChatInstance, TabState } from "./useChat.js";
 
 const MAX_TABS = 9;
@@ -26,6 +29,12 @@ export interface UseTabsReturn {
   autoLabel: (id: string, firstMessage: string) => void;
   /** Get frozen state for all tabs (for persistence) */
   getAllTabStates: () => TabState[];
+  /** Rebuild all tabs from saved metadata */
+  restoreFromMeta: (
+    tabMetas: TabMeta[],
+    activeId: string,
+    tabMessages: Map<string, ChatMessage[]>,
+  ) => void;
 }
 
 interface UseTabsOptions {
@@ -44,8 +53,7 @@ export function useTabs({ chat, defaultModel }: UseTabsOptions): UseTabsReturn {
   // Track whether each tab has been auto-labeled
   const autoLabeled = useRef(new Set<string>());
 
-  // biome-ignore lint/style/noNonNullAssertion: tabs always has at least one element
-  const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0]!;
+  const activeTab = (tabs.find((t) => t.id === activeTabId) ?? tabs[0]) as (typeof tabs)[number];
   const activeTabIndex = tabs.findIndex((t) => t.id === activeTabId);
 
   const switchTab = useCallback(
@@ -73,7 +81,14 @@ export function useTabs({ chat, defaultModel }: UseTabsOptions): UseTabsReturn {
           activePlan: null,
           sidebarPlan: null,
           showPlanPanel: true,
-          tokenUsage: { prompt: 0, completion: 0, total: 0 },
+          tokenUsage: {
+            prompt: 0,
+            completion: 0,
+            total: 0,
+            cacheRead: 0,
+            subagentInput: 0,
+            subagentOutput: 0,
+          },
           coAuthorCommits: true,
           sessionId: targetId,
           planMode: false,
@@ -109,7 +124,14 @@ export function useTabs({ chat, defaultModel }: UseTabsOptions): UseTabsReturn {
       activePlan: null,
       sidebarPlan: null,
       showPlanPanel: true,
-      tokenUsage: { prompt: 0, completion: 0, total: 0 },
+      tokenUsage: {
+        prompt: 0,
+        completion: 0,
+        total: 0,
+        cacheRead: 0,
+        subagentInput: 0,
+        subagentOutput: 0,
+      },
       coAuthorCommits: true,
       sessionId: newId,
       planMode: false,
@@ -218,6 +240,59 @@ export function useTabs({ chat, defaultModel }: UseTabsOptions): UseTabsReturn {
     return states;
   }, [tabs, activeTabId, chat]);
 
+  const restoreFromMeta = useCallback(
+    (tabMetas: TabMeta[], activeId: string, tabMessages: Map<string, ChatMessage[]>) => {
+      if (tabMetas.length === 0) return;
+
+      const restoredTabs: Tab[] = tabMetas.map((tm) => ({
+        id: tm.id,
+        label: tm.label,
+      }));
+      setTabs(restoredTabs);
+      tabCounter.current = restoredTabs.length;
+
+      // Mark all tabs as auto-labeled
+      for (const tm of tabMetas) {
+        autoLabeled.current.add(tm.id);
+      }
+
+      // Resolve active tab — fall back to first tab if activeId doesn't match
+      const resolvedActiveId = tabMetas.some((tm) => tm.id === activeId)
+        ? activeId
+        : (tabMetas[0] as (typeof tabMetas)[number]).id;
+
+      // Build tab states and freeze inactive ones
+      frozenStates.current.clear();
+      for (const tm of tabMetas) {
+        const msgs = tabMessages.get(tm.id) ?? [];
+        const state: TabState = {
+          id: tm.id,
+          label: tm.label,
+          messages: msgs,
+          coreMessages: rebuildCoreMessages(msgs),
+          activeModel: tm.activeModel,
+          activePlan: null,
+          sidebarPlan: null,
+          showPlanPanel: tm.showPlanPanel,
+          tokenUsage: { cacheRead: 0, subagentInput: 0, subagentOutput: 0, ...tm.tokenUsage },
+          coAuthorCommits: tm.coAuthorCommits,
+          sessionId: tm.sessionId,
+          planMode: tm.planMode,
+          planRequest: tm.planRequest,
+        };
+
+        if (tm.id === resolvedActiveId) {
+          chat.restore(state);
+        } else {
+          frozenStates.current.set(tm.id, state);
+        }
+      }
+
+      setActiveTabId(resolvedActiveId);
+    },
+    [chat],
+  );
+
   return {
     tabs,
     activeTabId,
@@ -234,5 +309,6 @@ export function useTabs({ chat, defaultModel }: UseTabsOptions): UseTabsReturn {
     moveTab,
     autoLabel,
     getAllTabStates,
+    restoreFromMeta,
   };
 }

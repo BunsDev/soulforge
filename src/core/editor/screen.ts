@@ -8,6 +8,8 @@ export interface ScreenSegment {
   bg: string | undefined; // undefined = default/transparent
   bold: boolean;
   italic: boolean;
+  underline: boolean;
+  strikethrough: boolean;
 }
 
 interface HlAttr {
@@ -20,8 +22,16 @@ interface HlAttr {
   strikethrough?: boolean;
 }
 
+// Cache hex conversions — avoids repeated string allocation
+const hexCache = new Map<number, string>();
+
 function rgbToHex(n: number): string {
-  return `#${n.toString(16).padStart(6, "0")}`;
+  let hex = hexCache.get(n);
+  if (hex === undefined) {
+    hex = `#${n.toString(16).padStart(6, "0")}`;
+    hexCache.set(n, hex);
+  }
+  return hex;
 }
 
 export class NvimScreen {
@@ -41,6 +51,9 @@ export class NvimScreen {
   private dirtyRows = new Set<number>();
   private cachedLines: ScreenSegment[][] = [];
   private colorsChanged = false;
+
+  /** Generation counter — incremented on every meaningful change. */
+  generation = 0;
 
   /** Callback fired on each flush event (complete screen update). */
   onFlush: (() => void) | null = null;
@@ -179,6 +192,10 @@ export class NvimScreen {
     this.markAllDirty();
   }
 
+  /**
+   * Optimized scroll: swap entire row arrays instead of copying cell-by-cell.
+   * For full-width scrolls this is O(rows) instead of O(rows × cols).
+   */
   private handleGridScroll(
     top: number,
     bot: number,
@@ -186,56 +203,123 @@ export class NvimScreen {
     right: number,
     rows: number,
   ): void {
-    if (rows > 0) {
-      for (let r = top; r < bot - rows; r++) {
-        for (let c = left; c < right; c++) {
-          const src = this.grid[r + rows]?.[c];
-          const srcHl = this.hlGrid[r + rows]?.[c];
-          const dstRow = this.grid[r];
-          const dstHlRow = this.hlGrid[r];
-          if (dstRow && dstHlRow) {
-            dstRow[c] = src ?? " ";
-            dstHlRow[c] = srcHl ?? 0;
-          }
+    const isFullWidth = left === 0 && right === this.cols;
+
+    if (isFullWidth) {
+      const prevCursor = this.cursorRow;
+      // Fast path: swap row references
+      if (rows > 0) {
+        // Scroll up: rows at top are replaced by rows below
+        const saved = [] as string[][];
+        const savedHl = [] as number[][];
+        for (let r = top; r < top + rows; r++) {
+          saved.push(this.grid[r] as string[]);
+          savedHl.push(this.hlGrid[r] as number[]);
         }
-        this.markRowDirty(r);
+        for (let r = top; r < bot - rows; r++) {
+          this.grid[r] = this.grid[r + rows] as string[];
+          this.hlGrid[r] = this.hlGrid[r + rows] as number[];
+          const movedCache = this.cachedLines[r + rows] as ScreenSegment[];
+          this.cachedLines[r] = movedCache;
+          if (!movedCache.length) this.markRowDirty(r);
+        }
+        for (let i = 0; i < rows; i++) {
+          const r = bot - rows + i;
+          const row = saved[i] as string[];
+          const hlRow = savedHl[i] as number[];
+          row.fill(" ");
+          hlRow.fill(0);
+          this.grid[r] = row;
+          this.hlGrid[r] = hlRow;
+          this.cachedLines[r] = [];
+          this.markRowDirty(r);
+        }
+        // Invalidate old cursor's cached segments (now at prevCursor - rows)
+        this.markRowDirty(prevCursor - rows);
+        this.markRowDirty(this.cursorRow);
+      } else if (rows < 0) {
+        const absRows = -rows;
+        const saved = [] as string[][];
+        const savedHl = [] as number[][];
+        for (let r = bot - absRows; r < bot; r++) {
+          saved.push(this.grid[r] as string[]);
+          savedHl.push(this.hlGrid[r] as number[]);
+        }
+        for (let r = bot - 1; r >= top + absRows; r--) {
+          this.grid[r] = this.grid[r - absRows] as string[];
+          this.hlGrid[r] = this.hlGrid[r - absRows] as number[];
+          const movedCache = this.cachedLines[r - absRows] as ScreenSegment[];
+          this.cachedLines[r] = movedCache;
+          if (!movedCache.length) this.markRowDirty(r);
+        }
+        for (let i = 0; i < absRows; i++) {
+          const r = top + i;
+          const row = saved[i] as string[];
+          const hlRow = savedHl[i] as number[];
+          row.fill(" ");
+          hlRow.fill(0);
+          this.grid[r] = row;
+          this.hlGrid[r] = hlRow;
+          this.cachedLines[r] = [];
+          this.markRowDirty(r);
+        }
+        // Invalidate old cursor's cached segments (now at prevCursor + absRows)
+        this.markRowDirty(prevCursor + absRows);
+        this.markRowDirty(this.cursorRow);
       }
-      for (let r = bot - rows; r < bot; r++) {
-        for (let c = left; c < right; c++) {
-          const dstRow = this.grid[r];
-          const dstHlRow = this.hlGrid[r];
-          if (dstRow && dstHlRow) {
-            dstRow[c] = " ";
-            dstHlRow[c] = 0;
+    } else {
+      // Partial-width scroll: fall back to cell-by-cell copy
+      if (rows > 0) {
+        for (let r = top; r < bot - rows; r++) {
+          for (let c = left; c < right; c++) {
+            const src = this.grid[r + rows]?.[c];
+            const srcHl = this.hlGrid[r + rows]?.[c];
+            const dstRow = this.grid[r];
+            const dstHlRow = this.hlGrid[r];
+            if (dstRow && dstHlRow) {
+              dstRow[c] = src ?? " ";
+              dstHlRow[c] = srcHl ?? 0;
+            }
           }
+          this.markRowDirty(r);
         }
-        this.markRowDirty(r);
-      }
-    } else if (rows < 0) {
-      const absRows = -rows;
-      for (let r = bot - 1; r >= top + absRows; r--) {
-        for (let c = left; c < right; c++) {
-          const src = this.grid[r - absRows]?.[c];
-          const srcHl = this.hlGrid[r - absRows]?.[c];
-          const dstRow = this.grid[r];
-          const dstHlRow = this.hlGrid[r];
-          if (dstRow && dstHlRow) {
-            dstRow[c] = src ?? " ";
-            dstHlRow[c] = srcHl ?? 0;
+        for (let r = bot - rows; r < bot; r++) {
+          for (let c = left; c < right; c++) {
+            const dstRow = this.grid[r];
+            const dstHlRow = this.hlGrid[r];
+            if (dstRow && dstHlRow) {
+              dstRow[c] = " ";
+              dstHlRow[c] = 0;
+            }
           }
+          this.markRowDirty(r);
         }
-        this.markRowDirty(r);
-      }
-      for (let r = top; r < top + absRows; r++) {
-        for (let c = left; c < right; c++) {
-          const dstRow = this.grid[r];
-          const dstHlRow = this.hlGrid[r];
-          if (dstRow && dstHlRow) {
-            dstRow[c] = " ";
-            dstHlRow[c] = 0;
+      } else if (rows < 0) {
+        const absRows = -rows;
+        for (let r = bot - 1; r >= top + absRows; r--) {
+          for (let c = left; c < right; c++) {
+            const src = this.grid[r - absRows]?.[c];
+            const srcHl = this.hlGrid[r - absRows]?.[c];
+            const dstRow = this.grid[r];
+            const dstHlRow = this.hlGrid[r];
+            if (dstRow && dstHlRow) {
+              dstRow[c] = src ?? " ";
+              dstHlRow[c] = srcHl ?? 0;
+            }
           }
+          this.markRowDirty(r);
         }
-        this.markRowDirty(r);
+        for (let r = top; r < top + absRows; r++) {
+          for (let c = left; c < right; c++) {
+            const dstRow = this.grid[r];
+            const dstHlRow = this.hlGrid[r];
+            if (dstRow && dstHlRow) {
+              dstRow[c] = " ";
+              dstHlRow[c] = 0;
+            }
+          }
+          this.markRowDirty(r);
+        }
       }
     }
   }
@@ -272,16 +356,18 @@ export class NvimScreen {
   private static readonly FALLBACK_BG = 0x1a1a2e;
 
   private handleDefaultColors(fg: number, bg: number): void {
-    // fg/bg of -1 means "use terminal default" — since we're an embedded UI
-    // with no real terminal background, fall back to our dark defaults.
     this.defaultFg = fg >= 0 ? fg : NvimScreen.FALLBACK_FG;
     this.defaultBg = bg >= 0 ? bg : NvimScreen.FALLBACK_BG;
     this.colorsChanged = true;
   }
 
-  /** Get the default background color as a hex string. */
-  getDefaultBg(): string {
-    return rgbToHex(this.defaultBg);
+  /**
+   * In embedded mode, always return undefined so the terminal's actual
+   * background shows through. Neovim's "default bg" is meaningless
+   * when we're rendering inside a TUI container.
+   */
+  getDefaultBg(): string | undefined {
+    return undefined;
   }
 
   /** Build a single row's segments. */
@@ -299,6 +385,8 @@ export class NvimScreen {
       let bg = this.defaultBg;
       let bold = false;
       let italic = false;
+      let underline = false;
+      let strikethrough = false;
 
       if (attr) {
         if (attr.reverse) {
@@ -310,19 +398,25 @@ export class NvimScreen {
         }
         bold = attr.bold ?? false;
         italic = attr.italic ?? false;
+        underline = attr.underline ?? false;
+        strikethrough = attr.strikethrough ?? false;
       }
 
-      // Block cursor: invert fg/bg at the cursor position
       const isCursor = isCursorRow && col === this.cursorCol;
       if (isCursor) {
-        const tmp = fg;
-        fg = bg;
-        bg = tmp;
+        const isBarMode = this.modeName === "insert" || this.modeName.startsWith("cmdline");
+        const isUnderlineMode = this.modeName === "replace";
+        if (isBarMode || isUnderlineMode) {
+          underline = true;
+        } else {
+          const tmp = fg;
+          fg = bg;
+          bg = tmp;
+        }
       }
 
       const fgHex = rgbToHex(fg);
       const bgHex = rgbToHex(bg);
-      // Cursor cell always gets explicit bg so it's always visible
       const segBg = isCursor ? bgHex : bgHex === defaultBgHex ? undefined : bgHex;
 
       if (
@@ -330,11 +424,13 @@ export class NvimScreen {
         current.fg === fgHex &&
         current.bg === segBg &&
         current.bold === bold &&
-        current.italic === italic
+        current.italic === italic &&
+        current.underline === underline &&
+        current.strikethrough === strikethrough
       ) {
         current.text += char;
       } else {
-        current = { text: char, fg: fgHex, bg: segBg, bold, italic };
+        current = { text: char, fg: fgHex, bg: segBg, bold, italic, underline, strikethrough };
         segments.push(current);
       }
     }
@@ -348,6 +444,16 @@ export class NvimScreen {
    * The returned array reference is always new so React detects the change.
    */
   getSegmentedLines(): ScreenSegment[][] {
+    if (this.dirtyRows.size === 0 && !this.colorsChanged) {
+      // Verify no empty rows (scroll can move unbuilt cached lines)
+      for (let r = 0; r < this.rows; r++) {
+        if (!this.cachedLines[r]?.length) {
+          this.dirtyRows.add(r);
+        }
+      }
+      if (this.dirtyRows.size === 0) return this.cachedLines;
+    }
+
     const defaultBgHex = rgbToHex(this.defaultBg);
 
     // If colors changed, rebuild everything
@@ -357,6 +463,7 @@ export class NvimScreen {
         this.cachedLines[row] = this.buildRow(row, defaultBgHex);
       }
       this.dirtyRows.clear();
+      this.generation++;
       return [...this.cachedLines];
     }
 
@@ -367,6 +474,7 @@ export class NvimScreen {
       }
     }
     this.dirtyRows.clear();
+    this.generation++;
 
     return [...this.cachedLines];
   }

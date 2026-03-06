@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  binaries:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: bun-darwin-arm64
+            artifact: soulforge-darwin-arm64
+          - os: macos-13
+            target: bun-darwin-x64
+            artifact: soulforge-darwin-x64
+          - os: ubuntu-latest
+            target: bun-linux-x64
+            artifact: soulforge-linux-x64
+          - os: ubuntu-latest
+            target: bun-linux-arm64
+            artifact: soulforge-linux-arm64
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - name: Build standalone binary
+        run: |
+          mkdir -p bin
+          bun build src/index.tsx --compile --target ${{ matrix.target }} --external react-devtools-core --outfile bin/${{ matrix.artifact }}
+
+      - name: Compress
+        run: tar czf ${{ matrix.artifact }}.tar.gz -C bin ${{ matrix.artifact }}
+
+      - name: Upload to release
+        run: gh release upload "${{ github.event.release.tag_name }}" ${{ matrix.artifact }}.tar.gz --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  github-packages:
+    runs-on: ubuntu-latest
+    needs: binaries
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://npm.pkg.github.com
+
+      - run: bun install --frozen-lockfile
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Build
+        run: bun run build
+
+      - name: Publish to GitHub Packages
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

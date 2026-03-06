@@ -1,14 +1,12 @@
 import { spawn } from "node:child_process";
-import { Box, Text, useInput } from "ink";
-import { ScrollList } from "ink-scroll-list";
-import { ScrollView, type ScrollViewRef } from "ink-scroll-view";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { TextAttributes } from "@opentui/core";
+import { useKeyboard, useTerminalDimensions } from "@opentui/react";
+import { useEffect, useMemo, useState } from "react";
+import { useErrorStore } from "../stores/errors.js";
 import type { ChatMessage } from "../types/index.js";
 import { POPUP_BG, POPUP_HL, PopupRow } from "./shared.js";
 
-const POPUP_WIDTH = 90;
-const MAX_VISIBLE = 14;
-const MAX_DETAIL_LINES = 20;
+const CHROME_ROWS = 7;
 
 type LogEntryKind = "tool-ok" | "tool-error" | "request-error";
 
@@ -47,6 +45,20 @@ function copyToClipboard(text: string): void {
   proc.stdin.end();
 }
 
+function isErrorSystemMsg(content: string): boolean {
+  return (
+    content.startsWith("Error:") ||
+    content.startsWith("Request failed:") ||
+    content.startsWith("Failed")
+  );
+}
+
+function stripErrorPrefix(content: string): string {
+  if (content.startsWith("Error: ")) return content.slice(7);
+  if (content.startsWith("Request failed: ")) return content.slice(16);
+  return content;
+}
+
 function extractLogEntries(messages: ChatMessage[]): LogEntry[] {
   const entries: LogEntry[] = [];
 
@@ -62,20 +74,20 @@ function extractLogEntries(messages: ChatMessage[]): LogEntry[] {
           kind: success ? "tool-ok" : "tool-error",
           name: tc.name,
           timestamp: msg.timestamp,
-          summary: truncLine(output, 50),
+          summary: truncLine(output, 80),
           detail: output,
           args: JSON.stringify(tc.args, null, 2),
         });
       }
     }
 
-    if (msg.role === "system" && msg.content.startsWith("Request failed:")) {
+    if (msg.role === "system" && isErrorSystemMsg(msg.content)) {
       entries.push({
         id: `req-${String(msg.timestamp)}`,
         kind: "request-error",
         name: "Request Error",
         timestamp: msg.timestamp,
-        summary: truncLine(msg.content.slice(16), 50),
+        summary: truncLine(stripErrorPrefix(msg.content), 80),
         detail: msg.content,
       });
     }
@@ -95,26 +107,48 @@ export function ErrorLog({ visible, messages, onClose }: Props) {
   const [query, setQuery] = useState("");
   const [detailIndex, setDetailIndex] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
-  const detailRef = useRef<ScrollViewRef>(null);
+  const [scrollOffset, setScrollOffset] = useState(0);
+  const [detailScrollOffset, setDetailScrollOffset] = useState(0);
+  const { width: termCols, height: termRows } = useTerminalDimensions();
+  const containerRows = termRows - 2;
 
-  const innerW = POPUP_WIDTH - 2;
+  const popupWidth = Math.max(60, termCols - 4);
+  const innerW = popupWidth - 2;
+  const maxListVisible = Math.max(8, containerRows - CHROME_ROWS);
+  const maxDetailLines = Math.max(10, containerRows - 6);
 
-  const entries = useMemo(() => extractLogEntries(messages), [messages]);
+  const bgErrors = useErrorStore((s) => s.errors);
+  const entries = useMemo(() => {
+    const chatEntries = extractLogEntries(messages);
+    const bgEntries: LogEntry[] = bgErrors.map((e) => ({
+      id: e.id,
+      kind: "request-error" as const,
+      name: e.source,
+      timestamp: e.timestamp,
+      summary: truncLine(e.message, 80),
+      detail: e.message,
+    }));
+    return [...chatEntries, ...bgEntries].sort((a, b) => b.timestamp - a.timestamp);
+  }, [messages, bgErrors]);
+
+  const errorEntries = useMemo(() => entries.filter((e) => e.kind !== "tool-ok"), [entries]);
 
   const filterQuery = query.toLowerCase().trim();
   const filtered = filterQuery
-    ? entries.filter(
+    ? errorEntries.filter(
         (e) =>
           e.name.toLowerCase().includes(filterQuery) ||
-          e.summary.toLowerCase().includes(filterQuery),
+          e.summary.toLowerCase().includes(filterQuery) ||
+          e.detail.toLowerCase().includes(filterQuery),
       )
-    : entries;
+    : errorEntries;
 
-  // Reset state when popup opens
   useEffect(() => {
     if (visible) {
       setQuery("");
       setCursor(0);
+      setScrollOffset(0);
+      setDetailScrollOffset(0);
       setDetailIndex(null);
       setCopied(false);
     }
@@ -125,10 +159,17 @@ export function ErrorLog({ visible, messages, onClose }: Props) {
     setTimeout(() => setCopied(false), 1500);
   };
 
+  const adjustScroll = (nextCursor: number) => {
+    setScrollOffset((prev) => {
+      if (nextCursor < prev) return nextCursor;
+      if (nextCursor >= prev + maxListVisible) return nextCursor - maxListVisible + 1;
+      return prev;
+    });
+  };
+
   const inDetail = detailIndex !== null;
   const selectedEntry = inDetail ? filtered[detailIndex] : null;
 
-  // Build detail lines for scroll
   const detailLines = useMemo(() => {
     if (!selectedEntry) return [];
     const lines: string[] = [];
@@ -143,90 +184,99 @@ export function ErrorLog({ visible, messages, onClose }: Props) {
     return lines;
   }, [selectedEntry]);
 
-  useInput(
-    (_input, key) => {
-      // ── Detail view ──
-      if (inDetail) {
-        if (key.escape || key.backspace) {
-          setDetailIndex(null);
-          return;
-        }
-        if (key.upArrow) {
-          detailRef.current?.scrollBy(-1);
-          return;
-        }
-        if (key.downArrow) {
-          detailRef.current?.scrollBy(1);
-          return;
-        }
-        if (_input === "y" && key.ctrl) {
-          if (selectedEntry) {
-            const text = selectedEntry.args
-              ? `Args:\n${selectedEntry.args}\n\n${selectedEntry.detail}`
-              : selectedEntry.detail;
-            copyToClipboard(text);
-            showCopied();
-          }
-          return;
-        }
-        return;
-      }
+  useKeyboard((evt) => {
+    if (!visible) return;
 
-      // ── List view ──
-      if (key.escape) {
-        onClose();
+    if (inDetail) {
+      if (evt.name === "escape") {
+        setDetailIndex(null);
+        setDetailScrollOffset(0);
         return;
       }
-
-      if (key.upArrow) {
-        setCursor((prev) => (prev > 0 ? prev - 1 : Math.max(0, filtered.length - 1)));
+      if (evt.name === "up") {
+        setDetailScrollOffset((prev) => Math.max(0, prev - 1));
         return;
       }
-      if (key.downArrow) {
-        setCursor((prev) => (prev < filtered.length - 1 ? prev + 1 : 0));
+      if (evt.name === "down") {
+        setDetailScrollOffset((prev) =>
+          Math.min(Math.max(0, detailLines.length - maxDetailLines), prev + 1),
+        );
         return;
       }
-
-      if (key.return) {
-        if (filtered[cursor]) {
-          setDetailIndex(cursor);
-        }
-        return;
-      }
-
-      if (_input === "y" && key.ctrl) {
-        const entry = filtered[cursor];
-        if (entry) {
-          const text = entry.args ? `Args:\n${entry.args}\n\n${entry.detail}` : entry.detail;
+      if (evt.name === "y" && evt.ctrl) {
+        if (selectedEntry) {
+          const text = selectedEntry.args
+            ? `Args:\n${selectedEntry.args}\n\n${selectedEntry.detail}`
+            : selectedEntry.detail;
           copyToClipboard(text);
           showCopied();
         }
         return;
       }
+      return;
+    }
 
-      if (key.backspace || key.delete) {
-        setQuery((prev) => prev.slice(0, -1));
-        setCursor(0);
-        return;
-      }
+    if (evt.name === "escape") {
+      onClose();
+      return;
+    }
 
-      if (_input && !key.ctrl && !key.meta) {
-        setQuery((prev) => prev + _input);
-        setCursor(0);
+    if (evt.name === "up") {
+      setCursor((prev) => {
+        const next = prev > 0 ? prev - 1 : Math.max(0, filtered.length - 1);
+        adjustScroll(next);
+        return next;
+      });
+      return;
+    }
+    if (evt.name === "down") {
+      setCursor((prev) => {
+        const next = prev < filtered.length - 1 ? prev + 1 : 0;
+        adjustScroll(next);
+        return next;
+      });
+      return;
+    }
+
+    if (evt.name === "return") {
+      if (filtered[cursor]) {
+        setDetailIndex(cursor);
       }
-    },
-    { isActive: visible },
-  );
+      return;
+    }
+
+    if (evt.name === "y" && evt.ctrl) {
+      const entry = filtered[cursor];
+      if (entry) {
+        const text = entry.args ? `Args:\n${entry.args}\n\n${entry.detail}` : entry.detail;
+        copyToClipboard(text);
+        showCopied();
+      }
+      return;
+    }
+
+    if (evt.name === "backspace" || evt.name === "delete") {
+      setQuery((prev) => prev.slice(0, -1));
+      setCursor(0);
+      setScrollOffset(0);
+      return;
+    }
+
+    if (evt.name && evt.name.length === 1 && !evt.ctrl && !evt.meta) {
+      setQuery((prev) => prev + evt.name);
+      setCursor(0);
+      setScrollOffset(0);
+    }
+  });
 
   if (!visible) return null;
 
-  // ── Detail view render ──
   if (inDetail && selectedEntry) {
-    const statusIcon = selectedEntry.kind === "tool-ok" ? "✓" : "✗";
+    const statusIcon = selectedEntry.kind === "tool-ok" ? "\u2713" : "\u2717";
     const statusColor = selectedEntry.kind === "tool-ok" ? "#2d5" : "#FF0040";
 
     return (
-      <Box
+      <box
         position="absolute"
         flexDirection="column"
         alignItems="center"
@@ -234,72 +284,91 @@ export function ErrorLog({ visible, messages, onClose }: Props) {
         width="100%"
         height="100%"
       >
-        <Box flexDirection="column" borderStyle="round" borderColor="#8B5CF6" width={POPUP_WIDTH}>
-          {/* Header */}
+        <box
+          flexDirection="column"
+          borderStyle="rounded"
+          border={true}
+          borderColor="#8B5CF6"
+          width={popupWidth}
+        >
           <PopupRow w={innerW}>
-            <Text color={statusColor} backgroundColor={POPUP_BG}>
+            <text fg={statusColor} bg={POPUP_BG}>
               {statusIcon}
-            </Text>
-            <Text color="white" bold backgroundColor={POPUP_BG}>
+            </text>
+            <text fg="white" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
               {" "}
               {selectedEntry.name}
-            </Text>
-            <Text color="#555" backgroundColor={POPUP_BG}>
+            </text>
+            <text fg="#555" bg={POPUP_BG}>
               {"  "}
               {timeAgo(selectedEntry.timestamp)}
-            </Text>
+            </text>
             {copied && (
-              <Text color="#2d5" backgroundColor={POPUP_BG}>
+              <text fg="#2d5" bg={POPUP_BG}>
                 {"  "}Copied!
-              </Text>
+              </text>
             )}
           </PopupRow>
 
-          {/* Separator */}
           <PopupRow w={innerW}>
-            <Text color="#333" backgroundColor={POPUP_BG}>
-              {"─".repeat(innerW - 4)}
-            </Text>
+            <text fg="#333" bg={POPUP_BG}>
+              {"\u2500".repeat(innerW - 4)}
+            </text>
           </PopupRow>
 
-          {/* Detail content */}
-          <ScrollView ref={detailRef} height={Math.min(detailLines.length, MAX_DETAIL_LINES)}>
-            {detailLines.map((line, i) => {
-              const isSection = line.startsWith("──");
-              return (
-                <PopupRow key={String(i)} w={innerW}>
-                  <Text
-                    color={isSection ? "#8B5CF6" : "#aaa"}
-                    bold={isSection}
-                    backgroundColor={POPUP_BG}
-                    wrap="truncate"
-                  >
-                    {line.length > innerW - 4 ? `${line.slice(0, innerW - 5)}…` : line || " "}
-                  </Text>
-                </PopupRow>
-              );
-            })}
-          </ScrollView>
+          <box
+            flexDirection="column"
+            height={Math.min(detailLines.length, maxDetailLines)}
+            overflow="hidden"
+          >
+            {detailLines
+              .slice(detailScrollOffset, detailScrollOffset + maxDetailLines)
+              .map((line, vi) => {
+                const isSection = line.startsWith("\u2500\u2500");
+                return (
+                  <PopupRow key={String(vi + detailScrollOffset)} w={innerW}>
+                    <text
+                      fg={isSection ? "#8B5CF6" : "#aaa"}
+                      attributes={isSection ? TextAttributes.BOLD : undefined}
+                      bg={POPUP_BG}
+                      truncate
+                    >
+                      {line.length > innerW - 4
+                        ? `${line.slice(0, innerW - 5)}\u2026`
+                        : line || " "}
+                    </text>
+                  </PopupRow>
+                );
+              })}
+          </box>
+          {detailLines.length > maxDetailLines && (
+            <PopupRow w={innerW}>
+              <text fg="#555" bg={POPUP_BG}>
+                {detailScrollOffset > 0 ? "\u2191 " : "  "}
+                {detailScrollOffset + 1}-
+                {Math.min(detailScrollOffset + maxDetailLines, detailLines.length)}/
+                {detailLines.length}
+                {detailScrollOffset + maxDetailLines < detailLines.length ? " \u2193" : ""}
+              </text>
+            </PopupRow>
+          )}
 
-          {/* Spacer */}
           <PopupRow w={innerW}>
-            <Text>{""}</Text>
+            <text>{""}</text>
           </PopupRow>
 
-          {/* Hints */}
           <PopupRow w={innerW}>
-            <Text color="#555" backgroundColor={POPUP_BG}>
-              {"↑↓"} scroll {"^Y"} copy esc/bksp back
-            </Text>
+            <text fg="#555" bg={POPUP_BG}>
+              {"\u2191\u2193"} scroll | ^Y copy | esc back
+            </text>
           </PopupRow>
-        </Box>
-      </Box>
+        </box>
+      </box>
     );
   }
 
-  // ── List view render ──
   return (
-    <Box
+    <box
       position="absolute"
       flexDirection="column"
       alignItems="center"
@@ -307,102 +376,133 @@ export function ErrorLog({ visible, messages, onClose }: Props) {
       width="100%"
       height="100%"
     >
-      <Box flexDirection="column" borderStyle="round" borderColor="#8B5CF6" width={POPUP_WIDTH}>
-        {/* Title */}
+      <box
+        flexDirection="column"
+        borderStyle="rounded"
+        border={true}
+        borderColor="#8B5CF6"
+        width={popupWidth}
+      >
         <PopupRow w={innerW}>
-          <Text color="white" bold backgroundColor={POPUP_BG}>
+          <text fg="white" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
             {"\uF06A"} Error Log
-          </Text>
-          <Text color="#555" backgroundColor={POPUP_BG}>
+          </text>
+          <text fg="#555" bg={POPUP_BG}>
             {" "}
-            ({String(entries.length)} entries)
-          </Text>
+            ({String(errorEntries.length)} {errorEntries.length === 1 ? "error" : "errors"})
+          </text>
           {copied && (
-            <Text color="#2d5" backgroundColor={POPUP_BG}>
+            <text fg="#2d5" bg={POPUP_BG}>
               {"  "}Copied!
-            </Text>
+            </text>
           )}
         </PopupRow>
 
-        {/* Search */}
         <PopupRow w={innerW}>
-          <Text color="#9B30FF" backgroundColor={POPUP_BG}>
+          <text fg="#9B30FF" bg={POPUP_BG}>
             {" "}
-          </Text>
-          <Text color={query ? "white" : "#555"} backgroundColor={POPUP_BG}>
-            {query || "type to search entries..."}
-          </Text>
-          <Text color="#FF0040" backgroundColor={POPUP_BG}>
-            {"\u2588"}
-          </Text>
+          </text>
+          {query ? (
+            <>
+              <text fg="white" bg={POPUP_BG}>
+                {query}
+              </text>
+              <text fg="#FF0040" bg={POPUP_BG}>
+                {"\u2588"}
+              </text>
+            </>
+          ) : (
+            <>
+              <text fg="#FF0040" bg={POPUP_BG}>
+                {"\u2588"}
+              </text>
+              <text fg="#555" bg={POPUP_BG}>
+                type to filter errors...
+              </text>
+            </>
+          )}
         </PopupRow>
 
-        {/* Separator */}
         <PopupRow w={innerW}>
-          <Text color="#333" backgroundColor={POPUP_BG}>
-            {"─".repeat(innerW - 4)}
-          </Text>
+          <text fg="#333" bg={POPUP_BG}>
+            {"\u2500".repeat(innerW - 4)}
+          </text>
         </PopupRow>
 
-        {/* Entry list */}
-        {filtered.length === 0 ? (
-          <PopupRow w={innerW}>
-            <Text color="#555" backgroundColor={POPUP_BG}>
-              {query ? "no matching entries" : "no tool calls or errors yet"}
-            </Text>
-          </PopupRow>
-        ) : (
-          <ScrollList selectedIndex={cursor} height={Math.min(filtered.length, MAX_VISIBLE)}>
-            {filtered.map((entry, i) => {
+        <box
+          flexDirection="column"
+          height={Math.min(filtered.length || 1, maxListVisible)}
+          overflow="hidden"
+        >
+          {filtered.length === 0 ? (
+            <PopupRow w={innerW}>
+              <text fg="#555" bg={POPUP_BG}>
+                {query ? "no matching errors" : "no errors yet"}
+              </text>
+            </PopupRow>
+          ) : (
+            filtered.slice(scrollOffset, scrollOffset + maxListVisible).map((entry, vi) => {
+              const i = vi + scrollOffset;
               const isActive = i === cursor;
               const bg = isActive ? POPUP_HL : POPUP_BG;
-              const statusIcon = entry.kind === "tool-ok" ? "✓" : "✗";
-              const statusColor = entry.kind === "tool-ok" ? "#2d5" : "#FF0040";
+              const statusColor = entry.kind === "request-error" ? "#FF0040" : "#f80";
               const nameMax = 20;
-              const summaryMax = innerW - nameMax - 22;
+              const timeStr = timeAgo(entry.timestamp);
+              const summaryMax = innerW - nameMax - timeStr.length - 10;
               const name =
                 entry.name.length > nameMax
-                  ? `${entry.name.slice(0, nameMax - 1)}…`
+                  ? `${entry.name.slice(0, nameMax - 1)}\u2026`
                   : entry.name.padEnd(nameMax);
               const summary = truncLine(entry.summary, summaryMax);
 
               return (
                 <PopupRow key={entry.id} bg={bg} w={innerW}>
-                  <Text backgroundColor={bg} color={isActive ? "#FF0040" : "#555"}>
-                    {isActive ? "› " : "  "}
-                  </Text>
-                  <Text backgroundColor={bg} color={statusColor}>
-                    {statusIcon}{" "}
-                  </Text>
-                  <Text backgroundColor={bg} color={isActive ? "white" : "#aaa"} bold={isActive}>
+                  <text bg={bg} fg={isActive ? "#FF0040" : "#555"}>
+                    {isActive ? "\u203A " : "  "}
+                  </text>
+                  <text bg={bg} fg={statusColor}>
+                    {"\u2717"}{" "}
+                  </text>
+                  <text
+                    bg={bg}
+                    fg={isActive ? "white" : "#aaa"}
+                    attributes={isActive ? TextAttributes.BOLD : undefined}
+                  >
                     {name}
-                  </Text>
-                  <Text backgroundColor={bg} color="#666">
+                  </text>
+                  <text bg={bg} fg="#666">
                     {" "}
                     {summary}
-                  </Text>
-                  <Text backgroundColor={bg} color="#444">
+                  </text>
+                  <text bg={bg} fg="#444">
                     {"  "}
-                    {timeAgo(entry.timestamp)}
-                  </Text>
+                    {timeStr}
+                  </text>
                 </PopupRow>
               );
-            })}
-          </ScrollList>
+            })
+          )}
+        </box>
+        {filtered.length > maxListVisible && (
+          <PopupRow w={innerW}>
+            <text fg="#555" bg={POPUP_BG}>
+              {scrollOffset > 0 ? "\u2191 " : "  "}
+              {cursor + 1}/{filtered.length}
+              {scrollOffset + maxListVisible < filtered.length ? " \u2193" : ""}
+            </text>
+          </PopupRow>
         )}
 
-        {/* Spacer */}
         <PopupRow w={innerW}>
-          <Text>{""}</Text>
+          <text>{""}</text>
         </PopupRow>
 
-        {/* Hints */}
         <PopupRow w={innerW}>
-          <Text color="#555" backgroundColor={POPUP_BG}>
-            {"↑↓"} nav {"⏎"} detail {"^Y"} copy esc close
-          </Text>
+          <text fg="#555" bg={POPUP_BG}>
+            {"\u2191\u2193"} nav | {"\u23CE"} detail | ^Y copy | esc close
+          </text>
         </PopupRow>
-      </Box>
-    </Box>
+      </box>
+    </box>
   );
 }

@@ -1,10 +1,13 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { tool } from "ai";
 import { z } from "zod";
 import type { EditorIntegration } from "../../types/index.js";
+import { type AgentBus, normalizePath } from "../agents/agent-bus.js";
+import { MemoryManager } from "../memory/manager.js";
 import { analyzeTool } from "./analyze.js";
+import { discoverPatternTool } from "./discover-pattern.js";
 import { editFileTool } from "./edit-file";
 import {
   editorActionsTool,
@@ -31,13 +34,17 @@ import {
 } from "./git.js";
 import { globTool } from "./glob";
 import { grepTool } from "./grep";
-import { createMemoryWriteTool } from "./memory-write";
+import { createMemoryTools } from "./memory.js";
+import { moveSymbolTool } from "./move-symbol.js";
 import { navigateTool } from "./navigate.js";
+import { projectTool } from "./project.js";
 import { readCodeTool } from "./read-code.js";
 import { readFileTool } from "./read-file";
 import { refactorTool } from "./refactor.js";
+import { renameSymbolTool } from "./rename-symbol.js";
 import { shellTool } from "./shell";
-import { webSearchTool } from "./web-search";
+import { testScaffoldTool } from "./test-scaffold.js";
+import { buildWebSearchTool } from "./web-search";
 
 export { buildInteractiveTools } from "./interactive.js";
 
@@ -52,9 +59,15 @@ export function buildTools(
   cwd?: string,
   editorSettings?: EditorIntegration,
   onApproveWebSearch?: (query: string) => Promise<boolean>,
-  opts?: { codeExecution?: boolean },
+  opts?: {
+    codeExecution?: boolean;
+    memoryManager?: MemoryManager;
+    webSearchModel?: import("ai").LanguageModel;
+  },
 ) {
-  const memoryTool = createMemoryWriteTool(cwd ?? process.cwd());
+  const effectiveCwd = cwd ?? process.cwd();
+  const mm = opts?.memoryManager ?? new MemoryManager(effectiveCwd);
+  const memoryTools = createMemoryTools(mm);
   const ei = editorSettings ?? {
     diagnostics: true,
     symbols: true,
@@ -118,36 +131,12 @@ export function buildTools(
       execute: (args) => globTool.execute(args),
     }),
 
-    web_search: tool({
-      description: webSearchTool.description,
-      inputSchema: z.object({
-        query: z.string().describe("Search query"),
-        count: z.number().optional().describe("Number of results (default 5)"),
-      }),
-      execute: async (args) => {
-        if (onApproveWebSearch) {
-          const approved = await onApproveWebSearch(args.query);
-          if (!approved) {
-            return {
-              success: false,
-              output: "Web search was denied by the user.",
-              error: "Web search denied.",
-            };
-          }
-        }
-        return webSearchTool.execute(args);
-      },
+    web_search: buildWebSearchTool({
+      webSearchModel: opts?.webSearchModel,
+      onApprove: onApproveWebSearch,
     }),
 
-    memory_write: tool({
-      description: memoryTool.description,
-      inputSchema: z.object({
-        summary: z.string().describe("Brief summary of the architectural decision"),
-        rationale: z.string().describe("Why this decision was made"),
-        tags: z.array(z.string()).optional().describe("Tags for categorization"),
-      }),
-      execute: (args) => memoryTool.execute(args),
-    }),
+    ...memoryTools,
 
     editor_read: tool({
       description: editorReadTool.description,
@@ -302,11 +291,23 @@ export function buildTools(
       description: navigateTool.description,
       inputSchema: z.object({
         action: z
-          .enum(["definition", "references", "symbols", "imports", "exports"])
+          .enum([
+            "definition",
+            "references",
+            "symbols",
+            "imports",
+            "exports",
+            "workspace_symbols",
+            "call_hierarchy",
+            "implementation",
+            "type_hierarchy",
+            "search_symbols",
+          ])
           .describe("Navigation action"),
         symbol: z.string().optional().describe("Symbol name to look up"),
         file: z.string().optional().describe("File path to analyze"),
         scope: z.string().optional().describe("Filter symbols by name pattern"),
+        query: z.string().optional().describe("Search query for workspace_symbols/search_symbols"),
       }),
       execute: (args) => navigateTool.execute(args),
     }),
@@ -325,17 +326,48 @@ export function buildTools(
       execute: (args) => readCodeTool.execute(args),
     }),
 
+    rename_symbol: tool({
+      description: renameSymbolTool.description,
+      inputSchema: z.object({
+        symbol: z.string().describe("Current name of the symbol to rename"),
+        newName: z.string().describe("New name for the symbol"),
+        file: z
+          .string()
+          .optional()
+          .describe(
+            "File where the symbol is defined (optional — auto-detected via workspace search)",
+          ),
+      }),
+      execute: (args) => renameSymbolTool.execute(args),
+    }),
+
+    move_symbol: tool({
+      description: moveSymbolTool.description,
+      inputSchema: z.object({
+        symbol: z.string().describe("Name of the symbol to move"),
+        from: z.string().describe("Source file path"),
+        to: z.string().describe("Target file path (created if it doesn't exist)"),
+      }),
+      execute: (args) => moveSymbolTool.execute(args),
+    }),
+
     refactor: tool({
       description: refactorTool.description,
       inputSchema: z.object({
         action: z
-          .enum(["rename", "extract_function", "extract_variable"])
-          .describe("Refactoring action"),
-        file: z.string().optional().describe("File path"),
-        symbol: z.string().optional().describe("Symbol to rename"),
-        newName: z.string().optional().describe("New name for rename or extracted symbol"),
-        startLine: z.number().optional().describe("Start line for extraction"),
-        endLine: z.number().optional().describe("End line for extraction"),
+          .enum([
+            "extract_function",
+            "extract_variable",
+            "format",
+            "format_range",
+            "organize_imports",
+          ])
+          .describe("Action to perform. For renaming symbols, use rename_symbol instead."),
+        file: z.string().optional().describe("Target file"),
+        symbol: z.string().optional().describe("Symbol name"),
+        newName: z.string().optional().describe("New name for extracted symbol"),
+        startLine: z.number().optional().describe("Start line for extraction or range formatting"),
+        endLine: z.number().optional().describe("End line for extraction or range formatting"),
         apply: z.boolean().optional().describe("Apply changes to disk (default true)"),
       }),
       execute: (args) => refactorTool.execute(args),
@@ -344,13 +376,69 @@ export function buildTools(
     analyze: tool({
       description: analyzeTool.description,
       inputSchema: z.object({
-        action: z.enum(["diagnostics", "type_info", "outline"]).describe("Analysis action"),
+        action: z
+          .enum(["diagnostics", "type_info", "outline", "code_actions", "unused", "symbol_diff"])
+          .describe("Analysis action"),
         file: z.string().optional().describe("File path to analyze"),
         symbol: z.string().optional().describe("Symbol for type_info"),
         line: z.number().optional().describe("Line number for type_info"),
         column: z.number().optional().describe("Column number for type_info"),
+        startLine: z.number().optional().describe("Start line for code_actions range"),
+        endLine: z.number().optional().describe("End line for code_actions range"),
+        oldContent: z
+          .string()
+          .optional()
+          .describe("Old file content for symbol_diff (or uses git HEAD)"),
       }),
       execute: (args) => analyzeTool.execute(args),
+    }),
+
+    discover_pattern: tool({
+      description: discoverPatternTool.description,
+      inputSchema: z.object({
+        query: z.string().describe("Concept to discover (e.g. 'provider', 'router', 'auth')"),
+        file: z.string().optional().describe("File to scope the search to"),
+      }),
+      execute: (args) => discoverPatternTool.execute(args),
+    }),
+
+    test_scaffold: tool({
+      description: testScaffoldTool.description,
+      inputSchema: z.object({
+        file: z.string().describe("Source file to generate tests for"),
+        framework: z
+          .enum(["vitest", "jest", "bun", "pytest", "go", "cargo"])
+          .optional()
+          .describe("Test framework (auto-detected from project toolchain)"),
+        output: z.string().optional().describe("Output path for test file"),
+      }),
+      execute: (args) => testScaffoldTool.execute(args),
+    }),
+
+    project: tool({
+      description: projectTool.description,
+      inputSchema: z.object({
+        action: z.enum(["test", "build", "lint", "typecheck", "run"]).describe("Project action"),
+        file: z.string().optional().describe("Target file (for test/lint)"),
+        fix: z.boolean().optional().describe("Auto-fix lint issues"),
+        script: z.string().optional().describe("Named script to run (for run action)"),
+        flags: z
+          .string()
+          .optional()
+          .describe(
+            "Extra flags appended to the command (e.g. '--features async', '-k test_name')",
+          ),
+        env: z
+          .record(z.string(), z.string())
+          .optional()
+          .describe("Environment variables (e.g. { NODE_ENV: 'test', DEBUG: '1' })"),
+        cwd: z
+          .string()
+          .optional()
+          .describe("Working directory relative to project root (for monorepos)"),
+        timeout: z.number().optional().describe("Timeout in ms (default 120000)"),
+      }),
+      execute: (args) => projectTool.execute(args as Parameters<typeof projectTool.execute>[0]),
     }),
 
     git_status: tool({
@@ -411,31 +499,15 @@ export function buildTools(
   };
 }
 
-/** Read-only tools for explore subagent */
-export function buildReadOnlyTools(
+/** Read-only tools for restricted modes (architect, socratic, challenge).
+ *  Includes all read/analysis + memory + editor read, but NO edit/shell/git/refactor.
+ *  The LLM physically cannot bypass the mode — these tools don't exist on the agent. */
+export function buildRestrictedModeTools(
   editorSettings?: EditorIntegration,
   onApproveWebSearch?: (query: string) => Promise<boolean>,
+  opts?: { memoryManager?: MemoryManager; webSearchModel?: import("ai").LanguageModel },
 ) {
-  const all = buildTools(undefined, editorSettings, onApproveWebSearch);
-  return {
-    read_file: all.read_file,
-    grep: all.grep,
-    glob: all.glob,
-    web_search: all.web_search,
-    editor_read: all.editor_read,
-    navigate: all.navigate,
-    read_code: all.read_code,
-    analyze: all.analyze,
-  };
-}
-
-/** Read-only tools + write_plan for plan mode */
-export function buildPlanModeTools(
-  cwd: string,
-  editorSettings?: EditorIntegration,
-  onApproveWebSearch?: (query: string) => Promise<boolean>,
-) {
-  const all = buildTools(cwd, editorSettings, onApproveWebSearch);
+  const all = buildTools(undefined, editorSettings, onApproveWebSearch, opts);
   return {
     read_file: all.read_file,
     grep: all.grep,
@@ -452,51 +524,80 @@ export function buildPlanModeTools(
     navigate: all.navigate,
     read_code: all.read_code,
     analyze: all.analyze,
-    write_plan: tool({
-      description:
-        "Submit a structured implementation plan. Call this when your research is complete and you have a concrete plan ready.",
-      inputSchema: z.object({
-        title: z.string().describe("Short plan title (2-6 words)"),
-        context: z.string().describe("What problem this solves and why these changes are needed"),
-        files: z
-          .array(
-            z.object({
-              path: z.string().describe("File path relative to project root"),
-              action: z.enum(["create", "modify", "delete"]).describe("Type of change"),
-              description: z.string().describe("What changes to make in this file"),
-            }),
-          )
-          .describe("Files to change"),
-        steps: z
-          .array(
-            z.object({
-              id: z.string().describe("Step ID (step-1, step-2, etc.)"),
-              label: z.string().describe("Short step description"),
-            }),
-          )
-          .describe("Ordered implementation steps"),
-        verification: z.array(z.string()).describe("How to verify the changes work"),
-      }),
-      execute: async (args) => {
-        // Write formatted markdown
-        const lines = [`# ${args.title}`, "", `## Context`, "", args.context, "", `## Files`];
-        for (const f of args.files) {
-          lines.push(`- **${f.action}** \`${f.path}\` — ${f.description}`);
-        }
-        lines.push("", "## Steps");
-        for (const s of args.steps) {
-          lines.push(`${s.id}. ${s.label}`);
-        }
-        lines.push("", "## Verification");
-        for (const v of args.verification) {
-          lines.push(`- ${v}`);
-        }
-        const dir = join(cwd, ".soulforge");
-        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-        writeFileSync(join(dir, "plan.md"), lines.join("\n"));
-        return { success: true, output: "Plan written to .soulforge/plan.md" };
-      },
-    }),
+    discover_pattern: all.discover_pattern,
+    memory_read: all.memory_read,
+    memory_write: all.memory_write,
+    memory_list: all.memory_list,
+    memory_search: all.memory_search,
+  };
+}
+
+/** Read-only tools for explore subagent */
+export function buildReadOnlyTools(
+  editorSettings?: EditorIntegration,
+  onApproveWebSearch?: (query: string) => Promise<boolean>,
+  opts?: { memoryManager?: MemoryManager; webSearchModel?: import("ai").LanguageModel },
+) {
+  const all = buildTools(undefined, editorSettings, onApproveWebSearch, opts);
+  return {
+    read_file: all.read_file,
+    grep: all.grep,
+    glob: all.glob,
+    web_search: all.web_search,
+    editor_read: all.editor_read,
+    ...(all.editor_diagnostics ? { editor_diagnostics: all.editor_diagnostics } : {}),
+    ...(all.editor_symbols ? { editor_symbols: all.editor_symbols } : {}),
+    ...(all.editor_hover ? { editor_hover: all.editor_hover } : {}),
+    ...(all.editor_references ? { editor_references: all.editor_references } : {}),
+    ...(all.editor_definition ? { editor_definition: all.editor_definition } : {}),
+    ...(all.editor_lsp_status ? { editor_lsp_status: all.editor_lsp_status } : {}),
+    navigate: all.navigate,
+    read_code: all.read_code,
+    analyze: all.analyze,
+    discover_pattern: all.discover_pattern,
+    memory_read: all.memory_read,
+    memory_list: all.memory_list,
+    memory_search: all.memory_search,
+  };
+}
+
+export function planFileName(sessionId?: string): string {
+  return sessionId ? `plan-${sessionId}.md` : "plan.md";
+}
+
+/** Read-only tools for plan mode (plan tool is provided by buildInteractiveTools) */
+export function buildPlanModeTools(
+  cwd: string,
+  editorSettings?: EditorIntegration,
+  onApproveWebSearch?: (query: string) => Promise<boolean>,
+  opts?: {
+    memoryManager?: MemoryManager;
+    webSearchModel?: import("ai").LanguageModel;
+    sessionId?: string;
+  },
+) {
+  const all = buildTools(cwd, editorSettings, onApproveWebSearch, opts);
+  return {
+    read_file: all.read_file,
+    grep: all.grep,
+    glob: all.glob,
+    web_search: all.web_search,
+    editor_read: all.editor_read,
+    editor_navigate: all.editor_navigate,
+    ...(all.editor_diagnostics ? { editor_diagnostics: all.editor_diagnostics } : {}),
+    ...(all.editor_symbols ? { editor_symbols: all.editor_symbols } : {}),
+    ...(all.editor_hover ? { editor_hover: all.editor_hover } : {}),
+    ...(all.editor_references ? { editor_references: all.editor_references } : {}),
+    ...(all.editor_definition ? { editor_definition: all.editor_definition } : {}),
+    ...(all.editor_lsp_status ? { editor_lsp_status: all.editor_lsp_status } : {}),
+    navigate: all.navigate,
+    read_code: all.read_code,
+    analyze: all.analyze,
+    discover_pattern: all.discover_pattern,
+    test_scaffold: all.test_scaffold,
+    memory_read: all.memory_read,
+    memory_list: all.memory_list,
+    memory_search: all.memory_search,
   };
 }
 
@@ -505,9 +606,200 @@ export function buildCodeTools(
   cwd?: string,
   editorSettings?: EditorIntegration,
   onApproveWebSearch?: (query: string) => Promise<boolean>,
-  opts?: { codeExecution?: boolean },
+  opts?: {
+    codeExecution?: boolean;
+    memoryManager?: MemoryManager;
+    webSearchModel?: import("ai").LanguageModel;
+  },
 ) {
   return buildTools(cwd, editorSettings, onApproveWebSearch, opts);
+}
+
+const SUBAGENT_MAX_LINES = 300;
+const SUBAGENT_MAX_OUTPUT_BYTES = 8192;
+
+function truncateLines(output: string): string {
+  const lines = output.split("\n");
+  if (lines.length <= SUBAGENT_MAX_LINES) return output;
+  return `${lines.slice(0, SUBAGENT_MAX_LINES).join("\n")}\n\n... [truncated: ${String(lines.length)} lines total. Use startLine/endLine for specific sections.]`;
+}
+
+function truncateBytes(output: string): string {
+  if (output.length <= SUBAGENT_MAX_OUTPUT_BYTES) return output;
+  return `${output.slice(0, SUBAGENT_MAX_OUTPUT_BYTES)}\n\n... [truncated: output exceeded limit. Narrow with glob or path params.]`;
+}
+
+/** Lean read-only tools for explore subagents — no editor, memory, git.
+ *  When webSearchModel is provided, includes an agent-powered web_search tool. */
+export function buildSubagentExploreTools(opts?: {
+  webSearchModel?: import("ai").LanguageModel;
+  onApproveWebSearch?: (query: string) => Promise<boolean>;
+}) {
+  return {
+    read_file: tool({
+      description: `${readFileTool.description} Capped at 300 lines — use startLine/endLine for large files.`,
+      inputSchema: z.object({
+        path: z.string().describe("File path to read"),
+        startLine: z.number().optional().describe("Start line (1-indexed)"),
+        endLine: z.number().optional().describe("End line (1-indexed)"),
+      }),
+      execute: async (args) => {
+        const result = await readFileTool.execute(args);
+        if (!result.success) return result;
+        return { ...result, output: truncateLines(result.output) };
+      },
+    }),
+
+    grep: tool({
+      description: grepTool.description,
+      inputSchema: z.object({
+        pattern: z.string().describe("Regex search pattern"),
+        path: z.string().optional().describe("Directory to search"),
+        glob: z.string().optional().describe("File glob filter"),
+      }),
+      execute: async (args) => {
+        const result = await grepTool.execute({ ...args, maxCount: 10 });
+        if (!result.success) return result;
+        return { ...result, output: truncateBytes(result.output) };
+      },
+    }),
+
+    glob: tool({
+      description: globTool.description,
+      inputSchema: z.object({
+        pattern: z.string().describe("Glob pattern"),
+        path: z.string().optional().describe("Base directory"),
+      }),
+      execute: (args) => globTool.execute(args),
+    }),
+
+    read_code: tool({
+      description: readCodeTool.description,
+      inputSchema: z.object({
+        target: z
+          .enum(["function", "class", "type", "interface", "scope"])
+          .describe("What to read"),
+        name: z.string().optional().describe("Symbol name (required unless target is scope)"),
+        file: z.string().describe("File path"),
+        startLine: z.number().optional().describe("Start line for scope target"),
+        endLine: z.number().optional().describe("End line for scope target"),
+      }),
+      execute: (args) => readCodeTool.execute(args),
+    }),
+
+    navigate: tool({
+      description: navigateTool.description,
+      inputSchema: z.object({
+        action: z
+          .enum([
+            "definition",
+            "references",
+            "symbols",
+            "imports",
+            "exports",
+            "workspace_symbols",
+            "call_hierarchy",
+            "implementation",
+            "type_hierarchy",
+            "search_symbols",
+          ])
+          .describe("Navigation action"),
+        symbol: z.string().optional().describe("Symbol name to look up"),
+        file: z.string().optional().describe("File path to analyze"),
+        scope: z.string().optional().describe("Filter symbols by name pattern"),
+        query: z.string().optional().describe("Search query for workspace_symbols/search_symbols"),
+      }),
+      execute: (args) => navigateTool.execute(args),
+    }),
+
+    analyze: tool({
+      description: analyzeTool.description,
+      inputSchema: z.object({
+        action: z
+          .enum(["diagnostics", "type_info", "outline", "code_actions", "unused", "symbol_diff"])
+          .describe("Analysis action"),
+        file: z.string().optional().describe("File path to analyze"),
+        symbol: z.string().optional().describe("Symbol for type_info"),
+        line: z.number().optional().describe("Line number for type_info"),
+        column: z.number().optional().describe("Column number for type_info"),
+        startLine: z.number().optional().describe("Start line for code_actions range"),
+        endLine: z.number().optional().describe("End line for code_actions range"),
+        oldContent: z
+          .string()
+          .optional()
+          .describe("Old file content for symbol_diff (or uses git HEAD)"),
+      }),
+      execute: (args) => analyzeTool.execute(args),
+    }),
+
+    discover_pattern: tool({
+      description: discoverPatternTool.description,
+      inputSchema: z.object({
+        query: z.string().describe("Concept to discover (e.g. 'provider', 'router', 'auth')"),
+        file: z.string().optional().describe("File to scope the search to"),
+      }),
+      execute: (args) => discoverPatternTool.execute(args),
+    }),
+
+    web_search: buildWebSearchTool({
+      webSearchModel: opts?.webSearchModel,
+      onApprove: opts?.onApproveWebSearch,
+    }),
+  };
+}
+
+/** Lean tools for code subagents — explore tools + edit_file, shell */
+export function buildSubagentCodeTools(opts?: {
+  webSearchModel?: import("ai").LanguageModel;
+  onApproveWebSearch?: (query: string) => Promise<boolean>;
+}) {
+  return {
+    ...buildSubagentExploreTools(opts),
+
+    edit_file: tool({
+      description: editFileTool.description,
+      inputSchema: z.object({
+        path: z.string().describe("File path to edit"),
+        oldString: z.string().describe("Exact string to replace (empty = create new file)"),
+        newString: z.string().describe("Replacement string"),
+      }),
+      execute: (args) => editFileTool.execute(args),
+    }),
+
+    rename_symbol: tool({
+      description: renameSymbolTool.description,
+      inputSchema: z.object({
+        symbol: z.string().describe("Current name of the symbol to rename"),
+        newName: z.string().describe("New name for the symbol"),
+        file: z.string().optional().describe("File where the symbol is defined (optional)"),
+      }),
+      execute: (args) => renameSymbolTool.execute(args),
+    }),
+
+    move_symbol: tool({
+      description: moveSymbolTool.description,
+      inputSchema: z.object({
+        symbol: z.string().describe("Name of the symbol to move"),
+        from: z.string().describe("Source file path"),
+        to: z.string().describe("Target file path"),
+      }),
+      execute: (args) => moveSymbolTool.execute(args),
+    }),
+
+    shell: tool({
+      description: shellTool.description,
+      inputSchema: z.object({
+        command: z.string().describe("Shell command to execute"),
+        cwd: z.string().optional().describe("Working directory"),
+        timeout: z.number().optional().describe("Timeout in ms"),
+      }),
+      execute: async (args) => {
+        const result = await shellTool.execute(args);
+        if (!result.success) return result;
+        return { ...result, output: truncateBytes(result.output) };
+      },
+    }),
+  };
 }
 
 /** Get tool names for display */
@@ -520,10 +812,18 @@ export function getToolNames(): string[] {
     globTool.name,
     "web_search",
     "memory_write",
+    "memory_read",
+    "memory_list",
+    "memory_search",
+    "memory_delete",
     navigateTool.name,
     readCodeTool.name,
+    renameSymbolTool.name,
+    moveSymbolTool.name,
     refactorTool.name,
     analyzeTool.name,
+    discoverPatternTool.name,
+    testScaffoldTool.name,
     editorReadTool.name,
     editorEditTool.name,
     editorNavigateTool.name,
@@ -544,4 +844,229 @@ export function getToolNames(): string[] {
     gitPullTool.name,
     gitStashTool.name,
   ];
+}
+
+interface WrappableTool {
+  description?: string;
+  inputSchema?: unknown;
+  execute?: (args: never, opts: never) => unknown;
+}
+
+export function wrapWithBusCache(
+  tools: Record<string, WrappableTool>,
+  bus: AgentBus,
+  agentId: string,
+): Record<string, WrappableTool> {
+  const wrapped = { ...tools };
+
+  const CACHE_HIT_LINES_THRESHOLD = 80;
+
+  function tagCacheHit(result: unknown, path: string): unknown {
+    const text =
+      typeof result === "string"
+        ? result
+        : String((result as Record<string, unknown>)?.output ?? "");
+    const lineCount = text.split("\n").length;
+    if (lineCount < CACHE_HIT_LINES_THRESHOLD) return result;
+    const hint = `[Cached — use read_code(target, name, "${path}") for specific symbols instead of re-reading.]`;
+    if (typeof result === "string") return `${hint}\n${result}`;
+    if (result && typeof result === "object" && "output" in result) {
+      const r = result as Record<string, unknown>;
+      return { ...r, output: `${hint}\n${String(r.output ?? "")}` };
+    }
+    return result;
+  }
+
+  function makeCachedExecute(
+    origExecute: (args: Record<string, unknown>, opts?: unknown) => Promise<unknown>,
+    keyFn: (args: Record<string, unknown>) => string | null,
+  ): WrappableTool["execute"] {
+    return (async (args: Record<string, unknown>, opts: unknown) => {
+      const key = keyFn(args);
+      if (key) {
+        const cached = bus.acquireToolResult(agentId, key);
+        if (cached) return cached;
+      }
+      const result = await origExecute(args, opts);
+      if (key) {
+        const content = typeof result === "string" ? result : JSON.stringify(result);
+        bus.cacheToolResult(key, content);
+      }
+      return result;
+    }) as WrappableTool["execute"];
+  }
+
+  const readFile = tools.read_file;
+  if (readFile?.execute) {
+    const origExecute = readFile.execute as (
+      args: { path: string; startLine?: number; endLine?: number },
+      opts?: unknown,
+    ) => Promise<unknown>;
+
+    wrapped.read_file = {
+      ...readFile,
+      execute: (async (
+        args: { path: string; startLine?: number; endLine?: number },
+        opts: unknown,
+      ) => {
+        const normalized = normalizePath(args.path);
+
+        if (args.startLine != null || args.endLine != null) {
+          const result = await origExecute(args, opts);
+          bus.recordFileRead(agentId, normalized);
+          return result;
+        }
+
+        const acquired = bus.acquireFileRead(agentId, normalized);
+
+        if (acquired.cached === true) {
+          const cached = acquired.content ?? (await origExecute(args, opts));
+          bus.recordFileRead(agentId, normalized);
+          return tagCacheHit(cached, normalized);
+        }
+
+        if (acquired.cached === "waiting") {
+          const content = await acquired.content;
+          bus.recordFileRead(agentId, normalized);
+          if (content != null) return tagCacheHit(content, normalized);
+          return origExecute(args, opts);
+        }
+
+        const { gen } = acquired;
+        try {
+          const result = await origExecute(args, opts);
+          const content = typeof result === "string" ? result : JSON.stringify(result);
+          bus.releaseFileRead(normalized, content, gen);
+          bus.recordFileRead(agentId, normalized);
+          return result;
+        } catch (error) {
+          bus.failFileRead(normalized, gen);
+          throw error;
+        }
+      }) as WrappableTool["execute"],
+    };
+  }
+
+  const editFile = tools.edit_file;
+  if (editFile?.execute) {
+    const origEdit = editFile.execute as (
+      args: { path: string; oldString: string; newString: string },
+      opts?: unknown,
+    ) => Promise<unknown>;
+
+    wrapped.edit_file = {
+      ...editFile,
+      execute: (async (
+        args: { path: string; oldString: string; newString: string },
+        opts: unknown,
+      ) => {
+        const normalized = normalizePath(args.path);
+        const { release, owner } = await bus.acquireEditLock(agentId, normalized);
+        try {
+          const result = await origEdit(args, opts);
+          const isOk =
+            result &&
+            typeof result === "object" &&
+            (result as Record<string, unknown>).success === true;
+          if (isOk) {
+            try {
+              const fresh = readFileSync(resolve(normalized), "utf-8");
+              bus.updateFile(normalized, fresh, agentId);
+            } catch {
+              bus.invalidateFile(normalized);
+            }
+          } else {
+            bus.invalidateFile(normalized);
+          }
+          bus.recordFileEdit(agentId, normalized);
+
+          if (owner && owner !== agentId && isOk) {
+            const text = typeof result === "string" ? result : JSON.stringify(result);
+            return `⚠ Note: ${owner} also edited ${normalized}. Your edit succeeded (different region). Verify with read_file if needed.\n\n${text}`;
+          }
+          if (owner && owner !== agentId && !isOk) {
+            const text = typeof result === "string" ? result : JSON.stringify(result);
+            return `⚠ Edit failed — ${owner} modified ${normalized} before you. Re-read the file to see current content and adapt your edit.\n\n${text}`;
+          }
+          return result;
+        } finally {
+          release();
+        }
+      }) as WrappableTool["execute"],
+    };
+  }
+
+  const NAVIGATE_CACHEABLE = new Set([
+    "definition",
+    "references",
+    "symbols",
+    "imports",
+    "exports",
+    "workspace_symbols",
+    "call_hierarchy",
+    "implementation",
+    "type_hierarchy",
+    "search_symbols",
+  ]);
+  const ANALYZE_CACHEABLE = new Set(["diagnostics", "outline", "type_info"]);
+
+  const cacheSpecs: Array<{
+    name: string;
+    keyFn: (args: Record<string, unknown>) => string | null;
+  }> = [
+    {
+      name: "read_code",
+      keyFn: (a) => {
+        const file = normalizePath(String(a.file ?? ""));
+        const target = String(a.target ?? "");
+        if (target === "scope") {
+          return `read_code:${file}:scope:${String(a.startLine ?? "")}:${String(a.endLine ?? "")}`;
+        }
+        return `read_code:${file}:${target}:${String(a.name ?? "")}`;
+      },
+    },
+    {
+      name: "grep",
+      keyFn: (a) =>
+        `grep:${String(a.pattern ?? "")}:${normalizePath(String(a.path ?? "."))}:${String(a.glob ?? "")}`,
+    },
+    {
+      name: "glob",
+      keyFn: (a) => `glob:${String(a.pattern ?? "")}:${normalizePath(String(a.path ?? "."))}`,
+    },
+    {
+      name: "navigate",
+      keyFn: (a) => {
+        if (!NAVIGATE_CACHEABLE.has(String(a.action ?? ""))) return null;
+        return `navigate:${String(a.action)}:${normalizePath(String(a.file ?? ""))}:${String(a.symbol ?? "")}`;
+      },
+    },
+    {
+      name: "analyze",
+      keyFn: (a) => {
+        const action = String(a.action ?? "");
+        if (!ANALYZE_CACHEABLE.has(action) || !a.file) return null;
+        return `analyze:${action}:${normalizePath(String(a.file))}`;
+      },
+    },
+    {
+      name: "web_search",
+      keyFn: (a) => `web_search:${String(a.query ?? "")}`,
+    },
+  ];
+
+  for (const spec of cacheSpecs) {
+    const t = tools[spec.name];
+    if (t?.execute) {
+      wrapped[spec.name] = {
+        ...t,
+        execute: makeCachedExecute(
+          t.execute as (args: Record<string, unknown>, opts?: unknown) => Promise<unknown>,
+          spec.keyFn,
+        ),
+      };
+    }
+  }
+
+  return wrapped;
 }

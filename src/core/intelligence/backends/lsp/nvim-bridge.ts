@@ -4,7 +4,16 @@
 // Works on any file (not just buffer 0) by loading hidden buffers.
 
 import { getNvimInstance } from "../../../editor/instance.js";
-import type { LspDiagnostic, LspHover, LspLocation, LspWorkspaceEdit } from "./protocol.js";
+import type {
+  LspCallHierarchyItem,
+  LspCodeAction,
+  LspDiagnostic,
+  LspHover,
+  LspLocation,
+  LspTextEdit,
+  LspTypeHierarchyItem,
+  LspWorkspaceEdit,
+} from "./protocol.js";
 
 type NvimApi = ReturnType<typeof getNvimInstance> & {
   api: { executeLua: (code: string, args: unknown[]) => Promise<unknown> };
@@ -225,6 +234,338 @@ export async function rename(
   const result = await executeLua(lua);
   if (result === "__NO_LSP__" || result === null || result === "null") return null;
   return safeParseJson<LspWorkspaceEdit | null>(result, null);
+}
+
+/** Get code actions for a range */
+export async function getCodeActions(
+  filePath: string,
+  startLine: number,
+  startCol: number,
+  endLine: number,
+  endCol: number,
+  diagnosticCodes?: (string | number)[],
+): Promise<LspCodeAction[] | null> {
+  const codesFilter = diagnosticCodes
+    ? `local filter_codes = {${diagnosticCodes.map((c) => (typeof c === "string" ? `'${c}'` : String(c))).join(",")}}
+       for _, d in ipairs(vim.diagnostic.get(bufnr)) do
+         for _, code in ipairs(filter_codes) do
+           if tostring(d.code) == tostring(code) then
+             table.insert(diags, d)
+             break
+           end
+         end
+       end`
+    : `diags = vim.diagnostic.get(bufnr)`;
+  const lua = `
+    ${bufferPreamble(filePath)}
+    local diags = {}
+    ${codesFilter}
+    local params = {
+      textDocument = { uri = vim.uri_from_fname(filepath) },
+      range = {
+        start = { line = ${String(startLine)}, character = ${String(startCol)} },
+        ['end'] = { line = ${String(endLine)}, character = ${String(endCol)} },
+      },
+      context = { diagnostics = diags },
+    }
+    local results = vim.lsp.buf_request_sync(bufnr, 'textDocument/codeAction', params, 5000)
+    if not results then return '[]' end
+    local actions = {}
+    for _, res in pairs(results) do
+      if res.result then
+        for _, action in ipairs(res.result) do
+          table.insert(actions, {
+            title = action.title,
+            kind = action.kind,
+            isPreferred = action.isPreferred,
+          })
+        end
+      end
+    end
+    return vim.json.encode(actions)
+  `;
+  const result = await executeLua(lua);
+  if (result === "__NO_LSP__" || result === null) return null;
+  return safeParseJson<LspCodeAction[]>(result, []);
+}
+
+/** Search workspace symbols */
+export async function workspaceSymbols(
+  filePath: string,
+  query: string,
+): Promise<LspLocation[] | null> {
+  const escapedQuery = query.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  const lua = `
+    ${bufferPreamble(filePath)}
+    local params = { query = '${escapedQuery}' }
+    local results = vim.lsp.buf_request_sync(bufnr, 'workspace/symbol', params, 10000)
+    if not results then return '[]' end
+    local symbols = {}
+    for _, res in pairs(results) do
+      if res.result then
+        for _, sym in ipairs(res.result) do
+          table.insert(symbols, sym)
+        end
+      end
+    end
+    return vim.json.encode(symbols)
+  `;
+  const result = await executeLua(lua);
+  if (result === "__NO_LSP__" || result === null) return null;
+  return safeParseJson<LspLocation[]>(result, []);
+}
+
+/** Format a document */
+export async function formatDocument(filePath: string): Promise<LspTextEdit[] | null> {
+  const lua = `
+    ${bufferPreamble(filePath)}
+    local params = {
+      textDocument = { uri = vim.uri_from_fname(filepath) },
+      options = { tabSize = 2, insertSpaces = true },
+    }
+    local results = vim.lsp.buf_request_sync(bufnr, 'textDocument/formatting', params, 5000)
+    if not results then return '[]' end
+    local edits = {}
+    for _, res in pairs(results) do
+      if res.result then
+        for _, edit in ipairs(res.result) do
+          table.insert(edits, edit)
+        end
+      end
+    end
+    return vim.json.encode(edits)
+  `;
+  const result = await executeLua(lua);
+  if (result === "__NO_LSP__" || result === null) return null;
+  return safeParseJson<LspTextEdit[]>(result, []);
+}
+
+/** Format a range */
+export async function formatRange(
+  filePath: string,
+  startLine: number,
+  startCol: number,
+  endLine: number,
+  endCol: number,
+): Promise<LspTextEdit[] | null> {
+  const lua = `
+    ${bufferPreamble(filePath)}
+    local params = {
+      textDocument = { uri = vim.uri_from_fname(filepath) },
+      range = {
+        start = { line = ${String(startLine)}, character = ${String(startCol)} },
+        ['end'] = { line = ${String(endLine)}, character = ${String(endCol)} },
+      },
+      options = { tabSize = 2, insertSpaces = true },
+    }
+    local results = vim.lsp.buf_request_sync(bufnr, 'textDocument/rangeFormatting', params, 5000)
+    if not results then return '[]' end
+    local edits = {}
+    for _, res in pairs(results) do
+      if res.result then
+        for _, edit in ipairs(res.result) do
+          table.insert(edits, edit)
+        end
+      end
+    end
+    return vim.json.encode(edits)
+  `;
+  const result = await executeLua(lua);
+  if (result === "__NO_LSP__" || result === null) return null;
+  return safeParseJson<LspTextEdit[]>(result, []);
+}
+
+/** Get call hierarchy (prepare + incoming + outgoing) */
+export async function callHierarchy(
+  filePath: string,
+  line: number,
+  col: number,
+): Promise<{
+  item: LspCallHierarchyItem;
+  incoming: LspCallHierarchyItem[];
+  outgoing: LspCallHierarchyItem[];
+} | null> {
+  const lua = `
+    ${bufferPreamble(filePath)}
+    local params = {
+      textDocument = { uri = vim.uri_from_fname(filepath) },
+      position = { line = ${String(line)}, character = ${String(col)} },
+    }
+
+    local prep = vim.lsp.buf_request_sync(bufnr, 'textDocument/prepareCallHierarchy', params, 5000)
+    if not prep then return 'null' end
+    local item = nil
+    for _, res in pairs(prep) do
+      if res.result and #res.result > 0 then
+        item = res.result[1]
+        break
+      end
+    end
+    if not item then return 'null' end
+
+    local inc_results = vim.lsp.buf_request_sync(bufnr, 'callHierarchy/incomingCalls', { item = item }, 5000)
+    local incoming = {}
+    if inc_results then
+      for _, res in pairs(inc_results) do
+        if res.result then
+          for _, call in ipairs(res.result) do
+            table.insert(incoming, call.from)
+          end
+        end
+      end
+    end
+
+    local out_results = vim.lsp.buf_request_sync(bufnr, 'callHierarchy/outgoingCalls', { item = item }, 5000)
+    local outgoing = {}
+    if out_results then
+      for _, res in pairs(out_results) do
+        if res.result then
+          for _, call in ipairs(res.result) do
+            table.insert(outgoing, call.to)
+          end
+        end
+      end
+    end
+
+    return vim.json.encode({ item = item, incoming = incoming, outgoing = outgoing })
+  `;
+  const result = await executeLua(lua);
+  if (result === "__NO_LSP__" || result === null || result === "null") return null;
+  return safeParseJson<{
+    item: LspCallHierarchyItem;
+    incoming: LspCallHierarchyItem[];
+    outgoing: LspCallHierarchyItem[];
+  } | null>(result, null);
+}
+
+/** Find implementations */
+export async function findImplementation(
+  filePath: string,
+  line: number,
+  col: number,
+): Promise<LspLocation[] | null> {
+  const lua = `
+    ${bufferPreamble(filePath)}
+    local params = {
+      textDocument = { uri = vim.uri_from_fname(filepath) },
+      position = { line = ${String(line)}, character = ${String(col)} },
+    }
+    local results = vim.lsp.buf_request_sync(bufnr, 'textDocument/implementation', params, 5000)
+    if not results then return '[]' end
+    local impls = {}
+    for _, res in pairs(results) do
+      if res.result then
+        local items = vim.islist(res.result) and res.result or { res.result }
+        for _, impl in ipairs(items) do
+          local uri = impl.uri or impl.targetUri or ''
+          local range = impl.range or impl.targetRange
+          table.insert(impls, {
+            uri = uri,
+            range = { start = range.start, ['end'] = range['end'] },
+          })
+        end
+      end
+    end
+    return vim.json.encode(impls)
+  `;
+  const result = await executeLua(lua);
+  if (result === "__NO_LSP__" || result === null) return null;
+  return safeParseJson<LspLocation[]>(result, []);
+}
+
+/** Get type hierarchy (prepare + supertypes + subtypes) */
+export async function typeHierarchy(
+  filePath: string,
+  line: number,
+  col: number,
+): Promise<{
+  item: LspTypeHierarchyItem;
+  supertypes: LspTypeHierarchyItem[];
+  subtypes: LspTypeHierarchyItem[];
+} | null> {
+  const lua = `
+    ${bufferPreamble(filePath)}
+    local params = {
+      textDocument = { uri = vim.uri_from_fname(filepath) },
+      position = { line = ${String(line)}, character = ${String(col)} },
+    }
+
+    local prep = vim.lsp.buf_request_sync(bufnr, 'textDocument/prepareTypeHierarchy', params, 5000)
+    if not prep then return 'null' end
+    local item = nil
+    for _, res in pairs(prep) do
+      if res.result and #res.result > 0 then
+        item = res.result[1]
+        break
+      end
+    end
+    if not item then return 'null' end
+
+    local sup_results = vim.lsp.buf_request_sync(bufnr, 'typeHierarchy/supertypes', { item = item }, 5000)
+    local supertypes = {}
+    if sup_results then
+      for _, res in pairs(sup_results) do
+        if res.result then
+          for _, t in ipairs(res.result) do
+            table.insert(supertypes, t)
+          end
+        end
+      end
+    end
+
+    local sub_results = vim.lsp.buf_request_sync(bufnr, 'typeHierarchy/subtypes', { item = item }, 5000)
+    local subtypes = {}
+    if sub_results then
+      for _, res in pairs(sub_results) do
+        if res.result then
+          for _, t in ipairs(res.result) do
+            table.insert(subtypes, t)
+          end
+        end
+      end
+    end
+
+    return vim.json.encode({ item = item, supertypes = supertypes, subtypes = subtypes })
+  `;
+  const result = await executeLua(lua);
+  if (result === "__NO_LSP__" || result === null || result === "null") return null;
+  return safeParseJson<{
+    item: LspTypeHierarchyItem;
+    supertypes: LspTypeHierarchyItem[];
+    subtypes: LspTypeHierarchyItem[];
+  } | null>(result, null);
+}
+
+/** Get organize imports code action */
+export async function organizeImports(filePath: string): Promise<LspCodeAction[] | null> {
+  const lua = `
+    ${bufferPreamble(filePath)}
+    local params = {
+      textDocument = { uri = vim.uri_from_fname(filepath) },
+      range = {
+        start = { line = 0, character = 0 },
+        ['end'] = { line = 0, character = 0 },
+      },
+      context = {
+        diagnostics = {},
+        only = { 'source.organizeImports' },
+      },
+    }
+    local results = vim.lsp.buf_request_sync(bufnr, 'textDocument/codeAction', params, 5000)
+    if not results then return '[]' end
+    local actions = {}
+    for _, res in pairs(results) do
+      if res.result then
+        for _, action in ipairs(res.result) do
+          table.insert(actions, action)
+        end
+      end
+    end
+    return vim.json.encode(actions)
+  `;
+  const result = await executeLua(lua);
+  if (result === "__NO_LSP__" || result === null) return null;
+  return safeParseJson<LspCodeAction[]>(result, []);
 }
 
 // ─── Helpers ───

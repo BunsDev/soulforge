@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { extname, join } from "node:path";
 import { FileCache } from "./cache.js";
 import type {
@@ -20,6 +20,28 @@ const EXT_TO_LANGUAGE: Record<string, Language> = {
   ".py": "python",
   ".go": "go",
   ".rs": "rust",
+  ".java": "java",
+  ".c": "c",
+  ".h": "c",
+  ".cpp": "cpp",
+  ".cc": "cpp",
+  ".cxx": "cpp",
+  ".hpp": "cpp",
+  ".cs": "csharp",
+  ".rb": "ruby",
+  ".php": "php",
+  ".swift": "swift",
+  ".kt": "kotlin",
+  ".kts": "kotlin",
+  ".scala": "scala",
+  ".lua": "lua",
+  ".ex": "elixir",
+  ".exs": "elixir",
+  ".dart": "dart",
+  ".zig": "zig",
+  ".sh": "bash",
+  ".bash": "bash",
+  ".zsh": "bash",
 };
 
 const PROJECT_FILE_TO_LANGUAGE: Record<string, Language> = {
@@ -29,6 +51,18 @@ const PROJECT_FILE_TO_LANGUAGE: Record<string, Language> = {
   "setup.py": "python",
   "go.mod": "go",
   "Cargo.toml": "rust",
+  "pom.xml": "java",
+  "build.gradle": "java",
+  "build.gradle.kts": "kotlin",
+  Gemfile: "ruby",
+  "composer.json": "php",
+  "Package.swift": "swift",
+  "build.sbt": "scala",
+  "mix.exs": "elixir",
+  "pubspec.yaml": "dart",
+  "build.zig": "zig",
+  Makefile: "c",
+  "CMakeLists.txt": "cpp",
 };
 
 /**
@@ -119,6 +153,18 @@ export class CodeIntelligenceRouter {
     operation: keyof IntelligenceBackend,
     fn: (backend: IntelligenceBackend) => Promise<T | null>,
   ): Promise<T | null> {
+    const result = await this.executeWithFallbackTracked(language, operation, fn);
+    return result?.value ?? null;
+  }
+
+  /**
+   * Like executeWithFallback but also returns which backend handled the call.
+   */
+  async executeWithFallbackTracked<T>(
+    language: Language,
+    operation: keyof IntelligenceBackend,
+    fn: (backend: IntelligenceBackend) => Promise<T | null>,
+  ): Promise<{ value: T; backend: string } | null> {
     const preference = this.config.backend ?? "auto";
 
     const candidates =
@@ -133,8 +179,11 @@ export class CodeIntelligenceRouter {
       await this.ensureInitialized(backend);
 
       try {
-        const result = await fn(backend);
-        if (result !== null) return result;
+        const result = await Promise.race([
+          fn(backend),
+          new Promise<null>((resolve) => setTimeout(resolve, 30_000, null)),
+        ]);
+        if (result !== null) return { value: result, backend: backend.name };
       } catch {
         // Fall through to next backend
       }
@@ -143,11 +192,100 @@ export class CodeIntelligenceRouter {
     return null;
   }
 
+  /** Get status of all initialized backends, including active LSP servers */
+  getStatus(): {
+    initialized: string[];
+    lspServers: Array<{ language: string; command: string }>;
+  } {
+    const lspBackend = this.backends.find((b) => b.name === "lsp");
+    const lspServers =
+      lspBackend && "getActiveServers" in lspBackend
+        ? (
+            lspBackend as { getActiveServers: () => Array<{ language: string; command: string }> }
+          ).getActiveServers()
+        : [];
+    return {
+      initialized: [...this.initialized],
+      lspServers,
+    };
+  }
+
+  /** Get PIDs of all child processes (LSP servers) managed by backends */
+  getChildPids(): number[] {
+    const lspBackend = this.backends.find((b) => b.name === "lsp");
+    if (lspBackend && "getChildPids" in lspBackend) {
+      return (lspBackend as { getChildPids: () => number[] }).getChildPids();
+    }
+    return [];
+  }
+
   /** Get info about available backends for a language */
   getAvailableBackends(language: Language): string[] {
     return this.backends
       .filter((b) => b.supportsLanguage(language))
       .map((b) => `${b.name} (tier ${String(b.tier)})`);
+  }
+
+  /**
+   * Eagerly initialize all backends for the detected project language.
+   * Call at startup so LSP servers are warm before the first tool call.
+   */
+  async warmup(): Promise<void> {
+    const language = this.detectLanguage();
+    if (language === "unknown") return;
+
+    for (const backend of this.backends) {
+      if (backend.supportsLanguage(language)) {
+        await this.ensureInitialized(backend);
+      }
+    }
+
+    // Ensure a standalone LSP server is running — always, even if Neovim is open.
+    // This keeps the server warm so there's no cold start if Neovim closes mid-session.
+    const lsp = this.backends.find((b) => b.name === "lsp");
+    if (lsp?.supportsLanguage(language) && "ensureStandaloneReady" in lsp) {
+      const probeFile = this.findProbeFile(language);
+      if (probeFile) {
+        try {
+          await Promise.race([
+            (lsp as { ensureStandaloneReady: (f: string) => Promise<void> }).ensureStandaloneReady(
+              probeFile,
+            ),
+            new Promise<void>((r) => setTimeout(r, 10_000)),
+          ]);
+        } catch {
+          // Warmup failure is non-fatal
+        }
+      }
+    }
+  }
+
+  /** Find a file to use for LSP warmup probing */
+  private findProbeFile(language: Language): string | null {
+    const extMap: Partial<Record<Language, string[]>> = {
+      typescript: [".ts", ".tsx"],
+      javascript: [".js", ".jsx"],
+      python: [".py"],
+      go: [".go"],
+      rust: [".rs"],
+    };
+    const exts = extMap[language];
+    if (!exts) return null;
+
+    // Check src/ first, then root
+    for (const dir of ["src", "."]) {
+      const full = join(this.cwd, dir);
+      try {
+        if (!existsSync(full)) continue;
+        const entries = readdirSync(full);
+        for (const entry of entries) {
+          if (exts.some((ext) => entry.endsWith(ext))) {
+            return join(full, entry);
+          }
+        }
+      } catch {}
+    }
+    return null;
   }
 
   /** Dispose all backends */

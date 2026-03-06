@@ -10,7 +10,7 @@ local plugins_dir = data_dir .. "/plugins"
 
 -- ─── Display (IDE-like defaults) ───
 o.number = true
-o.relativenumber = true
+o.relativenumber = false
 o.cursorline = true
 o.signcolumn = "yes"
 o.termguicolors = true
@@ -89,6 +89,7 @@ pcall(function()
   ensure_plugin("catppuccin", "https://github.com/catppuccin/nvim")
   require("catppuccin").setup({
     flavour = "mocha",
+    transparent_background = true,
     integrations = {
       nvimtree = true,
       treesitter = true,
@@ -145,6 +146,12 @@ local tree_ok = pcall(function()
 
   require("nvim-web-devicons").setup()
   require("nvim-tree").setup({
+    sync_root_with_cwd = true,
+    respect_buf_cwd = true,
+    update_focused_file = {
+      enable = true,
+      update_root = false,
+    },
     view = {
       width = 28,
     },
@@ -166,13 +173,13 @@ local tree_ok = pcall(function()
   })
 end)
 
--- Auto-open nvim-tree on VimEnter
+-- Auto-open nvim-tree on VimEnter, rooted at cwd
 if tree_ok then
   vim.api.nvim_create_autocmd("VimEnter", {
     once = true,
     callback = function()
       vim.schedule(function()
-        require("nvim-tree.api").tree.open()
+        require("nvim-tree.api").tree.open({ path = vim.fn.getcwd() })
       end)
     end,
   })

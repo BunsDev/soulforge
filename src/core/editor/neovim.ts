@@ -60,6 +60,7 @@ export async function launchNeovim(
   }
 
   const proc = spawn(nvimPath, args, {
+    cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
 
@@ -83,7 +84,7 @@ export async function launchNeovim(
  * Open a file in the embedded neovim instance.
  */
 export async function openFile(nvim: NvimInstance, filePath: string): Promise<void> {
-  await nvim.api.command(`edit ${filePath}`);
+  await nvim.api.executeLua("vim.cmd.edit(vim.fn.fnameescape(...))", [filePath]);
 }
 
 /**

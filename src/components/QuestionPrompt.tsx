@@ -1,5 +1,7 @@
-import { Box, Text, useInput } from "ink";
+import { TextAttributes } from "@opentui/core";
+import { useKeyboard } from "@opentui/react";
 import { useState } from "react";
+import { icon } from "../core/icons.js";
 import type { PendingQuestion } from "../types/index.js";
 
 interface Props {
@@ -10,61 +12,65 @@ interface Props {
 export function QuestionPrompt({ question, isActive }: Props) {
   const [selectedIdx, setSelectedIdx] = useState(0);
 
-  useInput(
-    (_input, key) => {
-      if (key.upArrow) {
-        setSelectedIdx((prev) => (prev > 0 ? prev - 1 : question.options.length - 1));
-        return;
+  useKeyboard((evt) => {
+    if (!isActive) return;
+    if (evt.name === "up") {
+      setSelectedIdx((prev) => (prev > 0 ? prev - 1 : question.options.length - 1));
+      return;
+    }
+    if (evt.name === "down") {
+      setSelectedIdx((prev) => (prev + 1) % question.options.length);
+      return;
+    }
+    if (evt.name === "return") {
+      const selected = question.options[selectedIdx];
+      if (selected) {
+        question.resolve(selected.value);
       }
-      if (key.downArrow) {
-        setSelectedIdx((prev) => (prev + 1) % question.options.length);
-        return;
-      }
-      if (key.return) {
-        const selected = question.options[selectedIdx];
-        if (selected) {
-          question.resolve(selected.value);
-        }
-        return;
-      }
-      if (key.escape && question.allowSkip) {
-        question.resolve("__skipped__");
-      }
-    },
-    { isActive },
-  );
+      return;
+    }
+    if (evt.name === "escape" && question.allowSkip) {
+      question.resolve("__skipped__");
+    }
+  });
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="#FF8C00" paddingX={1} width="100%">
-      {/* Header */}
-      <Box>
-        <Text color="#FF8C00" bold>
-          {"\uF059"} Question
-        </Text>
-      </Box>
-      {/* Question text */}
-      <Box>
-        <Text color="#eee">{question.question}</Text>
-      </Box>
-      {/* Options */}
+    <box
+      flexDirection="column"
+      borderStyle="rounded"
+      border={true}
+      borderColor="#FF8C00"
+      paddingX={1}
+      width="100%"
+    >
+      <box>
+        <text fg="#FF8C00" attributes={TextAttributes.BOLD}>
+          {icon("question")} Question
+        </text>
+      </box>
+      <box>
+        <text fg="#eee">{question.question}</text>
+      </box>
       {question.options.map((opt, i) => {
         const isSelected = i === selectedIdx;
         return (
-          <Box key={opt.value} gap={1}>
-            <Text color={isSelected ? "#FF8C00" : "#555"}>{isSelected ? " ›" : "  "}</Text>
-            <Text color={isSelected ? "#FF8C00" : "#ccc"} bold={isSelected}>
+          <box key={opt.value} gap={1} flexDirection="row">
+            <text fg={isSelected ? "#FF8C00" : "#555"}>{isSelected ? " ›" : "  "}</text>
+            <text
+              fg={isSelected ? "#FF8C00" : "#ccc"}
+              attributes={isSelected ? TextAttributes.BOLD : undefined}
+            >
               {opt.label}
-            </Text>
-            {opt.description && <Text color={isSelected ? "#999" : "#555"}>{opt.description}</Text>}
-          </Box>
+            </text>
+            {opt.description && <text fg={isSelected ? "#999" : "#555"}>{opt.description}</text>}
+          </box>
         );
       })}
-      {/* Hints */}
-      <Box>
-        <Text color="#555">
+      <box>
+        <text fg="#555">
           ↑↓ select{"  "}⏎ confirm{question.allowSkip ? "  esc skip" : ""}
-        </Text>
-      </Box>
-    </Box>
+        </text>
+      </box>
+    </box>
   );
 }

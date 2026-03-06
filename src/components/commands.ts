@@ -1,3 +1,7 @@
+import { Database } from "bun:sqlite";
+import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { ContextManager } from "../core/context/manager.js";
 import {
   getGitDiff,
@@ -9,9 +13,18 @@ import {
   gitStash,
   gitStashPop,
 } from "../core/git/status.js";
-import type { ChatInstance } from "../hooks/useChat.js";
+import { icon, setNerdFont } from "../core/icons.js";
+import { getModelContextInfo, getShortModelLabel } from "../core/llm/models.js";
+import { SessionManager } from "../core/sessions/manager.js";
+import type { ChatInstance, TokenUsage } from "../hooks/useChat.js";
 import type { UseTabsReturn } from "../hooks/useTabs.js";
+import { restart } from "../index.js";
+import { useRepoMapStore } from "../stores/repomap.js";
+import { useUIStore } from "../stores/ui.js";
 import type { AppConfig, ChatStyle, ForgeMode, NvimConfigMode } from "../types/index.js";
+import type { CommandPickerConfig } from "./CommandPicker.js";
+import type { InfoPopupConfig } from "./InfoPopup.js";
+import type { ConfigScope } from "./shared.js";
 
 export interface CommandContext {
   chat: ChatInstance;
@@ -31,18 +44,607 @@ export interface CommandContext {
   currentModeLabel: string;
   contextManager: ContextManager;
   chatStyle: ChatStyle;
-  setChatStyle: React.Dispatch<React.SetStateAction<ChatStyle>>;
+  setChatStyle: (style: ChatStyle) => void;
   handleSuspend: (opts: { command: string; args?: string[]; noAltScreen?: boolean }) => void;
   openGitMenu: () => void;
   openEditorWithFile: (file: string) => void;
   setSessionConfig: React.Dispatch<React.SetStateAction<Partial<AppConfig> | null>>;
   effectiveNvimConfig: NvimConfigMode | undefined;
+  vimHints: boolean;
+  verbose: boolean;
+  diffStyle: "default" | "sidebyside" | "compact";
+  showReasoning: boolean;
+  setShowReasoning: (v: boolean) => void;
   openSetup: () => void;
   openEditorSettings: () => void;
   openRouterSettings: () => void;
+  openProviderSettings: () => void;
+  openWebSearchSettings: () => void;
+  openCommandPicker: (config: CommandPickerConfig) => void;
+  openInfoPopup: (config: InfoPopupConfig) => void;
+  toggleChanges: () => void;
+  saveToScope: (patch: Partial<AppConfig>, toScope: ConfigScope, fromScope?: ConfigScope) => void;
+  detectScope: (key: string) => ConfigScope;
 }
 
-export function handleCommand(input: string, ctx: CommandContext): void {
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${String(bytes)}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+function sysMsg(ctx: CommandContext, content: string): void {
+  ctx.chat.setMessages((prev) => [
+    ...prev,
+    { id: crypto.randomUUID(), role: "system", content, timestamp: Date.now() },
+  ]);
+}
+
+function applyRepoMapToggle(
+  ctx: CommandContext,
+  nowEnabled: boolean,
+  toScope: ConfigScope,
+  fromScope?: ConfigScope,
+): void {
+  const cm = ctx.contextManager;
+  cm.setRepoMapEnabled(nowEnabled);
+  ctx.saveToScope({ repoMap: nowEnabled }, toScope, fromScope);
+
+  if (nowEnabled) {
+    if (!cm.isRepoMapReady()) cm.refreshRepoMap().catch(() => {});
+  } else {
+    if (cm.isSemanticEnabled()) {
+      cm.setSemanticSummaries(false);
+      ctx.saveToScope({ semanticSummaries: false }, toScope);
+    }
+    if (toScope !== "session") {
+      cm.clearRepoMap();
+    }
+  }
+
+  sysMsg(ctx, `Repo map ${nowEnabled ? "enabled" : "disabled"} (${toScope}).`);
+}
+
+function triggerSemanticGeneration(ctx: CommandContext, cm: ContextManager): void {
+  const modelId = cm.getSemanticModelId(ctx.chat.activeModel);
+  const label = getShortModelLabel(modelId);
+  useRepoMapStore.getState().setSemanticStatus("generating");
+  sysMsg(ctx, `Generating semantic summaries [${label}]...`);
+  cm.generateSemanticSummaries(modelId)
+    .then((count) => {
+      sysMsg(
+        ctx,
+        count > 0
+          ? `Generated ${String(count)} semantic summaries [${label}].`
+          : `All ${String(cm.getRepoMap().getStats().summaries)} summaries up to date.`,
+      );
+    })
+    .catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      sysMsg(ctx, `Failed to generate semantic summaries: ${msg}`);
+    });
+}
+
+function openRepoMapMenu(ctx: CommandContext): void {
+  const cm = ctx.contextManager;
+  const repoMap = cm.getRepoMap();
+  const enabled = cm.isRepoMapEnabled();
+  const ready = cm.isRepoMapReady();
+  const stats = repoMap.getStats();
+  const size = repoMap.dbSizeBytes();
+
+  const statusDesc = enabled
+    ? ready
+      ? `${String(stats.files)} files, ${String(stats.symbols)} sym, ${String(stats.edges)} edges (${formatBytes(size)})`
+      : "scanning..."
+    : "off — using file tree";
+
+  ctx.openCommandPicker({
+    title: "Repo Map",
+    icon: "󰙅",
+    currentValue: enabled ? "enable" : "disable",
+    scopeEnabled: true,
+    initialScope: ctx.detectScope("repoMap"),
+    options: [
+      {
+        value: "enable",
+        label: "Enable (recommended)",
+        description: `AST-ranked codebase map — ${statusDesc}`,
+      },
+      {
+        value: "disable",
+        label: "Disable",
+        description: "fall back to static file tree",
+      },
+      {
+        value: "refresh",
+        label: "Refresh",
+        description: "rescan all files and rebuild index",
+      },
+      {
+        value: "clear",
+        label: "Clear Index",
+        description: `delete index data (${formatBytes(size)})`,
+      },
+      {
+        value: "semantic",
+        label: cm.isSemanticEnabled() ? "Semantic Summaries ✓" : "Semantic Summaries",
+        description:
+          !enabled || !ready
+            ? "requires repo map to be active"
+            : cm.isSemanticEnabled()
+              ? `ON — ${String(stats.summaries)} cached [${getShortModelLabel(cm.getSemanticModelId(ctx.chat.activeModel))}]`
+              : "OFF — generate AI descriptions for top symbols",
+      },
+      ...(cm.isSemanticEnabled() && enabled && ready
+        ? [
+            {
+              value: "semantic-regen",
+              label: "Regenerate Summaries",
+              description: "clear cache and regenerate all summaries",
+            },
+            {
+              value: "semantic-clear",
+              label: "Clear Summaries",
+              description: `delete ${String(stats.summaries)} cached summaries`,
+            },
+          ]
+        : []),
+      {
+        value: "info",
+        label: "Status",
+        description: statusDesc,
+      },
+    ],
+    onSelect: (value, scope) => {
+      if (value === "enable" || value === "disable") {
+        applyRepoMapToggle(ctx, value === "enable", scope ?? "session");
+      } else if (value === "refresh") {
+        sysMsg(ctx, "Rebuilding repo map...");
+        cm.refreshRepoMap().catch(() => {});
+      } else if (value === "clear") {
+        if (cm.isSemanticEnabled()) {
+          cm.setSemanticSummaries(false);
+          ctx.saveToScope({ semanticSummaries: false }, scope ?? "session");
+        }
+        cm.setRepoMapEnabled(false);
+        cm.clearRepoMap();
+        ctx.saveToScope({ repoMap: false }, scope ?? "session");
+        sysMsg(ctx, `Repo map disabled and index cleared (${scope ?? "session"}).`);
+      } else if (value === "semantic") {
+        if (!cm.isRepoMapEnabled() || !cm.isRepoMapReady()) {
+          sysMsg(ctx, "Enable repo map first — semantic summaries depend on the symbol index.");
+          return;
+        }
+        const wasEnabled = cm.isSemanticEnabled();
+        cm.setSemanticSummaries(!wasEnabled);
+        ctx.saveToScope({ semanticSummaries: !wasEnabled }, scope ?? "session");
+        if (!wasEnabled) {
+          triggerSemanticGeneration(ctx, cm);
+        } else {
+          sysMsg(ctx, `Semantic summaries disabled (${scope ?? "session"}).`);
+        }
+      } else if (value === "semantic-regen") {
+        cm.clearSemanticSummaries();
+        sysMsg(ctx, "Cleared cached summaries.");
+        triggerSemanticGeneration(ctx, cm);
+      } else if (value === "semantic-clear") {
+        cm.clearSemanticSummaries();
+        sysMsg(ctx, `Cleared ${String(stats.summaries)} cached summaries.`);
+      } else if (value === "info") {
+        useUIStore.getState().openModal("repoMapStatus");
+      }
+    },
+    onScopeMove: (value, from, to) => {
+      applyRepoMapToggle(ctx, value === "enable", to, from);
+    },
+  });
+}
+
+function dirSize(dirPath: string): number {
+  if (!existsSync(dirPath)) return 0;
+  let total = 0;
+  for (const entry of readdirSync(dirPath)) {
+    const fp = join(dirPath, entry);
+    try {
+      const s = statSync(fp);
+      total += s.isDirectory() ? dirSize(fp) : s.size;
+    } catch {
+      // skip
+    }
+  }
+  return total;
+}
+
+function fileSize(filePath: string): number {
+  try {
+    return statSync(filePath).size;
+  } catch {
+    return 0;
+  }
+}
+
+function computeStorageSizes(cwd: string) {
+  const home = homedir();
+  const projectDir = join(cwd, ".soulforge");
+  const globalDir = join(home, ".soulforge");
+
+  const repoMap =
+    fileSize(join(projectDir, "repomap.db")) +
+    fileSize(join(projectDir, "repomap.db-wal")) +
+    fileSize(join(projectDir, "repomap.db-shm"));
+  const projectMemory =
+    fileSize(join(projectDir, "memory.db")) + fileSize(join(projectDir, "memory.db-wal"));
+  const sessions = dirSize(join(projectDir, "sessions"));
+  const plans = dirSize(join(projectDir, "plans"));
+  const projectConfig =
+    fileSize(join(projectDir, "config.json")) + fileSize(join(projectDir, "forbidden.json"));
+  const projectTotal = repoMap + projectMemory + sessions + plans + projectConfig;
+
+  const history =
+    fileSize(join(globalDir, "history.db")) + fileSize(join(globalDir, "history.db-wal"));
+  const globalMemory =
+    fileSize(join(globalDir, "memory.db")) + fileSize(join(globalDir, "memory.db-wal"));
+  const globalConfig =
+    fileSize(join(globalDir, "config.json")) + fileSize(join(globalDir, "secrets.json"));
+  const bins = dirSize(join(globalDir, "bin"));
+  const fonts = dirSize(join(globalDir, "fonts"));
+  const globalTotal = history + globalMemory + globalConfig + bins + fonts;
+
+  return {
+    projectDir,
+    globalDir,
+    repoMap,
+    projectMemory,
+    sessions,
+    plans,
+    projectConfig,
+    projectTotal,
+    history,
+    globalMemory,
+    globalConfig,
+    bins,
+    fonts,
+    globalTotal,
+  };
+}
+
+function openStorageMenu(ctx: CommandContext): void {
+  const show = () => {
+    const s = computeStorageSizes(ctx.cwd);
+    const sm = new SessionManager(ctx.cwd);
+    const sessionCount = sm.sessionCount();
+    const memMgr = ctx.contextManager.getMemoryManager();
+    const projectMemCount = memMgr.listByScope("project").length;
+    const globalMemCount = memMgr.listByScope("global").length;
+
+    const pad = (label: string, size: string, width = 28) => {
+      const gap = Math.max(1, width - label.length - size.length);
+      return `${label}${" ".repeat(gap)}${size}`;
+    };
+
+    ctx.openCommandPicker({
+      title: `Storage — ${formatBytes(s.projectTotal + s.globalTotal)}`,
+      icon: "󰋊",
+      maxWidth: 64,
+      options: [
+        {
+          value: "_h_project",
+          label: `Project ${formatBytes(s.projectTotal)}`,
+          color: "#9B30FF",
+          disabled: true,
+        },
+        {
+          value: "clear-repomap",
+          label: pad("Repo Map", formatBytes(s.repoMap)),
+          description: s.repoMap > 0 ? "󰩺 clear" : undefined,
+        },
+        {
+          value: "clear-sessions",
+          label: pad("Sessions", formatBytes(s.sessions)),
+          description: sessionCount > 0 ? `${String(sessionCount)} saved · 󰩺 clear` : undefined,
+        },
+        {
+          value: "_pmem",
+          label: pad(
+            "Memory",
+            `${formatBytes(s.projectMemory)}  ${String(projectMemCount)} entries`,
+          ),
+          disabled: true,
+        },
+        {
+          value: "clear-plans",
+          label: pad("Plans", formatBytes(s.plans)),
+          description: s.plans > 0 ? "󰩺 clear" : undefined,
+        },
+        {
+          value: "_pconfig",
+          label: pad("Config", formatBytes(s.projectConfig)),
+          disabled: true,
+        },
+        {
+          value: "_h_global",
+          label: `Global ${formatBytes(s.globalTotal)}`,
+          color: "#00BFFF",
+          disabled: true,
+        },
+        {
+          value: "clear-history",
+          label: pad("History", formatBytes(s.history)),
+          description: s.history > 0 ? "󰩺 clear" : undefined,
+        },
+        {
+          value: "_gmem",
+          label: pad("Memory", `${formatBytes(s.globalMemory)}  ${String(globalMemCount)} entries`),
+          disabled: true,
+        },
+        {
+          value: "_gconfig",
+          label: pad("Config", formatBytes(s.globalConfig)),
+          disabled: true,
+        },
+        {
+          value: "_bins",
+          label: pad("Binaries", formatBytes(s.bins)),
+          disabled: true,
+        },
+        {
+          value: "_fonts",
+          label: pad("Fonts", formatBytes(s.fonts)),
+          disabled: true,
+        },
+        {
+          value: "vacuum",
+          label: "Vacuum Databases",
+          description: "reclaim space from deleted rows",
+        },
+      ],
+      onSelect: (value) => {
+        if (value === "clear-repomap") {
+          if (s.repoMap === 0) return;
+          ctx.contextManager.clearRepoMap();
+          sysMsg(ctx, `Cleared repo map (freed ~${formatBytes(s.repoMap)}).`);
+        } else if (value === "clear-sessions") {
+          if (sessionCount === 0) return;
+          const cleared = sm.clearAllSessions();
+          sysMsg(ctx, `Cleared ${String(cleared)} sessions (freed ~${formatBytes(s.sessions)}).`);
+        } else if (value === "clear-history") {
+          const historyPath = join(s.globalDir, "history.db");
+          if (existsSync(historyPath) && s.history > 0) {
+            try {
+              const db = new Database(historyPath);
+              db.run("DELETE FROM history");
+              db.run("VACUUM");
+              db.close();
+              sysMsg(ctx, `Cleared search history (freed ~${formatBytes(s.history)}).`);
+            } catch {
+              sysMsg(ctx, "Failed to clear history database.");
+            }
+          }
+        } else if (value === "clear-plans") {
+          const plansDir = join(s.projectDir, "plans");
+          if (existsSync(plansDir) && s.plans > 0) {
+            rmSync(plansDir, { recursive: true });
+            sysMsg(ctx, `Cleared plans (freed ~${formatBytes(s.plans)}).`);
+          }
+        } else if (value === "vacuum") {
+          let freed = 0;
+          const dbs = [
+            join(s.projectDir, "repomap.db"),
+            join(s.projectDir, "memory.db"),
+            join(s.globalDir, "history.db"),
+            join(s.globalDir, "memory.db"),
+          ];
+          for (const dbPath of dbs) {
+            if (!existsSync(dbPath)) continue;
+            try {
+              const before = fileSize(dbPath);
+              const db = new Database(dbPath);
+              db.run("VACUUM");
+              db.close();
+              freed += Math.max(0, before - fileSize(dbPath));
+            } catch {
+              // skip
+            }
+          }
+          sysMsg(
+            ctx,
+            freed > 0
+              ? `Vacuumed databases (reclaimed ~${formatBytes(freed)}).`
+              : "Vacuumed databases (no space to reclaim).",
+          );
+        }
+        setTimeout(show, 50);
+      },
+    });
+  };
+  show();
+}
+
+function openMemoryMenu(ctx: CommandContext): void {
+  const memMgr = ctx.contextManager.getMemoryManager();
+
+  const showMain = () => {
+    const config = memMgr.scopeConfig;
+    ctx.openCommandPicker({
+      title: "Memory",
+      icon: "󰍽",
+      options: [
+        {
+          value: "write-scope",
+          label: "Write Scope",
+          description: `current: ${config.writeScope}`,
+        },
+        { value: "read-scope", label: "Read Scope", description: `current: ${config.readScope}` },
+        {
+          value: "settings-storage",
+          label: "Persist Settings",
+          description: `current: ${memMgr.settingsScope}`,
+        },
+        { value: "view", label: "View Memories", description: "list all memories by scope" },
+        { value: "clear", label: "Clear Memories", description: "delete memories by scope" },
+      ],
+      onSelect: (value) => {
+        if (value === "write-scope") {
+          ctx.openCommandPicker({
+            title: "Write Scope",
+            icon: "󰍽",
+            currentValue: memMgr.scopeConfig.writeScope,
+            options: [
+              { value: "global", label: "Global", description: "write to global memory" },
+              { value: "project", label: "Project", description: "write to project memory" },
+              {
+                value: "session",
+                label: "Session",
+                description: "write to session memory (lost on exit)",
+              },
+              { value: "none", label: "None", description: "disable memory writes" },
+            ],
+            onSelect: (ws) => {
+              memMgr.scopeConfig = {
+                ...memMgr.scopeConfig,
+                writeScope: ws as "global" | "project" | "session" | "none",
+              };
+              ctx.chat.setMessages((prev) => [
+                ...prev,
+                {
+                  id: crypto.randomUUID(),
+                  role: "system",
+                  content: `Memory write scope: ${ws}`,
+                  timestamp: Date.now(),
+                },
+              ]);
+              showMain();
+            },
+          });
+        } else if (value === "read-scope") {
+          ctx.openCommandPicker({
+            title: "Read Scope",
+            icon: "󰍽",
+            currentValue: memMgr.scopeConfig.readScope,
+            options: [
+              {
+                value: "all",
+                label: "All",
+                description: "read from all scopes (session > project > global)",
+              },
+              { value: "global", label: "Global", description: "read global only" },
+              { value: "project", label: "Project", description: "read project only" },
+              { value: "session", label: "Session", description: "read session only" },
+              { value: "none", label: "None", description: "disable memory reads" },
+            ],
+            onSelect: (rs) => {
+              memMgr.scopeConfig = {
+                ...memMgr.scopeConfig,
+                readScope: rs as "global" | "project" | "session" | "all" | "none",
+              };
+              ctx.chat.setMessages((prev) => [
+                ...prev,
+                {
+                  id: crypto.randomUUID(),
+                  role: "system",
+                  content: `Memory read scope: ${rs}`,
+                  timestamp: Date.now(),
+                },
+              ]);
+              showMain();
+            },
+          });
+        } else if (value === "settings-storage") {
+          ctx.openCommandPicker({
+            title: "Persist Settings",
+            icon: "󰍽",
+            currentValue: memMgr.settingsScope,
+            options: [
+              { value: "session", label: "Session", description: "settings lost on exit" },
+              {
+                value: "project",
+                label: "Project",
+                description: "save to .soulforge/ in this project",
+              },
+              {
+                value: "global",
+                label: "Global",
+                description: "save to ~/.soulforge/ for all projects",
+              },
+            ],
+            onSelect: (ss) => {
+              memMgr.setSettingsScope(ss as "session" | "project" | "global");
+              ctx.chat.setMessages((prev) => [
+                ...prev,
+                {
+                  id: crypto.randomUUID(),
+                  role: "system",
+                  content: `Memory settings saved to: ${ss}`,
+                  timestamp: Date.now(),
+                },
+              ]);
+              showMain();
+            },
+          });
+        } else if (value === "view") {
+          const scopes = ["session", "project", "global"] as const;
+          const lines: import("./InfoPopup.js").InfoPopupLine[] = [];
+          for (const scope of scopes) {
+            const memories = memMgr.listByScope(scope);
+            lines.push({ type: "header", label: `${scope} (${String(memories.length)})` });
+            if (memories.length === 0) {
+              lines.push({ type: "text", label: "  (empty)", color: "#444" });
+            } else {
+              for (const m of memories) {
+                lines.push({
+                  type: "entry",
+                  label: `  ${m.category}`,
+                  desc: m.title,
+                  color: "#FF8C00",
+                });
+              }
+            }
+            lines.push({ type: "spacer" });
+          }
+          ctx.openInfoPopup({ title: "Memories", icon: "󰍽", lines, onClose: showMain });
+        } else if (value === "clear") {
+          ctx.openCommandPicker({
+            title: "Clear Memories",
+            icon: "󰍽",
+            options: [
+              { value: "session", label: "Session", description: "clear session memories" },
+              { value: "project", label: "Project", description: "clear project memories" },
+              { value: "global", label: "Global", description: "clear global memories" },
+              { value: "all", label: "All", description: "clear all memories" },
+            ],
+            onSelect: (scope) => {
+              const cleared = memMgr.clearScope(scope as "session" | "project" | "global" | "all");
+              ctx.chat.setMessages((prev) => [
+                ...prev,
+                {
+                  id: crypto.randomUUID(),
+                  role: "system",
+                  content: `Cleared ${String(cleared)} ${scope} memories.`,
+                  timestamp: Date.now(),
+                },
+              ]);
+              showMain();
+            },
+          });
+        }
+      },
+    });
+  };
+
+  showMain();
+}
+
+export async function handleCommand(input: string, ctx: CommandContext): Promise<void> {
+  try {
+    await handleCommandInner(input, ctx);
+  } catch (err) {
+    const msg = err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : String(err);
+    sysMsg(ctx, `Error: command ${input.trim().split(" ")[0]} failed — ${msg}`);
+  }
+}
+
+async function handleCommandInner(input: string, ctx: CommandContext): Promise<void> {
   const trimmed = input.trim();
   const cmd = trimmed.toLowerCase();
 
@@ -52,55 +654,76 @@ export function handleCommand(input: string, ctx: CommandContext): void {
     cmd.startsWith("/font ") ||
     cmd.startsWith("/fonts ")
   ) {
-    const { detectInstalledFonts, NERD_FONTS } =
-      require("../core/setup/install.js") as typeof import("../core/setup/install.js");
-    const { detectTerminal, getCurrentFont, setTerminalFont } =
-      require("../core/setup/terminal-font.js") as typeof import("../core/setup/terminal-font.js");
+    const { detectInstalledFonts, NERD_FONTS } = await import("../core/setup/install.js");
+    const { detectTerminal, getCurrentFont, setTerminalFont } = await import(
+      "../core/setup/terminal-font.js"
+    );
 
     const fontArg = trimmed.replace(/^\/(fonts?)\s*/i, "").trim();
     const found = detectInstalledFonts();
     const term = detectTerminal();
 
     // /font set <name> — auto-configure terminal
-    if (fontArg.startsWith("set ")) {
+    if (fontArg === "set" || fontArg.startsWith("set ")) {
       const fontName = fontArg.slice(4).trim().toLowerCase();
-      const match = NERD_FONTS.find(
-        (f) =>
-          f.id === fontName ||
-          f.name.toLowerCase() === fontName ||
-          f.family.toLowerCase() === fontName,
-      );
-      if (!match) {
-        ctx.chat.setMessages((prev) => [
-          ...prev,
-          {
-            id: crypto.randomUUID(),
-            role: "system",
-            content: `Unknown font "${fontArg.slice(4).trim()}". Available:\n${NERD_FONTS.map((f) => `  ${f.id.padEnd(18)} ${f.family}`).join("\n")}`,
-            timestamp: Date.now(),
-          },
-        ]);
-      } else if (!term.canAutoSet) {
-        ctx.chat.setMessages((prev) => [
-          ...prev,
-          {
-            id: crypto.randomUUID(),
-            role: "system",
-            content: `Can't auto-set font in ${term.name}.\n${term.instructions} → ${match.family}`,
-            timestamp: Date.now(),
-          },
-        ]);
+
+      const applyFont = (fontId: string) => {
+        const match = NERD_FONTS.find(
+          (f) =>
+            f.id === fontId || f.name.toLowerCase() === fontId || f.family.toLowerCase() === fontId,
+        );
+        if (!match) {
+          ctx.chat.setMessages((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: "system",
+              content: `Unknown font "${fontId}". Available:\n${NERD_FONTS.map((f) => `  ${f.id.padEnd(18)} ${f.family}`).join("\n")}`,
+              timestamp: Date.now(),
+            },
+          ]);
+        } else if (!term.canAutoSet) {
+          ctx.chat.setMessages((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: "system",
+              content: `Can't auto-set font in ${term.name}.\n${term.instructions} → ${match.family}`,
+              timestamp: Date.now(),
+            },
+          ]);
+        } else {
+          const result = setTerminalFont(match.family);
+          ctx.chat.setMessages((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: "system",
+              content: result.message + (result.configPath ? `\nConfig: ${result.configPath}` : ""),
+              timestamp: Date.now(),
+            },
+          ]);
+        }
+      };
+
+      if (fontName) {
+        applyFont(fontName);
       } else {
-        const result = setTerminalFont(match.family);
-        ctx.chat.setMessages((prev) => [
-          ...prev,
-          {
-            id: crypto.randomUUID(),
-            role: "system",
-            content: result.message + (result.configPath ? `\nConfig: ${result.configPath}` : ""),
-            timestamp: Date.now(),
-          },
-        ]);
+        const currentFont = getCurrentFont();
+        ctx.openCommandPicker({
+          title: "Set Terminal Font",
+          icon: "\uDB80\uDDA3",
+          currentValue: found.find((f) => currentFont?.includes(f.family))?.id,
+          options: NERD_FONTS.map((f) => {
+            const installed = found.some((i) => i.id === f.id);
+            return {
+              value: f.id,
+              label: `${installed ? "✓" : "○"} ${f.name}`,
+              description: f.description,
+            };
+          }),
+          onSelect: applyFont,
+        });
       }
       return;
     }
@@ -148,29 +771,49 @@ export function handleCommand(input: string, ctx: CommandContext): void {
 
   if (cmd === "/chat-style" || cmd.startsWith("/chat-style ")) {
     const arg = trimmed.slice(12).trim().toLowerCase();
+    const patch = (v: string) => ({ chatStyle: v as "accent" | "bubble" });
+
+    const applyChatStyle = (style: "accent" | "bubble", scope?: ConfigScope) => {
+      ctx.setChatStyle(style);
+      ctx.saveToScope(patch(style), scope ?? "session");
+      ctx.chat.setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: "system",
+          content: `Chat style: ${style} (${scope ?? "session"})`,
+          timestamp: Date.now(),
+        },
+      ]);
+    };
+
     if (arg === "accent" || arg === "bubble") {
-      ctx.setChatStyle(arg);
-      ctx.chat.setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "system",
-          content: `Chat style: ${arg}`,
-          timestamp: Date.now(),
-        },
-      ]);
+      applyChatStyle(arg);
     } else {
-      const next = ctx.chatStyle === "accent" ? "bubble" : "accent";
-      ctx.setChatStyle(next);
-      ctx.chat.setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "system",
-          content: `Chat style: ${next}`,
-          timestamp: Date.now(),
+      ctx.openCommandPicker({
+        title: "Chat Style",
+        icon: "󰍪",
+        currentValue: ctx.chatStyle,
+        scopeEnabled: true,
+        initialScope: ctx.detectScope("chatStyle"),
+        options: [
+          {
+            value: "accent",
+            label: "Accent",
+            description: "colored left-border for messages",
+          },
+          {
+            value: "bubble",
+            label: "Bubble",
+            description: "rounded bubble chat layout",
+          },
+        ],
+        onSelect: (value, scope) => applyChatStyle(value as "accent" | "bubble", scope),
+        onScopeMove: (value, from, to) => {
+          ctx.setChatStyle(value as "accent" | "bubble");
+          ctx.saveToScope(patch(value), to, from);
         },
-      ]);
+      });
     }
     return;
   }
@@ -189,7 +832,7 @@ export function handleCommand(input: string, ctx: CommandContext): void {
       ]);
       return;
     }
-    ctx.nvimOpen(filePath).catch(() => {});
+    ctx.openEditorWithFile(filePath);
     ctx.chat.setMessages((prev) => [
       ...prev,
       {
@@ -202,22 +845,30 @@ export function handleCommand(input: string, ctx: CommandContext): void {
     return;
   }
 
-  if (cmd.startsWith("/mode ")) {
-    const modeName = trimmed.slice(6).trim().toLowerCase();
+  if (cmd === "/mode" || cmd.startsWith("/mode ")) {
+    const modeName = trimmed.slice(5).trim().toLowerCase();
     const validModes = ["default", "architect", "socratic", "challenge", "plan"] as const;
-    const matched = validModes.find((m) => m === modeName);
-    if (matched) {
-      ctx.setForgeMode(matched);
+    type Mode = (typeof validModes)[number];
+    const patch = (v: string) => ({ defaultForgeMode: v as Mode });
+
+    const applyMode = (mode: Mode, scope?: ConfigScope) => {
+      ctx.setForgeMode(mode);
+      ctx.saveToScope(patch(mode), scope ?? "session");
       ctx.chat.setMessages((prev) => [
         ...prev,
         {
           id: crypto.randomUUID(),
           role: "system",
-          content: `Forge mode set to: ${matched}`,
+          content: `Forge mode set to: ${mode} (${scope ?? "session"})`,
           timestamp: Date.now(),
         },
       ]);
-    } else {
+    };
+
+    const matched = validModes.find((m) => m === modeName);
+    if (matched) {
+      applyMode(matched);
+    } else if (modeName && !matched) {
       ctx.chat.setMessages((prev) => [
         ...prev,
         {
@@ -227,6 +878,51 @@ export function handleCommand(input: string, ctx: CommandContext): void {
           timestamp: Date.now(),
         },
       ]);
+    } else {
+      ctx.openCommandPicker({
+        title: "Forge Mode",
+        icon: "󰚩",
+        currentValue: ctx.currentMode,
+        scopeEnabled: true,
+        initialScope: ctx.detectScope("forgeMode"),
+        options: [
+          {
+            value: "default",
+            label: "Default",
+            description: "standard assistant — implements directly",
+            color: "#aaa",
+          },
+          {
+            value: "architect",
+            label: "Architect",
+            description: "design only — outlines, tradeoffs, no code",
+            color: "#9B30FF",
+          },
+          {
+            value: "socratic",
+            label: "Socratic",
+            description: "asks probing questions before implementing",
+            color: "#FF8C00",
+          },
+          {
+            value: "challenge",
+            label: "Challenge",
+            description: "devil's advocate — challenges every assumption",
+            color: "#FF0040",
+          },
+          {
+            value: "plan",
+            label: "Plan",
+            description: "research & plan only — no file edits or shell",
+            color: "#00BFFF",
+          },
+        ],
+        onSelect: (value, scope) => applyMode(value as Mode, scope),
+        onScopeMove: (value, from, to) => {
+          ctx.setForgeMode(value as Mode);
+          ctx.saveToScope(patch(value), to, from);
+        },
+      });
     }
     return;
   }
@@ -271,7 +967,7 @@ export function handleCommand(input: string, ctx: CommandContext): void {
   if (cmd.startsWith("/branch ")) {
     const branchName = trimmed.slice(8).trim();
     if (branchName) {
-      const { spawn } = require("node:child_process") as typeof import("node:child_process");
+      const { spawn } = await import("node:child_process");
       const proc = spawn("git", ["checkout", "-b", branchName], { cwd: ctx.cwd });
       const chunks: string[] = [];
       proc.stdout.on("data", (d: Buffer) => chunks.push(d.toString()));
@@ -294,39 +990,62 @@ export function handleCommand(input: string, ctx: CommandContext): void {
 
   if (cmd === "/co-author-commits" || cmd.startsWith("/co-author-commits ")) {
     const arg = trimmed.slice(19).trim().toLowerCase();
+    const patch = (v: string) => ({ coAuthorCommits: v === "enable" });
+
+    const applyCoAuthor = (enabled: boolean, scope?: ConfigScope) => {
+      ctx.chat.setCoAuthorCommits(enabled);
+      ctx.saveToScope(patch(enabled ? "enable" : "disable"), scope ?? "session");
+      ctx.chat.setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: "system",
+          content: `Co-author commits ${enabled ? "enabled" : "disabled"} (${scope ?? "session"}).`,
+          timestamp: Date.now(),
+        },
+      ]);
+    };
+
     if (arg === "enable" || arg === "on") {
-      ctx.chat.setCoAuthorCommits(true);
-      ctx.chat.setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "system",
-          content: "Co-author commits enabled.",
-          timestamp: Date.now(),
-        },
-      ]);
+      applyCoAuthor(true);
     } else if (arg === "disable" || arg === "off") {
-      ctx.chat.setCoAuthorCommits(false);
-      ctx.chat.setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "system",
-          content: "Co-author commits disabled.",
-          timestamp: Date.now(),
-        },
-      ]);
+      applyCoAuthor(false);
     } else {
-      ctx.chat.setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "system",
-          content: `Co-author commits: ${ctx.chat.coAuthorCommits ? "enabled" : "disabled"}\nUsage: /co-author-commits enable | disable`,
-          timestamp: Date.now(),
+      ctx.openCommandPicker({
+        title: "Co-Author Commits",
+        icon: "󰊢",
+        currentValue: ctx.chat.coAuthorCommits ? "enable" : "disable",
+        scopeEnabled: true,
+        initialScope: ctx.detectScope("coAuthorCommits"),
+        options: [
+          {
+            value: "enable",
+            label: "Enable",
+            description: "add co-author trailer on AI-assisted commits",
+          },
+          {
+            value: "disable",
+            label: "Disable",
+            description: "no co-author trailer on commits",
+          },
+        ],
+        onSelect: (value, scope) => applyCoAuthor(value === "enable", scope),
+        onScopeMove: (value, from, to) => {
+          ctx.chat.setCoAuthorCommits(value === "enable");
+          ctx.saveToScope(patch(value), to, from);
         },
-      ]);
+      });
     }
+    return;
+  }
+
+  if (cmd === "/memory") {
+    openMemoryMenu(ctx);
+    return;
+  }
+
+  if (cmd === "/repo-map") {
+    openRepoMapMenu(ctx);
     return;
   }
 
@@ -335,10 +1054,22 @@ export function handleCommand(input: string, ctx: CommandContext): void {
     case "/exit":
       ctx.exit();
       break;
+    case "/restart":
+      ctx.chat.abort();
+      restart();
+      break;
     case "/clear":
       ctx.chat.setMessages([]);
       ctx.chat.setCoreMessages([]);
-      ctx.chat.setTokenUsage({ prompt: 0, completion: 0, total: 0 });
+      ctx.chat.setTokenUsage({
+        prompt: 0,
+        completion: 0,
+        total: 0,
+        cacheRead: 0,
+        subagentInput: 0,
+        subagentOutput: 0,
+      });
+      ctx.chat.setMessageQueue([]);
       break;
     case "/editor":
     case "/edit":
@@ -353,8 +1084,21 @@ export function handleCommand(input: string, ctx: CommandContext): void {
     case "/router":
       ctx.openRouterSettings();
       break;
+    case "/provider-settings":
+    case "/provider":
+    case "/perf":
+      ctx.openProviderSettings();
+      break;
+    case "/web-search":
+      ctx.openWebSearchSettings();
+      break;
+    case "/panel":
     case "/plan-panel":
       ctx.chat.setShowPlanPanel((prev: boolean) => !prev);
+      break;
+    case "/changes":
+    case "/files":
+      ctx.toggleChanges();
       break;
     case "/errors":
       ctx.openErrorLog();
@@ -367,12 +1111,13 @@ export function handleCommand(input: string, ctx: CommandContext): void {
       ctx.openSessions();
       break;
     case "/summarize":
+    case "/compact":
       ctx.chat.setMessages((prev) => [
         ...prev,
         {
           id: crypto.randomUUID(),
           role: "system",
-          content: "Summarizing conversation...",
+          content: "Compacting conversation context...",
           timestamp: Date.now(),
         },
       ]);
@@ -424,23 +1169,63 @@ export function handleCommand(input: string, ctx: CommandContext): void {
           ]);
           return;
         }
-        const lines = [
-          `Branch: ${status.branch ?? "(detached)"}`,
-          `Staged: ${String(status.staged.length)} file(s)`,
-          `Modified: ${String(status.modified.length)} file(s)`,
-          `Untracked: ${String(status.untracked.length)} file(s)`,
-        ];
-        if (status.ahead > 0) lines.push(`Ahead: ${String(status.ahead)}`);
-        if (status.behind > 0) lines.push(`Behind: ${String(status.behind)}`);
-        ctx.chat.setMessages((prev) => [
-          ...prev,
+        const lines: import("./InfoPopup.js").InfoPopupLine[] = [
           {
-            id: crypto.randomUUID(),
-            role: "system",
-            content: lines.join("\n"),
-            timestamp: Date.now(),
+            type: "entry",
+            label: "Branch",
+            desc: status.branch ?? "(detached)",
+            descColor: "#8B5CF6",
           },
-        ]);
+          { type: "spacer" },
+          {
+            type: "entry",
+            label: "Staged",
+            desc: String(status.staged.length),
+            descColor: status.staged.length > 0 ? "#2d5" : "#666",
+          },
+          {
+            type: "entry",
+            label: "Modified",
+            desc: String(status.modified.length),
+            descColor: status.modified.length > 0 ? "#FF8C00" : "#666",
+          },
+          {
+            type: "entry",
+            label: "Untracked",
+            desc: String(status.untracked.length),
+            descColor: status.untracked.length > 0 ? "#FF0040" : "#666",
+          },
+        ];
+        if (status.ahead > 0)
+          lines.push({
+            type: "entry",
+            label: "Ahead",
+            desc: String(status.ahead),
+            descColor: "#2d5",
+          });
+        if (status.behind > 0)
+          lines.push({
+            type: "entry",
+            label: "Behind",
+            desc: String(status.behind),
+            descColor: "#FF8C00",
+          });
+        if (status.staged.length > 0) {
+          lines.push({ type: "spacer" }, { type: "header", label: "Staged Files" });
+          for (const f of status.staged)
+            lines.push({ type: "text", label: `  ${f}`, color: "#2d5" });
+        }
+        if (status.modified.length > 0) {
+          lines.push({ type: "spacer" }, { type: "header", label: "Modified Files" });
+          for (const f of status.modified)
+            lines.push({ type: "text", label: `  ${f}`, color: "#FF8C00" });
+        }
+        if (status.untracked.length > 0) {
+          lines.push({ type: "spacer" }, { type: "header", label: "Untracked Files" });
+          for (const f of status.untracked)
+            lines.push({ type: "text", label: `  ${f}`, color: "#FF0040" });
+        }
+        ctx.openInfoPopup({ title: "Git Status", icon: "󰊢", lines });
       });
       break;
     case "/branch":
@@ -460,43 +1245,136 @@ export function handleCommand(input: string, ctx: CommandContext): void {
       break;
     case "/context": {
       const breakdown = ctx.contextManager.getContextBreakdown();
-      const total = breakdown.reduce((sum, s) => sum + s.chars, 0);
-      const lines = breakdown
-        .filter((s) => s.active)
-        .map((s) => {
-          const kb = (s.chars / 1024).toFixed(1);
-          const pct = total > 0 ? Math.round((s.chars / total) * 100) : 0;
-          return `  ${String(pct).padStart(3)}%  ${kb.padStart(5)}k  ${s.section}`;
-        });
-      const totalKb = (total / 1024).toFixed(1);
-      ctx.chat.setMessages((prev) => [
-        ...prev,
+      const totalChars = breakdown.reduce((sum, s) => sum + s.chars, 0);
+      const modelId = ctx.chat.activeModel;
+      const ctxInfo = getModelContextInfo(modelId);
+      const ctxWindow = ctxInfo.tokens;
+      const tu: TokenUsage = ctx.chat.tokenUsage;
+      const apiCtx = ctx.chat.contextTokens;
+      const usedTokens = apiCtx > 0 ? apiCtx : Math.ceil(totalChars / 4);
+      const fillPct = Math.min(100, Math.round((usedTokens / ctxWindow) * 100));
+
+      const fmtT = (n: number) => {
+        if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+        if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+        return String(n);
+      };
+
+      const popupLines: import("./InfoPopup.js").InfoPopupLine[] = [
         {
-          id: crypto.randomUUID(),
-          role: "system",
-          content: [
-            `System prompt context: ${totalKb}k chars`,
-            "",
-            ...lines,
-            "",
-            "Clear with: /context clear [git|skills|memory]",
-          ].join("\n"),
-          timestamp: Date.now(),
+          type: "bar",
+          label: "Context window",
+          pct: fillPct,
+          desc: `${fmtT(usedTokens)} / ${fmtT(ctxWindow)} (${String(fillPct)}%)`,
+          descColor: fillPct > 75 ? "#FF0040" : fillPct > 50 ? "#FF8C00" : "#888",
         },
-      ]);
+        {
+          type: "entry",
+          label: "Model",
+          desc: getShortModelLabel(modelId),
+          color: "#888",
+          descColor: "#ccc",
+        },
+        { type: "separator" },
+        { type: "header", label: "System Prompt Breakdown" },
+      ];
+
+      const activeSections = breakdown.filter((s) => s.active && s.chars > 0);
+      const totalSysChars = activeSections.reduce((sum, s) => sum + s.chars, 0);
+      for (const s of activeSections) {
+        const sTokens = Math.ceil(s.chars / 4);
+        const sPct = totalSysChars > 0 ? Math.round((s.chars / totalSysChars) * 100) : 0;
+        popupLines.push({
+          type: "bar",
+          label: s.section,
+          pct: sPct,
+          desc: `~${fmtT(sTokens)}`,
+          color: "#ccc",
+          descColor: "#666",
+          barColor: sPct > 40 ? "#FF8C00" : "#555",
+        });
+      }
+
+      popupLines.push(
+        { type: "separator" },
+        { type: "header", label: "Token Usage (session)" },
+        {
+          type: "entry",
+          label: "Input",
+          desc: fmtT(tu.prompt),
+          color: "#2d9bf0",
+          descColor: "#2d9bf0",
+        },
+        {
+          type: "entry",
+          label: "Output",
+          desc: fmtT(tu.completion),
+          color: "#e0a020",
+          descColor: "#e0a020",
+        },
+        {
+          type: "entry",
+          label: "Total",
+          desc: fmtT(tu.total),
+          color: "#ccc",
+          descColor: "#ccc",
+        },
+      );
+      if (tu.subagentInput > 0 || tu.subagentOutput > 0) {
+        popupLines.push({
+          type: "entry",
+          label: "  Subagents",
+          desc: `${fmtT(tu.subagentInput)}↑ ${fmtT(tu.subagentOutput)}↓ (included above)`,
+          color: "#9B30FF",
+          descColor: "#666",
+        });
+      }
+
+      // Cache savings — the big highlight
+      if (tu.cacheRead > 0) {
+        const cachePct = tu.prompt > 0 ? Math.round((tu.cacheRead / tu.prompt) * 100) : 0;
+        const newTokens = tu.prompt - tu.cacheRead;
+        popupLines.push(
+          { type: "separator" },
+          { type: "header", label: "⚡ Cache Savings" },
+          {
+            type: "bar",
+            label: "Cache hit rate",
+            pct: cachePct,
+            desc: `${String(cachePct)}%`,
+            barColor: "#2d5",
+            descColor: "#2d5",
+          },
+          {
+            type: "entry",
+            label: "Cached",
+            desc: `${fmtT(tu.cacheRead)} tokens (reused from cache)`,
+            color: "#2d5",
+            descColor: "#2d5",
+          },
+          {
+            type: "entry",
+            label: "New input",
+            desc: `${fmtT(newTokens)} tokens (fresh processing)`,
+            color: "#888",
+            descColor: "#888",
+          },
+        );
+      }
+
+      popupLines.push(
+        { type: "separator" },
+        { type: "text", label: "/context clear [git|skills|memory|all]" },
+      );
+      ctx.openInfoPopup({
+        title: "Context Budget",
+        icon: "󰊕",
+        lines: popupLines,
+        labelWidth: 22,
+        width: 72,
+      });
       break;
     }
-    case "/mode":
-      ctx.chat.setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "system",
-          content: `Current mode: ${ctx.currentModeLabel} (${ctx.currentMode})\nAvailable: /mode default | architect | socratic | challenge | plan`,
-          timestamp: Date.now(),
-        },
-      ]);
-      break;
     case "/git":
       ctx.openGitMenu();
       break;
@@ -505,42 +1383,124 @@ export function handleCommand(input: string, ctx: CommandContext): void {
       break;
     case "/proxy":
     case "/proxy status": {
-      const { getProxyBinary, isProxyRunning } =
-        require("../core/proxy/lifecycle.js") as typeof import("../core/proxy/lifecycle.js");
-      const binary = getProxyBinary();
-      isProxyRunning().then((running: boolean) => {
-        const lines = [
-          "── Proxy Status ──",
-          "",
-          `Installed: ${binary ? `yes (${binary})` : "no"}`,
-          `Running:   ${running ? "yes" : "no"}`,
-          "",
-          "Commands:",
-          "  /proxy login   — authenticate with Claude (browser OAuth)",
-          "  /proxy install — manually install CLIProxyAPI",
-        ];
-        ctx.chat.setMessages((prev) => [
-          ...prev,
+      const { fetchProxyStatus } = await import("../core/proxy/lifecycle.js");
+      type Line = import("./InfoPopup.js").InfoPopupLine;
+
+      const buildLines = (s: Awaited<ReturnType<typeof fetchProxyStatus>>): Line[] => {
+        const lines: Line[] = [
           {
-            id: crypto.randomUUID(),
-            role: "system",
-            content: lines.join("\n"),
-            timestamp: Date.now(),
+            type: "entry",
+            label: "Status",
+            desc: s.running ? "● running" : "○ stopped",
+            descColor: s.running ? "#2d5" : "#FF0040",
           },
-        ]);
+          {
+            type: "entry",
+            label: "Endpoint",
+            desc: s.endpoint,
+            descColor: "#888",
+          },
+          {
+            type: "entry",
+            label: "Binary",
+            desc: s.binaryPath ?? "not installed",
+            descColor: s.installed ? "#888" : "#FF0040",
+          },
+        ];
+        if (s.pid) {
+          lines.push({ type: "entry", label: "PID", desc: String(s.pid), descColor: "#888" });
+        }
+        if (s.models.length > 0) {
+          lines.push({ type: "spacer" }, { type: "separator" }, { type: "spacer" });
+          lines.push({ type: "header", label: `Models (${s.models.length})` });
+          for (const m of s.models) {
+            lines.push({ type: "text", label: `  ${m}`, color: "#888" });
+          }
+        }
+        lines.push(
+          { type: "spacer" },
+          { type: "separator" },
+          { type: "spacer" },
+          { type: "header", label: "Commands" },
+          { type: "entry", label: "/proxy login", desc: "authenticate with Claude" },
+          { type: "entry", label: "/proxy install", desc: "manually install CLIProxyAPI" },
+        );
+        return lines;
+      };
+
+      ctx.openInfoPopup({
+        title: "Proxy Status",
+        icon: "󰌆",
+        lines: [{ type: "text", label: "Loading...", color: "#888" }],
       });
+
+      let pollActive = true;
+      const poll = async () => {
+        while (pollActive) {
+          const status = await fetchProxyStatus();
+          if (!pollActive) break;
+          ctx.openInfoPopup({
+            title: "Proxy Status",
+            icon: "󰌆",
+            lines: buildLines(status),
+            onClose: () => {
+              pollActive = false;
+            },
+          });
+          await new Promise((r) => setTimeout(r, 3000));
+        }
+      };
+      poll();
       break;
     }
     case "/proxy login": {
-      const { proxyLogin } =
-        require("../core/proxy/lifecycle.js") as typeof import("../core/proxy/lifecycle.js");
-      const loginCmd = proxyLogin();
-      ctx.handleSuspend({ command: loginCmd.command, args: loginCmd.args, noAltScreen: true });
+      const { runProxyLogin } = await import("../core/proxy/lifecycle.js");
+      type Line = import("./InfoPopup.js").InfoPopupLine;
+
+      const loginLines: Line[] = [
+        { type: "text", label: "Opening browser for authentication...", color: "#888" },
+      ];
+
+      const updatePopup = (extraLines: Line[], closeCb?: () => void) => {
+        ctx.openInfoPopup({
+          title: "Proxy Login",
+          icon: "󰌆",
+          lines: extraLines,
+          onClose: closeCb,
+        });
+      };
+
+      let handle: ReturnType<typeof runProxyLogin> | null = null;
+
+      const onClose = () => {
+        handle?.abort();
+      };
+
+      updatePopup(loginLines, onClose);
+
+      handle = runProxyLogin((line) => {
+        loginLines.push({ type: "text", label: line, color: "#ccc" });
+        updatePopup([...loginLines], onClose);
+      });
+
+      handle.promise
+        .then(({ ok }) => {
+          loginLines.push({
+            type: "text",
+            label: ok ? "Authentication complete." : "Authentication failed.",
+            color: ok ? "#2d5" : "#FF0040",
+          });
+          updatePopup([...loginLines]);
+        })
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          loginLines.push({ type: "text", label: `Error: ${msg}`, color: "#FF0040" });
+          updatePopup([...loginLines]);
+        });
       break;
     }
     case "/proxy install": {
-      const { installProxy } =
-        require("../core/setup/install.js") as typeof import("../core/setup/install.js");
+      const { installProxy } = await import("../core/setup/install.js");
       ctx.chat.setMessages((prev) => [
         ...prev,
         {
@@ -653,44 +1613,55 @@ export function handleCommand(input: string, ctx: CommandContext): void {
             },
           ]);
         } else {
-          const logText = entries.map((e) => `${e.hash} ${e.subject} (${e.date})`).join("\n");
-          ctx.chat.setMessages((prev) => [
-            ...prev,
-            { id: crypto.randomUUID(), role: "system", content: logText, timestamp: Date.now() },
-          ]);
+          const popupLines: import("./InfoPopup.js").InfoPopupLine[] = entries.map((e) => ({
+            type: "entry" as const,
+            label: e.hash,
+            desc: `${e.subject} (${e.date})`,
+            color: "#FF8C00",
+          }));
+          ctx.openInfoPopup({
+            title: "Git Log",
+            icon: "󰊢",
+            lines: popupLines,
+            width: 78,
+            labelWidth: 10,
+          });
         }
       });
       break;
     case "/setup":
       ctx.openSetup();
       break;
+    case "/storage": {
+      openStorageMenu(ctx);
+      break;
+    }
     case "/tabs": {
-      const lines: string[] = ["── Tabs ──", ""];
+      const tabLines: import("./InfoPopup.js").InfoPopupLine[] = [];
       for (let i = 0; i < ctx.tabMgr.tabs.length; i++) {
         const tab = ctx.tabMgr.tabs[i];
         if (!tab) continue;
         const isActive = tab.id === ctx.tabMgr.activeTabId;
-        const marker = isActive ? "▸" : " ";
-        lines.push(`  ${marker} ${String(i + 1)}. ${tab.label}${isActive ? " (active)" : ""}`);
+        tabLines.push({
+          type: "entry",
+          label: `${isActive ? "▸" : " "} ${String(i + 1)}.`,
+          desc: tab.label,
+          color: isActive ? "#9B30FF" : "#555",
+          descColor: isActive ? "#fff" : "#666",
+        });
       }
-      lines.push(
-        "",
-        "Shortcuts:",
-        "  Alt+T        — new tab",
-        "  Alt+W        — close tab",
-        "  Alt+1-9      — switch to tab",
-        "  Alt+[ / ]    — prev / next tab",
-        "  /rename <n>  — rename current tab",
+      tabLines.push(
+        { type: "spacer" },
+        { type: "separator" },
+        { type: "spacer" },
+        { type: "header", label: "Shortcuts" },
+        { type: "entry", label: "Alt+T", desc: "new tab" },
+        { type: "entry", label: "Alt+W", desc: "close tab" },
+        { type: "entry", label: "Alt+1-9", desc: "switch to tab" },
+        { type: "entry", label: "Alt+[ / ]", desc: "prev / next tab" },
+        { type: "entry", label: "/rename <n>", desc: "rename current tab" },
       );
-      ctx.chat.setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "system",
-          content: lines.join("\n"),
-          timestamp: Date.now(),
-        },
-      ]);
+      ctx.openInfoPopup({ title: "Tabs", icon: "󰓩", lines: tabLines });
       break;
     }
     case "/new-tab":
@@ -742,41 +1713,231 @@ export function handleCommand(input: string, ctx: CommandContext): void {
         const arg = trimmed.slice(13).trim().toLowerCase();
         const validModes = ["auto", "default", "user", "none"] as const;
         const matched = validModes.find((m) => m === arg);
+
+        const applyNvimConfig = (mode: (typeof validModes)[number], scope?: ConfigScope) => {
+          ctx.saveToScope({ nvimConfig: mode }, scope ?? "session");
+          ctx.chat.setMessages((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: "system",
+              content: `Neovim config set to: ${mode} (${scope ?? "session"})\nReopen the editor (Ctrl+E twice) for changes to take effect.`,
+              timestamp: Date.now(),
+            },
+          ]);
+        };
+
         if (matched) {
-          ctx.setSessionConfig((prev) => ({ ...prev, nvimConfig: matched }));
-          ctx.chat.setMessages((prev) => [
-            ...prev,
-            {
-              id: crypto.randomUUID(),
-              role: "system",
-              content: `Neovim config set to: ${matched}\nReopen the editor (Ctrl+E twice) for changes to take effect.`,
-              timestamp: Date.now(),
-            },
-          ]);
+          applyNvimConfig(matched);
         } else {
-          ctx.chat.setMessages((prev) => [
-            ...prev,
-            {
-              id: crypto.randomUUID(),
-              role: "system",
-              content: [
-                `Current nvim config: ${ctx.effectiveNvimConfig ?? "auto"}`,
-                "",
-                "Usage: /nvim-config <mode>",
-                "  auto    — use user config if found, else shipped config",
-                "  default — always use SoulForge's shipped init.lua",
-                "  user    — always use your own nvim config",
-                "  none    — bare neovim, no config at all",
-              ].join("\n"),
-              timestamp: Date.now(),
-            },
-          ]);
+          ctx.openCommandPicker({
+            title: "Neovim Config",
+            icon: "\uDB80\uDFA9",
+            currentValue: ctx.effectiveNvimConfig ?? "auto",
+            scopeEnabled: true,
+            initialScope: ctx.detectScope("nvimConfig"),
+            options: [
+              {
+                value: "auto",
+                label: "Auto",
+                description: "use user config if found, else shipped config",
+              },
+              {
+                value: "default",
+                label: "Default",
+                description: "always use SoulForge's shipped init.lua",
+              },
+              {
+                value: "user",
+                label: "User",
+                description: "always use your own nvim config",
+              },
+              {
+                value: "none",
+                label: "None",
+                description: "bare neovim, no config at all",
+              },
+            ],
+            onSelect: (value, scope) =>
+              applyNvimConfig(value as (typeof validModes)[number], scope),
+            onScopeMove: (value, from, to) =>
+              ctx.saveToScope({ nvimConfig: value as (typeof validModes)[number] }, to, from),
+          });
         }
+        break;
+      }
+      if (cmd === "/verbose") {
+        const patch = (v: string) => ({ verbose: v === "on" });
+        ctx.openCommandPicker({
+          title: "Verbose Mode",
+          icon: "󰍡",
+          currentValue: ctx.verbose ? "on" : "off",
+          scopeEnabled: true,
+          initialScope: ctx.detectScope("verbose"),
+          options: [
+            { value: "on", label: "On", description: "show full tool call output in chat" },
+            { value: "off", label: "Off", description: "show compact tool call summaries" },
+          ],
+          onSelect: (value, scope) => {
+            ctx.saveToScope(patch(value), scope ?? "session");
+            ctx.chat.setMessages((prev) => [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                role: "system",
+                content: `Verbose mode ${value === "on" ? "on" : "off"} (${scope ?? "session"})`,
+                timestamp: Date.now(),
+              },
+            ]);
+          },
+          onScopeMove: (value, from, to) => ctx.saveToScope(patch(value), to, from),
+        });
+        break;
+      }
+      if (cmd === "/reasoning") {
+        const patch = (v: string) => ({ showReasoning: v === "on" });
+        ctx.openCommandPicker({
+          title: "Reasoning Display",
+          icon: "󰘦",
+          currentValue: ctx.showReasoning ? "on" : "off",
+          scopeEnabled: true,
+          initialScope: ctx.detectScope("showReasoning"),
+          options: [
+            { value: "on", label: "On", description: "show reasoning content in chat" },
+            { value: "off", label: "Off", description: "show thinking status only" },
+          ],
+          onSelect: (value, scope) => {
+            ctx.setShowReasoning(value === "on");
+            ctx.saveToScope(patch(value), scope ?? "session");
+            ctx.chat.setMessages((prev) => [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                role: "system",
+                content: `Reasoning ${value === "on" ? "visible" : "hidden"} (${scope ?? "session"})`,
+                timestamp: Date.now(),
+              },
+            ]);
+          },
+          onScopeMove: (value, from, to) => {
+            ctx.setShowReasoning(value === "on");
+            ctx.saveToScope(patch(value), to, from);
+          },
+        });
+        break;
+      }
+      if (cmd === "/diff-style") {
+        const patch = (v: string) => ({
+          diffStyle: v as "default" | "sidebyside" | "compact",
+        });
+        ctx.openCommandPicker({
+          title: "Diff Style",
+          icon: "󰊢",
+          scopeEnabled: true,
+          initialScope: ctx.detectScope("diffStyle"),
+          options: [
+            {
+              value: "default",
+              label: "Default",
+              description: "Full inline diff with syntax highlighting",
+              icon: "📄",
+            },
+            {
+              value: "sidebyside",
+              label: "Side by Side",
+              description: "Old and new shown in columns",
+              icon: "📊",
+            },
+            {
+              value: "compact",
+              label: "Compact",
+              description: "File name + line count summary only",
+              icon: "📝",
+            },
+          ],
+          currentValue: ctx.diffStyle,
+          onSelect: (value, scope) => {
+            ctx.saveToScope(patch(value), scope ?? "session");
+            ctx.chat.setMessages((prev) => [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                role: "system",
+                content: `Diff style: ${value} (${scope ?? "session"})`,
+                timestamp: Date.now(),
+              },
+            ]);
+          },
+          onScopeMove: (value, from, to) => ctx.saveToScope(patch(value), to, from),
+        });
+        break;
+      }
+      if (cmd === "/vim-hints") {
+        const patch = (v: string) => ({ vimHints: v === "visible" });
+        ctx.openCommandPicker({
+          title: "Vim Hints",
+          icon: "\uDB80\uDFA9",
+          currentValue: ctx.vimHints ? "visible" : "hidden",
+          scopeEnabled: true,
+          initialScope: ctx.detectScope("vimHints"),
+          options: [
+            {
+              value: "visible",
+              label: "Visible",
+              description: "show vim keybinding hints in editor",
+            },
+            { value: "hidden", label: "Hidden", description: "hide vim keybinding hints" },
+          ],
+          onSelect: (value, scope) => {
+            ctx.saveToScope(patch(value), scope ?? "session");
+            ctx.chat.setMessages((prev) => [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                role: "system",
+                content: `Vim hints ${value === "visible" ? "visible" : "hidden"} (${scope ?? "session"})`,
+                timestamp: Date.now(),
+              },
+            ]);
+          },
+          onScopeMove: (value, from, to) => ctx.saveToScope(patch(value), to, from),
+        });
+        break;
+      }
+      if (cmd === "/nerd-font" || cmd === "/nerdfont") {
+        const patch = (v: string) => ({ nerdFont: v === "yes" });
+        ctx.openCommandPicker({
+          title: "Nerd Font",
+          icon: icon("ghost"),
+          scopeEnabled: true,
+          initialScope: ctx.detectScope("nerdFont"),
+          options: [
+            { value: "yes", label: "Yes", description: "Terminal uses a Nerd Font" },
+            { value: "no", label: "No", description: "Use ASCII fallback icons" },
+          ],
+          onSelect: (value, scope) => {
+            setNerdFont(value === "yes");
+            ctx.saveToScope(patch(value), scope ?? "global");
+            ctx.chat.setMessages((prev) => [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                role: "system",
+                content: `Nerd Font ${value === "yes" ? "enabled" : "disabled"} (${scope ?? "global"}). Restart for full effect.`,
+                timestamp: Date.now(),
+              },
+            ]);
+          },
+          onScopeMove: (value, from, to) => {
+            setNerdFont(value === "yes");
+            ctx.saveToScope(patch(value), to, from);
+          },
+        });
         break;
       }
       if (cmd === "/privacy" || cmd.startsWith("/privacy ")) {
         const { getAllPatterns, addProjectPattern, removeProjectPattern, addSessionPattern } =
-          require("../core/security/forbidden.js") as typeof import("../core/security/forbidden.js");
+          await import("../core/security/forbidden.js");
         const arg = trimmed.slice(9).trim();
 
         if (arg.startsWith("add ")) {
@@ -831,44 +1992,36 @@ export function handleCommand(input: string, ctx: CommandContext): void {
           }
         } else {
           const patterns = getAllPatterns();
-          const lines: string[] = ["Forbidden File Patterns", ""];
-          lines.push(`Built-in (${String(patterns.builtin.length)}):`);
-          for (const p of patterns.builtin.slice(0, 8)) lines.push(`  ${p}`);
-          if (patterns.builtin.length > 8)
-            lines.push(`  ... and ${String(patterns.builtin.length - 8)} more`);
+          const popupLines: import("./InfoPopup.js").InfoPopupLine[] = [];
 
-          if (patterns.aiignore.length > 0) {
-            lines.push("", `.aiignore (${String(patterns.aiignore.length)}):`);
-            for (const p of patterns.aiignore) lines.push(`  ${p}`);
-          }
-          if (patterns.global.length > 0) {
-            lines.push("", `Global (${String(patterns.global.length)}):`);
-            for (const p of patterns.global) lines.push(`  ${p}`);
-          }
-          if (patterns.project.length > 0) {
-            lines.push("", `Project (${String(patterns.project.length)}):`);
-            for (const p of patterns.project) lines.push(`  ${p}`);
-          }
-          if (patterns.session.length > 0) {
-            lines.push("", `Session (${String(patterns.session.length)}):`);
-            for (const p of patterns.session) lines.push(`  ${p}`);
-          }
-          lines.push(
-            "",
-            "Commands:",
-            "  /privacy add <pattern>     — add to project config",
-            "  /privacy remove <pattern>  — remove from project config",
-            "  /privacy session <pattern> — add for this session only",
+          const addCategory = (name: string, items: string[], max?: number) => {
+            popupLines.push({ type: "header", label: `${name} (${String(items.length)})` });
+            const show = max ? items.slice(0, max) : items;
+            for (const p of show) popupLines.push({ type: "text", label: `  ${p}` });
+            if (max && items.length > max)
+              popupLines.push({
+                type: "text",
+                label: `  ... and ${String(items.length - max)} more`,
+                color: "#444",
+              });
+            popupLines.push({ type: "spacer" });
+          };
+
+          addCategory("Built-in", patterns.builtin, 8);
+          if (patterns.aiignore.length > 0) addCategory(".aiignore", patterns.aiignore);
+          if (patterns.global.length > 0) addCategory("Global", patterns.global);
+          if (patterns.project.length > 0) addCategory("Project", patterns.project);
+          if (patterns.session.length > 0) addCategory("Session", patterns.session);
+
+          popupLines.push(
+            { type: "separator" },
+            { type: "spacer" },
+            { type: "header", label: "Commands" },
+            { type: "entry", label: "/privacy add <pat>", desc: "add to project config" },
+            { type: "entry", label: "/privacy remove <pat>", desc: "remove from project config" },
+            { type: "entry", label: "/privacy session <pat>", desc: "add for this session only" },
           );
-          ctx.chat.setMessages((prev) => [
-            ...prev,
-            {
-              id: crypto.randomUUID(),
-              role: "system",
-              content: lines.join("\n"),
-              timestamp: Date.now(),
-            },
-          ]);
+          ctx.openInfoPopup({ title: "Forbidden Patterns", icon: "󰒃", lines: popupLines });
         }
         break;
       }

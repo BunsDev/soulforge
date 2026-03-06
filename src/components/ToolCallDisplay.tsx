@@ -1,22 +1,26 @@
-import { Box, Text } from "ink";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { TextAttributes } from "@opentui/core";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
+  type AgentStatsEvent,
   type MultiAgentEvent,
+  onAgentStats,
   onMultiAgentEvent,
   onSubagentStep,
   type SubagentStep,
 } from "../core/agents/subagent-events.js";
 import {
+  BACKEND_LABELS,
   CATEGORY_COLORS,
   TOOL_CATEGORIES,
   TOOL_ICON_COLORS,
   TOOL_ICONS,
   TOOL_LABELS,
+  type ToolCategory,
 } from "../core/tool-display.js";
 import type { PlanOutput } from "../types/index.js";
 import { DiffView } from "./DiffView.js";
 import { StructuredPlanView } from "./StructuredPlanView.js";
-import { SPINNER_FRAMES } from "./shared.js";
+import { SPINNER_FRAMES, useSpinnerFrame } from "./shared.js";
 
 export interface LiveToolCall {
   id: string;
@@ -25,12 +29,12 @@ export interface LiveToolCall {
   args?: string;
   result?: string;
   error?: string;
+  /** Set at tool-call start when the backend is known upfront (e.g. routed web search agent). */
+  backend?: string;
 }
 
-// ─── Subagent names ───
-const SUBAGENT_NAMES = new Set(["dispatch"]);
+const SUBAGENT_NAMES = new Set(["dispatch", "web_search"]);
 
-// ─── Colors ───
 const COLORS = {
   spinnerActive: "#FF0040",
   toolNameActive: "#9B30FF",
@@ -39,6 +43,10 @@ const COLORS = {
   textDone: "#555",
   error: "#f44",
 } as const;
+
+function backendLabel(tag: string): string {
+  return BACKEND_LABELS[tag] ?? tag;
+}
 
 function formatArgs(toolName: string, args?: string): string {
   if (!args) return "";
@@ -84,9 +92,6 @@ function formatArgs(toolName: string, args?: string): string {
     if (toolName === "editor_hover" && parsed.line) {
       return `line ${String(parsed.line)}:${String(parsed.col ?? "")}`;
     }
-    if (toolName === "plan" && parsed.title) {
-      return String(parsed.title);
-    }
     if (toolName === "update_plan_step" && parsed.stepId) {
       return `${String(parsed.stepId)} → ${String(parsed.status ?? "")}`;
     }
@@ -110,12 +115,34 @@ function formatArgs(toolName: string, args?: string): string {
       const label = parts.join(" ");
       return label.length > 50 ? `${label.slice(0, 47)}...` : label;
     }
+    if (toolName === "rename_symbol") {
+      const label = `${String(parsed.symbol ?? "")} → ${String(parsed.newName ?? "")}`;
+      return label.length > 50 ? `${label.slice(0, 47)}...` : label;
+    }
     if (toolName === "refactor") {
       const parts = [parsed.action, parsed.symbol].filter(Boolean).map(String);
       const label = parts.join(" ");
       return label.length > 50 ? `${label.slice(0, 47)}...` : label;
     }
-    if (toolName === "write_plan") return ".soulforge/plan.md";
+    if (toolName === "project") {
+      const parts = [parsed.action, parsed.file].filter(Boolean).map(String);
+      const label = parts.join(" ");
+      return label.length > 50 ? `${label.slice(0, 47)}...` : label;
+    }
+    if (toolName === "move_symbol") {
+      const label = `${String(parsed.symbol ?? "")} → ${String(parsed.to ?? "")}`;
+      return label.length > 50 ? `${label.slice(0, 47)}...` : label;
+    }
+    if (toolName === "discover_pattern" && parsed.query) {
+      return String(parsed.query);
+    }
+    if (toolName === "test_scaffold" && parsed.file) {
+      return String(parsed.file);
+    }
+    if (toolName === "write_plan" || toolName === "plan") {
+      if (parsed.title) return String(parsed.title);
+      return "plan";
+    }
     if (toolName === "git_commit" && parsed.message) {
       const m = String(parsed.message);
       return m.length > 50 ? `${m.slice(0, 47)}...` : m;
@@ -134,20 +161,30 @@ function formatArgs(toolName: string, args?: string): string {
       }
     }
   } catch {
-    // partial JSON during streaming — don't show raw JSON
+    // partial JSON during streaming
   }
   return "";
 }
 
 function formatResult(toolName: string, result?: string): string {
   if (!result) return "";
-  // Subagent results are plain text summaries — show truncated
   if (SUBAGENT_NAMES.has(toolName)) {
+    try {
+      const p = JSON.parse(result);
+      if (p.success === false && p.error) return String(p.error).slice(0, 50);
+      if (p.output) {
+        const out = String(p.output);
+        const lines = out.split("\n").length;
+        if (lines > 1) return `${String(lines)} lines`;
+        return out.length > 40 ? `${out.slice(0, 37)}...` : out;
+      }
+    } catch {
+      // not JSON, fall through
+    }
     const lines = result.split("\n").length;
     if (lines > 1) return `${String(lines)} lines`;
     return result.length > 40 ? `${result.slice(0, 37)}...` : result;
   }
-  // Code execution — show stdout line count or exit code
   if (toolName === "code_execution") {
     const lines = result.split("\n").length;
     if (lines > 1) return `${String(lines)} lines output`;
@@ -192,55 +229,58 @@ function formatResult(toolName: string, result?: string): string {
   return result.length > 40 ? `${result.slice(0, 37)}...` : result;
 }
 
-// ─── Spinner ───
-function Spinner({ color }: { color?: string }) {
-  const [idx, setIdx] = useState(0);
+const Spinner = memo(function Spinner({ color }: { color?: string }) {
+  const frame = useSpinnerFrame();
+  return <span fg={color ?? COLORS.spinnerActive}>{SPINNER_FRAMES[frame]}</span>;
+});
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setIdx((prev) => (prev + 1) % SPINNER_FRAMES.length);
-    }, 80);
-    return () => clearInterval(interval);
-  }, []);
-
-  return <Text color={color ?? COLORS.spinnerActive}>{SPINNER_FRAMES[idx]}</Text>;
-}
-
-// ─── Elapsed Timer ───
 function useElapsedTimers(calls: LiveToolCall[]) {
   const startTimes = useRef(new Map<string, number>());
+  const callsRef = useRef(calls);
+  callsRef.current = calls;
   const [elapsed, setElapsed] = useState(new Map<string, number>());
 
   useEffect(() => {
+    const activeIds = new Set<string>();
     for (const call of calls) {
+      activeIds.add(call.id);
       if (call.state === "running" && !startTimes.current.has(call.id)) {
         startTimes.current.set(call.id, Date.now());
       }
     }
+    for (const id of startTimes.current.keys()) {
+      if (!activeIds.has(id)) startTimes.current.delete(id);
+    }
   }, [calls]);
 
+  const hasRunning = calls.some((c) => c.state === "running");
+
   useEffect(() => {
-    const hasRunning = calls.some((c) => c.state === "running");
     if (!hasRunning) return;
 
     const interval = setInterval(() => {
       const now = Date.now();
-      const next = new Map<string, number>();
-      for (const call of calls) {
-        const start = startTimes.current.get(call.id);
-        if (start) {
-          next.set(call.id, Math.floor((now - start) / 1000));
+      setElapsed((prev) => {
+        let changed = false;
+        const next = new Map<string, number>();
+        for (const call of callsRef.current) {
+          const start = startTimes.current.get(call.id);
+          if (start) {
+            const secs = Math.floor((now - start) / 1000);
+            next.set(call.id, secs);
+            if (prev.get(call.id) !== secs) changed = true;
+          }
         }
-      }
-      setElapsed(next);
+        if (!changed && prev.size === next.size) return prev;
+        return next;
+      });
     }, 1000);
     return () => clearInterval(interval);
-  }, [calls]);
+  }, [hasRunning]);
 
   return elapsed;
 }
 
-// ─── Duration Formatter ───
 function formatDuration(seconds: number): string {
   if (seconds < 60) return `${String(seconds)}s`;
   const mins = Math.floor(seconds / 60);
@@ -251,16 +291,16 @@ function formatDuration(seconds: number): string {
   return remMins > 0 ? `${String(hrs)}h ${String(remMins)}m` : `${String(hrs)}h`;
 }
 
-// ─── Status Icon ───
-function StatusIcon({ state }: { state: LiveToolCall["state"] }) {
+const StatusIcon = memo(function StatusIcon({ state }: { state: LiveToolCall["state"] }) {
   if (state === "running") return <Spinner />;
-  if (state === "done") return <Text color={COLORS.checkDone}>✓</Text>;
-  return <Text color={COLORS.error}>✗</Text>;
-}
+  if (state === "done") return <span fg={COLORS.checkDone}>✓</span>;
+  return <span fg={COLORS.error}>✗</span>;
+});
 
-// ─── Subagent child steps hook ───
-function useSubagentSteps(parentId: string | null) {
+function useSubagentSteps(parentId: string | null, maxSteps = 5) {
   const [steps, setSteps] = useState<SubagentStep[]>([]);
+  const maxStepsRef = useRef(maxSteps);
+  maxStepsRef.current = maxSteps;
 
   useEffect(() => {
     if (!parentId) return;
@@ -268,7 +308,6 @@ function useSubagentSteps(parentId: string | null) {
     return onSubagentStep((step) => {
       if (step.parentToolCallId !== parentId) return;
       setSteps((prev) => {
-        // Replace running step with done/error, or append new
         const existing = prev.findIndex(
           (s) => s.toolName === step.toolName && s.args === step.args && s.state === "running",
         );
@@ -277,9 +316,9 @@ function useSubagentSteps(parentId: string | null) {
           next[existing] = step;
           return next;
         }
-        // Keep only last 4 steps visible
         const next = [...prev, step];
-        return next.length > 5 ? next.slice(-5) : next;
+        const max = maxStepsRef.current;
+        return next.length > max ? next.slice(-max) : next;
       });
     });
   }, [parentId]);
@@ -287,65 +326,91 @@ function useSubagentSteps(parentId: string | null) {
   return steps;
 }
 
-// ─── Subagent child step row ───
 function ChildStepRow({ step }: { step: SubagentStep }) {
   const icon = TOOL_ICONS[step.toolName] ?? "\uF0AD";
   const iconColor = TOOL_ICON_COLORS[step.toolName] ?? "#666";
   const label = TOOL_LABELS[step.toolName] ?? step.toolName;
-  const category = TOOL_CATEGORIES[step.toolName];
-  const categoryColor = category ? CATEGORY_COLORS[category] : undefined;
+  const staticCategory = TOOL_CATEGORIES[step.toolName];
+  const hasSplit = !!(step.backend && staticCategory && step.backend !== staticCategory);
+  const category = hasSplit ? staticCategory : (step.backend ?? staticCategory);
+  const backendTag = hasSplit ? step.backend : null;
+  const categoryColor =
+    (staticCategory ? CATEGORY_COLORS[staticCategory as ToolCategory] : null) ??
+    (step.backend ? (CATEGORY_COLORS[step.backend as ToolCategory] ?? "#888") : undefined) ??
+    "#888";
+  const backendColor = backendTag
+    ? (CATEGORY_COLORS[backendTag as ToolCategory] ?? "#888")
+    : undefined;
   const isDone = step.state !== "running";
 
   return (
-    <Box height={1} flexShrink={0} marginLeft={3}>
-      <Text wrap="truncate">
-        <Text color="#333">├ </Text>
+    <box height={1} flexShrink={0} marginLeft={3}>
+      <text truncate>
+        <span fg="#333">├ </span>
         {step.state === "running" ? (
           <Spinner color="#666" />
         ) : step.state === "done" ? (
-          <Text color="#2d5">✓</Text>
+          <span fg="#2d5">✓</span>
         ) : (
-          <Text color="#f44">✗</Text>
+          <span fg="#f44">✗</span>
         )}
-        <Text color={isDone ? "#444" : iconColor}> {icon} </Text>
-        {category ? <Text color={isDone ? "#333" : categoryColor}>[{category}] </Text> : null}
-        <Text color={isDone ? "#444" : "#888"}>{label}</Text>
-        {step.agentId ? <Text color={isDone ? "#333" : "#9B30FF"}> [{step.agentId}]</Text> : null}
-        {step.args ? <Text color={isDone ? "#333" : "#666"}> {step.args}</Text> : null}
-      </Text>
-    </Box>
+        <span fg={isDone ? "#444" : iconColor}> {icon} </span>
+        {category ? <span fg={isDone ? "#333" : categoryColor}>[{category}]</span> : null}
+        {backendTag ? (
+          <span fg={isDone ? "#333" : backendColor}>[{backendLabel(backendTag)}] </span>
+        ) : category ? (
+          <span> </span>
+        ) : null}
+        <span fg={isDone ? "#444" : "#888"}>{label}</span>
+        {step.agentId ? <span fg={isDone ? "#333" : "#9B30FF"}> [{step.agentId}]</span> : null}
+        {step.args ? <span fg={isDone ? "#333" : "#666"}> {step.args}</span> : null}
+      </text>
+    </box>
   );
 }
 
-// ─── Multi-Agent progress tracking ───
+interface AgentInfo {
+  role: string;
+  task: string;
+  state: "pending" | "running" | "done" | "error";
+  toolUses?: number;
+  tokenUsage?: { input: number; output: number; total: number };
+  cacheHits?: number;
+}
+
 interface MultiAgentState {
   totalAgents: number;
-  agents: Map<
-    string,
-    { role: string; task: string; state: "pending" | "running" | "done" | "error" }
-  >;
+  agents: Map<string, AgentInfo>;
   findingCount: number;
 }
 
-function useMultiAgentProgress(parentId: string | null) {
+function humanizeTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+function useMultiAgentProgress(parentId: string | null, fallbackTotal: number) {
   const [state, setState] = useState<MultiAgentState | null>(null);
+  const fallbackRef = useRef(fallbackTotal);
+  fallbackRef.current = fallbackTotal;
 
   useEffect(() => {
     if (!parentId) return;
-    setState(null);
 
     return onMultiAgentEvent((event: MultiAgentEvent) => {
       if (event.parentToolCallId !== parentId) return;
 
       setState((prev) => {
         const s: MultiAgentState = prev ?? {
-          totalAgents: event.totalAgents ?? 0,
+          totalAgents: event.totalAgents ?? fallbackRef.current,
           agents: new Map(),
           findingCount: 0,
         };
+        const total = event.totalAgents ?? s.totalAgents;
 
         if (event.type === "dispatch-start") {
-          return { ...s, totalAgents: event.totalAgents ?? 0 };
+          return { ...s, totalAgents: event.totalAgents ?? fallbackRef.current };
         }
         if (event.type === "agent-start" && event.agentId) {
           const next = new Map(s.agents);
@@ -354,19 +419,46 @@ function useMultiAgentProgress(parentId: string | null) {
             task: event.task ?? "",
             state: "running",
           });
-          return { ...s, agents: next };
+          return { ...s, totalAgents: total, agents: next };
         }
         if (event.type === "agent-done" && event.agentId) {
           const next = new Map(s.agents);
           const existing = next.get(event.agentId);
-          if (existing) next.set(event.agentId, { ...existing, state: "done" });
-          return { ...s, agents: next, findingCount: event.findingCount ?? s.findingCount };
+          const stats = {
+            toolUses: event.toolUses,
+            tokenUsage: event.tokenUsage,
+            cacheHits: event.cacheHits,
+          };
+          if (existing) {
+            next.set(event.agentId, { ...existing, state: "done", ...stats });
+          } else {
+            next.set(event.agentId, {
+              role: event.role ?? "explore",
+              task: event.task ?? "",
+              state: "done",
+              ...stats,
+            });
+          }
+          return {
+            ...s,
+            totalAgents: total,
+            agents: next,
+            findingCount: event.findingCount ?? s.findingCount,
+          };
         }
         if (event.type === "agent-error" && event.agentId) {
           const next = new Map(s.agents);
           const existing = next.get(event.agentId);
-          if (existing) next.set(event.agentId, { ...existing, state: "error" });
-          return { ...s, agents: next };
+          if (existing) {
+            next.set(event.agentId, { ...existing, state: "error" });
+          } else {
+            next.set(event.agentId, {
+              role: event.role ?? "explore",
+              task: event.task ?? "",
+              state: "error",
+            });
+          }
+          return { ...s, totalAgents: total, agents: next };
         }
         return s;
       });
@@ -376,261 +468,463 @@ function useMultiAgentProgress(parentId: string | null) {
   return state;
 }
 
-// ─── Multi-Agent Row (child of ToolRow for multi-agent dispatch calls) ───
+function useAgentLiveStats(parentId: string | null) {
+  const [stats, setStats] = useState<Map<string, AgentStatsEvent>>(new Map());
+
+  useEffect(() => {
+    if (!parentId) return;
+    return onAgentStats((event) => {
+      if (event.parentToolCallId !== parentId) return;
+      setStats((prev) => {
+        const next = new Map(prev);
+        next.set(event.agentId, event);
+        return next;
+      });
+    });
+  }, [parentId]);
+
+  return stats;
+}
+
+const CACHE_ICONS = {
+  hit: "\uF0E7",
+  wait: "\uF017",
+} as const;
+
+const CACHE_COLORS = {
+  hit: "#2d5",
+  wait: "#FFDD57",
+} as const;
+
 function MultiAgentChildRow({
   agentId,
   info,
   isLast,
   childSteps,
+  liveStats,
 }: {
   agentId: string;
-  info: { role: string; task: string; state: string };
+  info: AgentInfo;
   isLast: boolean;
   childSteps: SubagentStep[];
+  liveStats?: AgentStatsEvent;
 }) {
   const roleIcon = info.role === "explore" ? "\uDB80\uDE29" : "\uDB80\uDD69";
-  const roleColor = "#9B30FF";
+  const roleColor = info.role === "code" ? "#FF6B2B" : "#9B30FF";
   const isDone = info.state === "done" || info.state === "error";
   const taskStr = info.task.length > 40 ? `${info.task.slice(0, 37)}...` : info.task;
   const connector = isLast && childSteps.length === 0 ? "└ " : "├ ";
   const continuation = isLast ? "  " : "│ ";
 
+  const toolUses = isDone ? info.toolUses : liveStats?.toolUses;
+  const tokenUsage = isDone ? info.tokenUsage : liveStats?.tokenUsage;
+  const cacheHits = isDone ? info.cacheHits : liveStats?.cacheHits;
+
+  const statParts: string[] = [];
+  if (toolUses != null && toolUses > 0) statParts.push(`${String(toolUses)} tool uses`);
+  if (tokenUsage && tokenUsage.total > 0)
+    statParts.push(`${humanizeTokens(tokenUsage.total)} tokens`);
+  if (cacheHits && cacheHits > 0) statParts.push(`${humanizeTokens(cacheHits)} cached`);
+  const statStr = statParts.length > 0 ? ` · ${statParts.join(" · ")}` : "";
+
   return (
     <>
-      <Box height={1} flexShrink={0} marginLeft={3}>
-        <Text wrap="truncate">
-          <Text color="#333">{connector}</Text>
+      <box height={1} flexShrink={0} marginLeft={3}>
+        <text truncate>
+          <span fg="#333">{connector}</span>
           {info.state === "running" ? (
             <Spinner color={roleColor} />
           ) : info.state === "done" ? (
-            <Text color="#2d5">✓</Text>
+            <span fg="#2d5">✓</span>
           ) : info.state === "error" ? (
-            <Text color="#f44">✗</Text>
+            <span fg="#f44">✗</span>
           ) : (
-            <Text color="#555">○</Text>
+            <span fg="#555">○</span>
           )}
-          <Text color={isDone ? "#444" : roleColor}> {roleIcon} </Text>
-          <Text color={isDone ? "#444" : "#ddd"} bold={!isDone}>
+          <span fg={isDone ? "#444" : roleColor}> {roleIcon} </span>
+          <span
+            fg={isDone ? "#444" : "#ddd"}
+            attributes={!isDone ? TextAttributes.BOLD : undefined}
+          >
             {agentId}
-          </Text>
-          <Text color={isDone ? "#333" : "#666"}> {taskStr}</Text>
-        </Text>
-      </Box>
-      {childSteps.map((step, i) => {
-        const stepIcon = TOOL_ICONS[step.toolName] ?? "\uF0AD";
-        const stepColor = TOOL_ICON_COLORS[step.toolName] ?? "#666";
-        const stepLabel = TOOL_LABELS[step.toolName] ?? step.toolName;
-        const stepDone = step.state !== "running";
-        const stepLast = i === childSteps.length - 1;
-        const stepConnector = stepLast ? "└ " : "├ ";
+          </span>
+          <span fg={isDone ? "#333" : roleColor}> ({info.role})</span>
+          <span fg={isDone ? "#333" : "#666"}> {taskStr}</span>
+          {statStr ? <span fg={isDone ? "#555" : "#666"}>{statStr}</span> : null}
+        </text>
+      </box>
+      {(() => {
+        const MAX_VISIBLE = 6;
+        const running = childSteps.filter((s) => s.state === "running");
+        const done = childSteps.filter((s) => s.state !== "running");
+        const doneSlots = Math.max(0, MAX_VISIBLE - running.length);
+        const visibleDone = done.slice(-doneSlots);
+        const hiddenCount = done.length - visibleDone.length;
+        const visible = [...visibleDone, ...running];
+        const agentRunning = info.state === "running";
+        const showThinking = agentRunning && running.length === 0 && done.length > 0;
 
         return (
-          <Box key={`${step.toolName}-${String(i)}`} height={1} flexShrink={0} marginLeft={3}>
-            <Text wrap="truncate">
-              <Text color="#333">
-                {continuation}
-                {"  "}
-                {stepConnector}
-              </Text>
-              {step.state === "running" ? (
-                <Spinner color="#666" />
-              ) : step.state === "done" ? (
-                <Text color="#2d5">✓</Text>
-              ) : (
-                <Text color="#f44">✗</Text>
-              )}
-              <Text color={stepDone ? "#444" : stepColor}> {stepIcon} </Text>
-              <Text color={stepDone ? "#444" : "#888"}>{stepLabel}</Text>
-              {step.args ? <Text color={stepDone ? "#333" : "#666"}> {step.args}</Text> : null}
-            </Text>
-          </Box>
+          <>
+            {hiddenCount > 0 && (
+              <box height={1} flexShrink={0} marginLeft={3}>
+                <text truncate>
+                  <span fg="#333">{continuation} ├ </span>
+                  <span fg="#444">+{hiddenCount} completed</span>
+                </text>
+              </box>
+            )}
+            {visible.map((step, i) => {
+              const stepIcon = TOOL_ICONS[step.toolName] ?? "\uF0AD";
+              const stepColor = TOOL_ICON_COLORS[step.toolName] ?? "#666";
+              const stepLabel = TOOL_LABELS[step.toolName] ?? step.toolName;
+              const stepStaticCategory = TOOL_CATEGORIES[step.toolName];
+              const stepHasSplit = !!(
+                step.backend &&
+                stepStaticCategory &&
+                step.backend !== stepStaticCategory
+              );
+              const stepCategory = stepHasSplit
+                ? stepStaticCategory
+                : (step.backend ?? stepStaticCategory);
+              const stepBackendTag = stepHasSplit ? step.backend : null;
+              const stepCatColor =
+                (stepStaticCategory ? CATEGORY_COLORS[stepStaticCategory as ToolCategory] : null) ??
+                (step.backend
+                  ? (CATEGORY_COLORS[step.backend as ToolCategory] ?? "#888")
+                  : undefined) ??
+                "#888";
+              const stepBackendColor = stepBackendTag
+                ? (CATEGORY_COLORS[stepBackendTag as ToolCategory] ?? "#888")
+                : undefined;
+              const stepDone = step.state !== "running";
+              const stepLast = i === visible.length - 1 && !showThinking;
+              const stepConnector = stepLast ? "└ " : "├ ";
+              const origIdx = childSteps.indexOf(step);
+
+              const cacheIcon = step.cacheState ? CACHE_ICONS[step.cacheState] : "";
+              const cacheColor = step.cacheState ? CACHE_COLORS[step.cacheState] : "";
+              const cacheLabel =
+                step.cacheState === "hit"
+                  ? step.sourceAgentId
+                    ? `from ${step.sourceAgentId}`
+                    : "cached"
+                  : step.cacheState === "wait"
+                    ? step.sourceAgentId
+                      ? `waiting on ${step.sourceAgentId}`
+                      : "waiting"
+                    : "";
+
+              return (
+                <box
+                  key={`${step.toolName}-${String(origIdx)}`}
+                  height={1}
+                  flexShrink={0}
+                  marginLeft={3}
+                >
+                  <text truncate>
+                    <span fg="#333">
+                      {continuation}
+                      {"  "}
+                      {stepConnector}
+                    </span>
+                    {step.cacheState === "wait" ? (
+                      <Spinner color={CACHE_COLORS.wait} />
+                    ) : step.state === "running" ? (
+                      <Spinner color="#666" />
+                    ) : step.state === "done" ? (
+                      <span fg="#2d5">✓</span>
+                    ) : (
+                      <span fg="#f44">✗</span>
+                    )}
+                    <span fg={stepDone ? "#444" : stepColor}> {stepIcon} </span>
+                    {stepCategory ? (
+                      <span fg={stepDone ? "#333" : stepCatColor}>[{stepCategory}]</span>
+                    ) : null}
+                    {stepBackendTag ? (
+                      <span fg={stepDone ? "#333" : stepBackendColor}>
+                        [{backendLabel(stepBackendTag)}]{" "}
+                      </span>
+                    ) : stepCategory ? (
+                      <span> </span>
+                    ) : null}
+                    <span fg={stepDone ? "#444" : "#888"}>{stepLabel}</span>
+                    {step.args ? <span fg={stepDone ? "#333" : "#666"}> {step.args}</span> : null}
+                    {cacheIcon ? (
+                      <span fg={cacheColor}>
+                        {" "}
+                        {cacheIcon} {cacheLabel}
+                      </span>
+                    ) : null}
+                  </text>
+                </box>
+              );
+            })}
+            {showThinking && (
+              <box height={1} flexShrink={0} marginLeft={3}>
+                <text truncate>
+                  <span fg="#333">
+                    {continuation}
+                    {"  "}└{" "}
+                  </span>
+                  <Spinner color="#555" />
+                  <span fg="#555"> thinking...</span>
+                </text>
+              </box>
+            )}
+          </>
         );
-      })}
+      })()}
     </>
   );
 }
 
-// ─── Regular Tool Call Row ───
-function ToolRow({ tc, seconds }: { tc: LiveToolCall; seconds?: number }) {
-  const isSubagent = SUBAGENT_NAMES.has(tc.toolName);
-  // Detect multi-agent dispatch (more than 1 task in args)
-  const isMultiAgent = useMemo(() => {
-    if (tc.toolName !== "dispatch" || !tc.args) return false;
-    try {
-      const parsed = JSON.parse(tc.args);
-      return Array.isArray(parsed.tasks) && parsed.tasks.length > 1;
-    } catch {
-      return false;
-    }
-  }, [tc.toolName, tc.args]);
-  const childSteps = useSubagentSteps(
-    isSubagent && !isMultiAgent && tc.state === "running" ? tc.id : null,
-  );
-  const multiAgentChildSteps = useSubagentSteps(
-    isMultiAgent && tc.state === "running" ? tc.id : null,
-  );
-  const multiProgress = useMultiAgentProgress(
-    isMultiAgent && tc.state === "running" ? tc.id : null,
-  );
-
-  const icon = TOOL_ICONS[tc.toolName] ?? "\uF0AD"; // wrench fallback
-  const label = TOOL_LABELS[tc.toolName] ?? tc.toolName;
-  const argStr = formatArgs(tc.toolName, tc.args);
-  const isDone = tc.state !== "running";
-
-  // Parse edit_file args for DiffView when done
-  const editDiff = useMemo(() => {
-    if (tc.toolName !== "edit_file" || tc.state !== "done" || !tc.args) return null;
-    try {
-      const parsed = JSON.parse(tc.args);
-      if (
-        typeof parsed.path === "string" &&
-        typeof parsed.oldString === "string" &&
-        typeof parsed.newString === "string"
-      ) {
-        return {
-          path: parsed.path as string,
-          oldString: parsed.oldString as string,
-          newString: parsed.newString as string,
-        };
+const ToolRow = memo(
+  function ToolRow({
+    tc,
+    seconds,
+    diffStyle = "default",
+  }: {
+    tc: LiveToolCall;
+    seconds?: number;
+    diffStyle?: "default" | "sidebyside" | "compact";
+  }) {
+    const isSubagent = SUBAGENT_NAMES.has(tc.toolName);
+    const multiAgentInfo = useMemo(() => {
+      if (tc.toolName !== "dispatch" || !tc.args) return null;
+      try {
+        const parsed = JSON.parse(tc.args);
+        if (Array.isArray(parsed.tasks) && parsed.tasks.length > 1) {
+          return { totalAgents: parsed.tasks.length as number };
+        }
+      } catch {
+        // partial JSON during streaming
       }
-    } catch {
-      // partial or invalid JSON
-    }
-    return null;
-  }, [tc.toolName, tc.state, tc.args]);
+      return null;
+    }, [tc.toolName, tc.args]);
+    const isMultiAgent = multiAgentInfo !== null;
 
-  // Build suffix
-  let suffix = "";
-  if (tc.state === "running" && seconds != null && seconds > 0) {
+    const dispatchId = isSubagent ? tc.id : null;
+    const allChildSteps = useSubagentSteps(dispatchId, 15);
+    const multiProgress = useMultiAgentProgress(dispatchId, multiAgentInfo?.totalAgents ?? 0);
+    const liveStats = useAgentLiveStats(dispatchId);
+
+    const icon = TOOL_ICONS[tc.toolName] ?? "\uF0AD";
+    const label = TOOL_LABELS[tc.toolName] ?? tc.toolName;
+    const argStr = formatArgs(tc.toolName, tc.args);
+    const isDone = tc.state !== "running";
+
+    const editDiff = useMemo(() => {
+      if (tc.toolName !== "edit_file" || tc.state !== "done" || !tc.args) return null;
+      try {
+        const parsed = JSON.parse(tc.args);
+        if (
+          typeof parsed.path === "string" &&
+          typeof parsed.oldString === "string" &&
+          typeof parsed.newString === "string"
+        ) {
+          return {
+            path: parsed.path as string,
+            oldString: parsed.oldString as string,
+            newString: parsed.newString as string,
+          };
+        }
+      } catch {
+        // partial or invalid JSON
+      }
+      return null;
+    }, [tc.toolName, tc.state, tc.args]);
+
+    let suffix = "";
     if (isMultiAgent && multiProgress) {
       const done = [...multiProgress.agents.values()].filter(
         (a) => a.state === "done" || a.state === "error",
       ).length;
-      suffix = ` ${formatDuration(seconds)} · ${String(done)}/${String(multiProgress.totalAgents)} agents`;
-      if (multiProgress.findingCount > 0) {
-        suffix += ` · ${String(multiProgress.findingCount)} findings`;
+      if (tc.state === "running") {
+        if (seconds != null && seconds > 0) {
+          suffix = ` ${formatDuration(seconds)} · ${String(done)}/${String(multiProgress.totalAgents)} agents`;
+        } else {
+          suffix = ` ${String(done)}/${String(multiProgress.totalAgents)} agents`;
+        }
+        if (multiProgress.findingCount > 0) {
+          suffix += ` · ${String(multiProgress.findingCount)} findings`;
+        }
+      } else if (tc.state === "done") {
+        suffix = ` → ${String(done)}/${String(multiProgress.totalAgents)} agents`;
       }
-    } else {
+    } else if (tc.state === "running" && seconds != null && seconds > 0) {
       suffix = ` ${formatDuration(seconds)}`;
+    } else if (tc.state === "done" && tc.result && !editDiff) {
+      suffix = ` → ${formatResult(tc.toolName, tc.result)}`;
+    } else if (tc.state === "error" && tc.error) {
+      suffix = ` → ${tc.error.slice(0, 50)}`;
     }
-  } else if (tc.state === "done" && tc.result && !editDiff) {
-    suffix = ` → ${formatResult(tc.toolName, tc.result)}`;
-  } else if (tc.state === "error" && tc.error) {
-    suffix = ` → ${tc.error.slice(0, 50)}`;
-  }
 
-  // Check if result indicates success (for DiffView)
-  const editSuccess = useMemo(() => {
-    if (!editDiff || !tc.result) return false;
-    try {
-      const parsed = JSON.parse(tc.result);
-      return parsed.success === true;
-    } catch {
-      return false;
-    }
-  }, [editDiff, tc.result]);
+    const editSuccess = useMemo(() => {
+      if (!editDiff || !tc.result) return false;
+      try {
+        const parsed = JSON.parse(tc.result);
+        return parsed.success === true;
+      } catch {
+        return false;
+      }
+    }, [editDiff, tc.result]);
 
-  const editError = useMemo(() => {
-    if (!editDiff || !tc.result) return undefined;
-    try {
-      const parsed = JSON.parse(tc.result);
-      if (!parsed.success && parsed.error) return parsed.error as string;
-    } catch {
-      // ignore
-    }
-    return undefined;
-  }, [editDiff, tc.result]);
+    const editError = useMemo(() => {
+      if (!editDiff || !tc.result) return undefined;
+      try {
+        const parsed = JSON.parse(tc.result);
+        if (!parsed.success && parsed.error) return parsed.error as string;
+      } catch {
+        // ignore
+      }
+      return undefined;
+    }, [editDiff, tc.result]);
 
-  const iconColor = TOOL_ICON_COLORS[tc.toolName] ?? "#888";
-  const category = TOOL_CATEGORIES[tc.toolName];
-  const categoryColor = category ? CATEGORY_COLORS[category] : undefined;
+    const iconColor = TOOL_ICON_COLORS[tc.toolName] ?? "#888";
+    const staticCategory = TOOL_CATEGORIES[tc.toolName];
+    const backendCategory = useMemo(() => {
+      if (tc.result) {
+        try {
+          const parsed = JSON.parse(tc.result);
+          if (parsed.backend && typeof parsed.backend === "string") {
+            return parsed.backend as string;
+          }
+        } catch {
+          // not JSON
+        }
+      }
+      return tc.backend ?? null;
+    }, [tc.result, tc.backend]);
+    const hasSplit = !!(backendCategory && staticCategory && backendCategory !== staticCategory);
+    const category = hasSplit ? staticCategory : (backendCategory ?? staticCategory);
+    const backendTag = hasSplit ? backendCategory : null;
+    const categoryColor =
+      (staticCategory ? CATEGORY_COLORS[staticCategory as ToolCategory] : null) ??
+      (backendCategory
+        ? (CATEGORY_COLORS[backendCategory as ToolCategory] ?? "#888")
+        : undefined) ??
+      "#888";
+    const backendColor = backendTag
+      ? (CATEGORY_COLORS[backendTag as ToolCategory] ?? "#888")
+      : undefined;
 
-  return (
-    <Box flexDirection="column">
-      <Box height={1} flexShrink={0}>
-        <Text wrap="truncate">
-          <StatusIcon state={tc.state} />
-          <Text color={isDone ? COLORS.textDone : iconColor}> {icon} </Text>
-          {category ? <Text color={isDone ? "#444" : categoryColor}>[{category}] </Text> : null}
-          <Text color={isDone ? COLORS.textDone : COLORS.toolNameActive} bold={!isDone}>
-            {label}
-          </Text>
-          {argStr ? (
-            <Text color={isDone ? COLORS.textDone : COLORS.argsActive}> {argStr}</Text>
-          ) : null}
-          {suffix ? (
-            <Text color={tc.state === "error" ? COLORS.error : COLORS.textDone}>{suffix}</Text>
-          ) : null}
-        </Text>
-      </Box>
-      {editDiff ? (
-        <Box marginLeft={2}>
-          <DiffView
-            filePath={editDiff.path}
-            oldString={editDiff.oldString}
-            newString={editDiff.newString}
-            success={editSuccess}
-            errorMessage={editError}
-          />
-        </Box>
-      ) : null}
-      {/* Multi-agent: show per-agent progress with nested tool steps */}
-      {isMultiAgent && multiProgress && multiProgress.agents.size > 0 && (
-        <Box flexDirection="column">
-          {[...multiProgress.agents.entries()].map(([agentId, info], idx, arr) => {
-            const agentSteps = multiAgentChildSteps.filter((s) => s.agentId === agentId);
-            return (
-              <MultiAgentChildRow
-                key={agentId}
-                agentId={agentId}
-                info={info}
-                isLast={idx === arr.length - 1}
-                childSteps={agentSteps}
-              />
-            );
-          })}
-        </Box>
-      )}
-      {/* Single subagent: show child steps */}
-      {isSubagent && !isMultiAgent && childSteps.length > 0 && (
-        <Box flexDirection="column">
-          {childSteps.map((step, i) => (
-            <ChildStepRow key={`${step.toolName}-${String(i)}`} step={step} />
-          ))}
-        </Box>
-      )}
-    </Box>
-  );
-}
+    return (
+      <box flexDirection="column">
+        <box height={1} flexShrink={0}>
+          <text truncate>
+            <StatusIcon state={tc.state} />
+            <span fg={isDone ? COLORS.textDone : iconColor}> {icon} </span>
+            {category ? <span fg={isDone ? "#444" : categoryColor}>[{category}]</span> : null}
+            {backendTag ? (
+              <span fg={isDone ? "#444" : backendColor}>[{backendLabel(backendTag)}] </span>
+            ) : category ? (
+              <span> </span>
+            ) : null}
+            <span
+              fg={isDone ? COLORS.textDone : COLORS.toolNameActive}
+              attributes={!isDone ? TextAttributes.BOLD : undefined}
+            >
+              {label}
+            </span>
+            {argStr ? (
+              <span fg={isDone ? COLORS.textDone : COLORS.argsActive}> {argStr}</span>
+            ) : null}
+            {suffix ? (
+              <span fg={tc.state === "error" ? COLORS.error : COLORS.textDone}>{suffix}</span>
+            ) : null}
+          </text>
+        </box>
+        {editDiff ? (
+          <box marginLeft={2}>
+            <DiffView
+              filePath={editDiff.path}
+              oldString={editDiff.oldString}
+              newString={editDiff.newString}
+              success={editSuccess}
+              errorMessage={editError}
+              mode={diffStyle}
+            />
+          </box>
+        ) : null}
+        {isMultiAgent && multiProgress !== null && multiProgress.agents.size > 0 && (
+          <box flexDirection="column" marginLeft={2}>
+            {[...multiProgress.agents.entries()].map(([agentId, info], idx, arr) => {
+              const agentSteps = allChildSteps.filter((s) => s.agentId === agentId);
+              return (
+                <MultiAgentChildRow
+                  key={agentId}
+                  agentId={agentId}
+                  info={info}
+                  isLast={idx === arr.length - 1}
+                  childSteps={agentSteps}
+                  liveStats={liveStats.get(agentId)}
+                />
+              );
+            })}
+          </box>
+        )}
+        {isSubagent && !isMultiAgent && allChildSteps.length > 0 && (
+          <box flexDirection="column">
+            {allChildSteps.slice(-5).map((step, i) => (
+              <ChildStepRow key={`${step.toolName}-${String(i)}`} step={step} />
+            ))}
+          </box>
+        )}
+      </box>
+    );
+  },
+  (prev, next) =>
+    prev.tc.id === next.tc.id &&
+    prev.tc.state === next.tc.state &&
+    prev.tc.args === next.tc.args &&
+    prev.tc.result === next.tc.result &&
+    prev.tc.error === next.tc.error &&
+    prev.tc.backend === next.tc.backend &&
+    prev.seconds === next.seconds &&
+    prev.diffStyle === next.diffStyle,
+);
 
-// ─── Main Display ───
+const QUIET_TOOLS = new Set(["update_plan_step", "ask_user"]);
+
 interface Props {
   calls: LiveToolCall[];
+  verbose?: boolean;
+  diffStyle?: "default" | "sidebyside" | "compact";
 }
 
-export function ToolCallDisplay({ calls }: Props) {
+export const ToolCallDisplay = memo(function ToolCallDisplay({
+  calls,
+  verbose = false,
+  diffStyle = "default",
+}: Props) {
   const elapsed = useElapsedTimers(calls);
 
   if (calls.length === 0) return null;
 
+  const visible = calls.filter((tc) => verbose || !QUIET_TOOLS.has(tc.toolName));
+
   return (
-    <Box flexDirection="column">
-      {calls.map((tc) => {
+    <box flexDirection="column">
+      {visible.map((tc) => {
         const seconds = elapsed.get(tc.id);
-        // Render structured plan view when write_plan completes
-        if (tc.toolName === "write_plan" && tc.state === "done" && tc.args) {
+        if ((tc.toolName === "write_plan" || tc.toolName === "plan") && tc.args) {
           try {
             const plan = JSON.parse(tc.args) as PlanOutput;
-            if (plan.title && plan.steps) {
-              return <StructuredPlanView key={tc.id} plan={plan} />;
+            if (
+              plan.title &&
+              Array.isArray(plan.steps) &&
+              Array.isArray(plan.files) &&
+              Array.isArray(plan.verification)
+            ) {
+              return <StructuredPlanView key={tc.id} plan={plan} result={tc.result} />;
             }
           } catch {
             // Fall through to normal row
           }
         }
-        return <ToolRow key={tc.id} tc={tc} seconds={seconds} />;
+        return <ToolRow key={tc.id} tc={tc} seconds={seconds} diffStyle={diffStyle} />;
       })}
-    </Box>
+    </box>
   );
-}
+});

@@ -1,11 +1,11 @@
-import { Box, Text, useInput } from "ink";
-import TextInput from "ink-text-input";
+import { TextAttributes } from "@opentui/core";
+import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useCallback, useEffect, useState } from "react";
 import { getGitDiff, getGitStatus, gitAdd, gitCommit } from "../core/git/status.js";
 
 import { POPUP_BG, POPUP_HL, PopupRow } from "./shared.js";
 
-const POPUP_WIDTH = 56;
+const MAX_POPUP_WIDTH = 56;
 
 interface Props {
   visible: boolean;
@@ -17,6 +17,9 @@ interface Props {
 }
 
 export function GitCommitModal({ visible, cwd, coAuthor, onClose, onCommitted, onRefresh }: Props) {
+  const { width: termCols } = useTerminalDimensions();
+  const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.7));
+  const innerW = popupWidth - 2;
   const [message, setMessage] = useState("");
   const [stagedFiles, setStagedFiles] = useState<string[]>([]);
   const [modifiedFiles, setModifiedFiles] = useState<string[]>([]);
@@ -79,27 +82,25 @@ export function GitCommitModal({ visible, cwd, coAuthor, onClose, onCommitted, o
     onClose,
   ]);
 
-  useInput(
-    (_input, key) => {
-      if (key.escape) {
-        onClose();
-        return;
-      }
-      if (key.tab) {
-        setStageAll((prev) => !prev);
-        return;
-      }
-    },
-    { isActive: visible },
-  );
+  useKeyboard((evt) => {
+    if (!visible) return;
+
+    if (evt.name === "escape") {
+      onClose();
+      return;
+    }
+    if (evt.name === "tab") {
+      setStageAll((prev) => !prev);
+      return;
+    }
+  });
 
   if (!visible) return null;
 
-  const innerW = POPUP_WIDTH - 2;
   const totalChanges = stagedFiles.length + modifiedFiles.length + untrackedFiles.length;
 
   return (
-    <Box
+    <box
       position="absolute"
       flexDirection="column"
       alignItems="center"
@@ -107,105 +108,111 @@ export function GitCommitModal({ visible, cwd, coAuthor, onClose, onCommitted, o
       width="100%"
       height="100%"
     >
-      <Box flexDirection="column" borderStyle="round" borderColor="#FF8C00" width={POPUP_WIDTH}>
+      <box
+        flexDirection="column"
+        borderStyle="rounded"
+        border={true}
+        borderColor="#FF8C00"
+        width={popupWidth}
+      >
         <PopupRow w={innerW}>
-          <Text color="white" bold backgroundColor={POPUP_BG}>
+          <text fg="white" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
             {"󰊢"} Git Commit
-          </Text>
+          </text>
         </PopupRow>
         <PopupRow w={innerW}>
-          <Text color="#333" backgroundColor={POPUP_BG}>
+          <text fg="#333" bg={POPUP_BG}>
             {"─".repeat(innerW - 4)}
-          </Text>
+          </text>
         </PopupRow>
 
-        {/* Staged files */}
         {stagedFiles.length > 0 && (
           <PopupRow w={innerW}>
-            <Text color="#2d5" backgroundColor={POPUP_BG}>
+            <text fg="#2d5" bg={POPUP_BG}>
               ● {String(stagedFiles.length)} staged
-            </Text>
+            </text>
           </PopupRow>
         )}
         {modifiedFiles.length > 0 && (
           <PopupRow w={innerW}>
-            <Text color="#FF8C00" backgroundColor={POPUP_BG}>
+            <text fg="#FF8C00" bg={POPUP_BG}>
               ● {String(modifiedFiles.length)} modified
-            </Text>
+            </text>
           </PopupRow>
         )}
         {untrackedFiles.length > 0 && (
           <PopupRow w={innerW}>
-            <Text color="#f44" backgroundColor={POPUP_BG}>
+            <text fg="#f44" bg={POPUP_BG}>
               ● {String(untrackedFiles.length)} untracked
-            </Text>
+            </text>
           </PopupRow>
         )}
         {totalChanges === 0 && (
           <PopupRow w={innerW}>
-            <Text color="#555" backgroundColor={POPUP_BG}>
+            <text fg="#555" bg={POPUP_BG}>
               No changes to commit
-            </Text>
+            </text>
           </PopupRow>
         )}
 
         <PopupRow w={innerW}>
-          <Text color="#555" backgroundColor={POPUP_BG}>
+          <text fg="#555" bg={POPUP_BG}>
             {diffSummary}
-          </Text>
+          </text>
         </PopupRow>
 
-        {/* Stage all toggle */}
         {(modifiedFiles.length > 0 || untrackedFiles.length > 0) && (
           <PopupRow w={innerW} bg={stageAll ? POPUP_HL : POPUP_BG}>
-            <Text
-              color={stageAll ? "#FF0040" : "#666"}
-              backgroundColor={stageAll ? POPUP_HL : POPUP_BG}
-            >
+            <text fg={stageAll ? "#FF0040" : "#666"} bg={stageAll ? POPUP_HL : POPUP_BG}>
               [Tab] {stageAll ? "✓" : "○"} Stage all changes
-            </Text>
+            </text>
           </PopupRow>
         )}
 
         <PopupRow w={innerW}>
-          <Text>{""}</Text>
+          <text>{""}</text>
         </PopupRow>
 
-        {/* Commit message input */}
         <PopupRow w={innerW}>
-          <Text color="#aaa" backgroundColor={POPUP_BG}>
+          <text fg="#aaa" bg={POPUP_BG}>
             Message:
-          </Text>
+          </text>
         </PopupRow>
-        <Box paddingX={2}>
-          <Box borderStyle="round" borderColor="#6A0DAD" paddingX={1} width={innerW - 2}>
-            <TextInput
+        <box paddingX={2}>
+          <box
+            borderStyle="rounded"
+            border={true}
+            borderColor="#6A0DAD"
+            paddingX={1}
+            width={innerW - 2}
+          >
+            <input
               value={message}
-              onChange={setMessage}
+              onInput={setMessage}
               onSubmit={handleCommit}
               placeholder="describe your changes..."
-              focus={visible}
+              focused={visible}
             />
-          </Box>
-        </Box>
+          </box>
+        </box>
 
         {error && (
           <PopupRow w={innerW}>
-            <Text color="#f44" backgroundColor={POPUP_BG}>
+            <text fg="#f44" bg={POPUP_BG}>
               {error}
-            </Text>
+            </text>
           </PopupRow>
         )}
 
         <PopupRow w={innerW}>
-          <Text>{""}</Text>
+          <text>{""}</text>
         </PopupRow>
         <PopupRow w={innerW}>
-          <Text color="#555" backgroundColor={POPUP_BG}>
-            ⏎ commit tab stage-all esc cancel
-          </Text>
+          <text fg="#555" bg={POPUP_BG}>
+            {"⏎"} commit | tab stage-all | esc cancel
+          </text>
         </PopupRow>
-      </Box>
-    </Box>
+      </box>
+    </box>
   );
 }

@@ -12,7 +12,9 @@ import type {
   SourceLocation,
   SymbolInfo,
   SymbolKind,
+  TypeHierarchyResult,
   TypeInfo,
+  UnusedItem,
 } from "../types.js";
 
 // Lazy import to avoid loading ts-morph until needed
@@ -31,12 +33,13 @@ async function getTsMorph(): Promise<TsMorphModule> {
 }
 
 /**
- * ts-morph based backend (Tier 1) for TypeScript/JavaScript.
+ * ts-morph based backend (Tier 2) for TypeScript/JavaScript.
  * Full semantic analysis: definitions, references, diagnostics, rename, etc.
+ * Falls back here when LSP is unavailable.
  */
 export class TsMorphBackend implements IntelligenceBackend {
   readonly name = "ts-morph";
-  readonly tier = 1;
+  readonly tier = 2;
   private project: Project | null = null;
   private cwd = "";
 
@@ -517,6 +520,7 @@ export class TsMorphBackend implements IntelligenceBackend {
     const sourceFile = await this.getSourceFile(file);
     if (!sourceFile) return null;
 
+    const ts = await getTsMorph();
     const fullText = sourceFile.getFullText();
     const lines = fullText.split("\n");
     const startIdx = Math.max(0, startLine - 1);
@@ -524,16 +528,55 @@ export class TsMorphBackend implements IntelligenceBackend {
 
     const extractedLines = lines.slice(startIdx, endIdx + 1);
     const extractedCode = extractedLines.join("\n");
-
-    // Simple extraction: wrap in function and replace with call
     const indent = (extractedLines[0] ?? "").match(/^(\s*)/)?.[1] ?? "";
-    const newFunc = `\nfunction ${functionName}() {\n${extractedCode}\n}\n`;
-    const replacement = `${indent}${functionName}();`;
+
+    // Analyze the extracted range to find referenced outer-scope variables
+    const startPos = sourceFile.compilerNode.getPositionOfLineAndCharacter(startIdx, 0);
+    const endPos = sourceFile.compilerNode.getPositionOfLineAndCharacter(
+      endIdx,
+      (lines[endIdx] ?? "").length,
+    );
+
+    const params: string[] = [];
+    const paramNames = new Set<string>();
+
+    // Walk descendants in the range and find identifiers referencing outer scope
+    sourceFile.forEachDescendant((node) => {
+      if (!ts.Node.isIdentifier(node)) return;
+      const nodeStart = node.getStart();
+      if (nodeStart < startPos || nodeStart > endPos) return;
+
+      const name = node.getText();
+      if (paramNames.has(name)) return;
+
+      // Check if this identifier is defined outside the range
+      const defs = node.getDefinitionNodes();
+      for (const def of defs) {
+        const defStart = def.getStartLineNumber();
+        if (def.getSourceFile() === sourceFile && (defStart < startLine || defStart > endLine)) {
+          // It's an outer variable — add as parameter
+          const nodeType = node.getType();
+          const typeText = nodeType.getText(node);
+          params.push(`${name}: ${typeText}`);
+          paramNames.add(name);
+          break;
+        }
+      }
+    });
+
+    // Detect return value from last expression
+    const lastLine = extractedLines[extractedLines.length - 1]?.trim() ?? "";
+    const hasReturn = lastLine.startsWith("return ");
+    const paramList = params.join(", ");
+    const argList = [...paramNames].join(", ");
+
+    const newFunc = `\nfunction ${functionName}(${paramList}) {\n${extractedCode}\n}\n`;
+    const callExpr = hasReturn
+      ? `${indent}return ${functionName}(${argList});`
+      : `${indent}${functionName}(${argList});`;
 
     const newLines = [...lines];
-    newLines.splice(startIdx, endIdx - startIdx + 1, replacement);
-
-    // Insert function before the containing function/at end
+    newLines.splice(startIdx, endIdx - startIdx + 1, callExpr);
     const newContent = `${newLines.join("\n")}\n${newFunc}`;
 
     return {
@@ -544,7 +587,7 @@ export class TsMorphBackend implements IntelligenceBackend {
           newContent,
         },
       ],
-      description: `Extracted lines ${String(startLine)}-${String(endLine)} into function '${functionName}'`,
+      description: `Extracted lines ${String(startLine)}-${String(endLine)} into function '${functionName}(${paramList})'`,
     };
   }
 
@@ -584,6 +627,215 @@ export class TsMorphBackend implements IntelligenceBackend {
       ],
       description: `Extracted lines ${String(startLine)}-${String(endLine)} into variable '${variableName}'`,
     };
+  }
+
+  // ─── Implementation ───
+
+  async findImplementation(
+    file: string,
+    symbol: string,
+    line?: number,
+    column?: number,
+  ): Promise<SourceLocation[] | null> {
+    const sourceFile = await this.getSourceFile(file);
+    if (!sourceFile) return null;
+
+    const node = this.findNode(sourceFile, symbol, line, column);
+    if (!node) return null;
+
+    const ts = await getTsMorph();
+    if (!ts.Node.isIdentifier(node)) return null;
+
+    const impls = node.getImplementations();
+    if (impls.length === 0) return null;
+
+    return impls.map((impl) => {
+      const sf = impl.getSourceFile();
+      const pos = sf.getLineAndColumnAtPos(impl.getTextSpan().getStart());
+      return {
+        file: sf.getFilePath(),
+        line: pos.line,
+        column: pos.column,
+      };
+    });
+  }
+
+  // ─── Type Hierarchy ───
+
+  async getTypeHierarchy(
+    file: string,
+    symbol: string,
+    line?: number,
+    column?: number,
+  ): Promise<TypeHierarchyResult | null> {
+    const sourceFile = await this.getSourceFile(file);
+    if (!sourceFile) return null;
+
+    const node = this.findNode(sourceFile, symbol, line, column);
+    if (!node) return null;
+
+    const ts = await getTsMorph();
+    const parent = ts.Node.isIdentifier(node) ? node.getParent() : node;
+    if (!parent) return null;
+
+    const item = {
+      name: symbol,
+      kind: "function" as SourceLocation["file"] extends string ? "class" : "unknown" as never,
+      file: resolve(file),
+      line: node.getStartLineNumber(),
+    };
+
+    const supertypes: TypeHierarchyResult["supertypes"] = [];
+    const subtypes: TypeHierarchyResult["subtypes"] = [];
+
+    if (ts.Node.isClassDeclaration(parent)) {
+      item.kind = "class" as never;
+      // Supertypes
+      const baseClass = parent.getBaseClass();
+      if (baseClass) {
+        supertypes.push({
+          name: baseClass.getName() ?? "anonymous",
+          kind: "class",
+          file: baseClass.getSourceFile().getFilePath(),
+          line: baseClass.getStartLineNumber(),
+        });
+      }
+      for (const impl of parent.getImplements()) {
+        const typeNode = impl.getExpression();
+        const defs = ts.Node.isIdentifier(typeNode) ? typeNode.getDefinitionNodes() : [];
+        for (const def of defs) {
+          supertypes.push({
+            name: typeNode.getText(),
+            kind: "interface",
+            file: def.getSourceFile().getFilePath(),
+            line: def.getStartLineNumber(),
+          });
+        }
+      }
+      // Subtypes — find classes that extend this one
+      const refs = parent.getNameNode()?.findReferencesAsNodes() ?? [];
+      for (const ref of refs) {
+        const refParent = ref.getParent();
+        if (refParent && ts.Node.isHeritageClause(refParent.getParent() ?? refParent)) {
+          const classDecl = refParent.getParent()?.getParent();
+          if (classDecl && ts.Node.isClassDeclaration(classDecl)) {
+            subtypes.push({
+              name: classDecl.getName() ?? "anonymous",
+              kind: "class",
+              file: classDecl.getSourceFile().getFilePath(),
+              line: classDecl.getStartLineNumber(),
+            });
+          }
+        }
+      }
+    } else if (ts.Node.isInterfaceDeclaration(parent)) {
+      item.kind = "interface" as never;
+      // Supertypes
+      for (const ext of parent.getExtends()) {
+        const typeNode = ext.getExpression();
+        const defs = ts.Node.isIdentifier(typeNode) ? typeNode.getDefinitionNodes() : [];
+        for (const def of defs) {
+          supertypes.push({
+            name: typeNode.getText(),
+            kind: "interface",
+            file: def.getSourceFile().getFilePath(),
+            line: def.getStartLineNumber(),
+          });
+        }
+      }
+      // Subtypes — find implementors
+      const refs = parent.getNameNode().findReferencesAsNodes();
+      for (const ref of refs) {
+        const refParent = ref.getParent();
+        if (refParent && ts.Node.isHeritageClause(refParent.getParent() ?? refParent)) {
+          const container = refParent.getParent()?.getParent();
+          if (container && ts.Node.isClassDeclaration(container)) {
+            subtypes.push({
+              name: container.getName() ?? "anonymous",
+              kind: "class",
+              file: container.getSourceFile().getFilePath(),
+              line: container.getStartLineNumber(),
+            });
+          }
+        }
+      }
+    } else {
+      return null;
+    }
+
+    return { item, supertypes, subtypes };
+  }
+
+  // ─── Unused Detection ───
+
+  async findUnused(file: string): Promise<UnusedItem[] | null> {
+    const sourceFile = await this.getSourceFile(file);
+    if (!sourceFile) return null;
+
+    const ts = await getTsMorph();
+    const unused: UnusedItem[] = [];
+
+    // Check unused imports
+    for (const imp of sourceFile.getImportDeclarations()) {
+      const defaultImport = imp.getDefaultImport();
+      if (defaultImport) {
+        const refs = defaultImport.findReferencesAsNodes();
+        // Only the declaration itself = unused
+        if (refs.length <= 1) {
+          unused.push({
+            name: defaultImport.getText(),
+            kind: "import",
+            file: resolve(file),
+            line: imp.getStartLineNumber(),
+          });
+        }
+      }
+      for (const named of imp.getNamedImports()) {
+        const nameNode = named.getAliasNode();
+        const effectiveNode = nameNode ?? named.getNameNode();
+        const refs =
+          "findReferencesAsNodes" in effectiveNode
+            ? (effectiveNode as import("ts-morph").Identifier).findReferencesAsNodes()
+            : [];
+        if (refs.length <= 1) {
+          unused.push({
+            name: named.getName(),
+            kind: "import",
+            file: resolve(file),
+            line: imp.getStartLineNumber(),
+          });
+        }
+      }
+    }
+
+    // Check unused exports — see if exported symbol is imported anywhere
+    const project = this.getProject();
+    if (project) {
+      for (const [name, decls] of sourceFile.getExportedDeclarations()) {
+        if (name === "default") continue;
+        const decl = decls[0];
+        if (!decl) continue;
+        const nameNode = ts.Node.isIdentifier(decl)
+          ? decl
+          : "getNameNode" in decl && typeof decl.getNameNode === "function"
+            ? (decl.getNameNode() as Node | undefined)
+            : null;
+        if (!nameNode || !ts.Node.isIdentifier(nameNode)) continue;
+
+        const refs = nameNode.findReferencesAsNodes();
+        const externalRefs = refs.filter((r) => r.getSourceFile() !== sourceFile);
+        if (externalRefs.length === 0) {
+          unused.push({
+            name,
+            kind: "export",
+            file: resolve(file),
+            line: decl.getStartLineNumber(),
+          });
+        }
+      }
+    }
+
+    return unused.length > 0 ? unused : null;
   }
 
   // ─── Private helpers ───

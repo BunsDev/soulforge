@@ -1,10 +1,6 @@
+import { readFileSync } from "node:fs";
 import type { NvimInstance } from "./neovim.js";
 
-/**
- * Module-level holder so tools (outside React) can access neovim.
- * The hook calls setNvimInstance() on ready/cleanup;
- * tools call getNvimInstance() to interact with the editor.
- */
 let instance: NvimInstance | null = null;
 
 export function setNvimInstance(nvim: NvimInstance | null): void {
@@ -15,11 +11,38 @@ export function getNvimInstance(): NvimInstance | null {
   return instance;
 }
 
-/**
- * Wait for the neovim instance to become available.
- * Polls every 100ms up to timeoutMs (default 5s).
- * Returns the instance or null if timed out.
- */
+export async function readBufferContent(filePath: string): Promise<string> {
+  const nvim = instance as
+    | (NvimInstance & {
+        api: { executeLua: (code: string, args: unknown[]) => Promise<unknown> };
+      })
+    | null;
+  if (nvim) {
+    try {
+      const result = await nvim.api.executeLua(
+        `
+        local path = select(1, ...)
+        for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+          if vim.api.nvim_buf_is_loaded(buf) then
+            local name = vim.api.nvim_buf_get_name(buf)
+            if name == path then
+              local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+              return table.concat(lines, "\\n")
+            end
+          end
+        end
+        return nil
+        `,
+        [filePath],
+      );
+      if (typeof result === "string") return result;
+    } catch {
+      // Fall through to disk read
+    }
+  }
+  return readFileSync(filePath, "utf-8");
+}
+
 export function waitForNvim(timeoutMs = 5000): Promise<NvimInstance | null> {
   if (instance) return Promise.resolve(instance);
   return new Promise((resolve) => {

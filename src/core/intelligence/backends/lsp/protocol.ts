@@ -76,6 +76,34 @@ export interface LspTextDocumentEdit {
   edits: LspTextEdit[];
 }
 
+/** LSP Code Action */
+export interface LspCodeAction {
+  title: string;
+  kind?: string;
+  diagnostics?: LspDiagnostic[];
+  isPreferred?: boolean;
+  edit?: LspWorkspaceEdit;
+  command?: { title: string; command: string; arguments?: unknown[] };
+}
+
+/** LSP Call Hierarchy Item */
+export interface LspCallHierarchyItem {
+  name: string;
+  kind: number;
+  uri: string;
+  range: LspRange;
+  selectionRange: LspRange;
+}
+
+/** LSP Type Hierarchy Item */
+export interface LspTypeHierarchyItem {
+  name: string;
+  kind: number;
+  uri: string;
+  range: LspRange;
+  selectionRange: LspRange;
+}
+
 // ─── JSON-RPC Types ───
 
 interface JsonRpcRequest {

@@ -8,6 +8,25 @@ const NO_EDITOR: ToolResult = {
   error: "Editor is not open",
 };
 
+async function checkCurrentBufferForbidden(
+  nvim: Awaited<ReturnType<typeof requireNvim>>,
+): Promise<ToolResult | null> {
+  if (!nvim) return null;
+  try {
+    const bufName = await nvim.api.request("nvim_buf_get_name", [0]);
+    if (typeof bufName === "string" && bufName) {
+      const blocked = isForbidden(bufName);
+      if (blocked) {
+        const msg = `Access denied: current buffer "${bufName}" matches forbidden pattern "${blocked}".`;
+        return { success: false, output: msg, error: msg };
+      }
+    }
+  } catch {
+    // Could not determine buffer name — allow
+  }
+  return null;
+}
+
 /** Safely parse JSON returned by executeLua. Handles nil, non-string, trailing whitespace, etc. */
 function safeJsonParse<T>(raw: unknown, fallback: T): T {
   if (raw == null || raw === "") return fallback;
@@ -44,15 +63,8 @@ export const editorReadTool = {
     const nvim = await requireNvim();
     if (!nvim) return NO_EDITOR;
     try {
-      // Check if the current buffer is a forbidden file
-      const bufName = await nvim.api.request("nvim_buf_get_name", [0]);
-      if (typeof bufName === "string" && bufName) {
-        const blocked = isForbidden(bufName);
-        if (blocked) {
-          const msg = `Access denied: current buffer "${bufName}" matches forbidden pattern "${blocked}".`;
-          return { success: false, output: msg, error: msg };
-        }
-      }
+      const forbidden = await checkCurrentBufferForbidden(nvim);
+      if (forbidden) return forbidden;
       const buffer = await nvim.api.buffer;
       const start = args.startLine != null ? args.startLine - 1 : 0;
       const end = args.endLine ?? -1;
@@ -84,6 +96,8 @@ export const editorEditTool = {
     const nvim = await requireNvim();
     if (!nvim) return NO_EDITOR;
     try {
+      const forbidden = await checkCurrentBufferForbidden(nvim);
+      if (forbidden) return forbidden;
       const buffer = await nvim.api.buffer;
       const replacementLines = args.replacement.split("\n");
       await buffer.setLines(replacementLines, {
@@ -91,10 +105,11 @@ export const editorEditTool = {
         end: args.endLine,
         strictIndexing: false,
       });
+      await nvim.api.command("write");
       const count = replacementLines.length;
       return {
         success: true,
-        output: `Replaced lines ${String(args.startLine)}-${String(args.endLine)} with ${String(count)} line(s)`,
+        output: `Replaced lines ${String(args.startLine)}-${String(args.endLine)} with ${String(count)} line(s) (saved)`,
       };
     } catch (err: unknown) {
       return { success: false, output: String(err), error: String(err) };
@@ -125,13 +140,16 @@ export const editorNavigateTool = {
           const msg = `Access denied: "${args.file}" matches forbidden pattern "${blocked}". This file is blocked for security.`;
           return { success: false, output: msg, error: msg };
         }
-        await nvim.api.command(`edit ${args.file}`);
+        await nvim.api.executeLua("vim.cmd.edit(vim.fn.fnameescape(...))", [args.file]);
       }
       if (args.line != null) {
-        await nvim.api.command(`normal! ${String(args.line)}G${String(args.col ?? 1)}|`);
+        await nvim.api.executeLua(
+          "local l, c = ...; vim.api.nvim_win_set_cursor(0, {l, math.max(0, c - 1)})",
+          [args.line, args.col ?? 1],
+        );
       }
       if (args.search) {
-        await nvim.api.command(`/${args.search}`);
+        await nvim.api.executeLua("vim.fn.search(...)", [args.search]);
       }
       const bufName = await nvim.api.request("nvim_buf_get_name", [0]);
       const window = await nvim.api.window;
@@ -156,6 +174,8 @@ export const editorDiagnosticsTool = {
     const nvim = await requireNvim();
     if (!nvim) return NO_EDITOR;
     try {
+      const forbidden = await checkCurrentBufferForbidden(nvim);
+      if (forbidden) return forbidden;
       const lua = `
         local diags = vim.diagnostic.get(0)
         if #diags == 0 then return '[]' end
@@ -209,6 +229,8 @@ export const editorSymbolsTool = {
     const nvim = await requireNvim();
     if (!nvim) return NO_EDITOR;
     try {
+      const forbidden = await checkCurrentBufferForbidden(nvim);
+      if (forbidden) return forbidden;
       const lua = `
         local clients = vim.lsp.get_clients({ bufnr = 0 })
         if #clients == 0 then return '__NO_LSP__' end
@@ -269,6 +291,8 @@ export const editorReferencesTool = {
     const nvim = await requireNvim();
     if (!nvim) return NO_EDITOR;
     try {
+      const forbidden = await checkCurrentBufferForbidden(nvim);
+      if (forbidden) return forbidden;
       const line = args.line ?? 0;
       const col = args.col ?? 0;
       const lua = `
@@ -338,6 +362,8 @@ export const editorDefinitionTool = {
     const nvim = await requireNvim();
     if (!nvim) return NO_EDITOR;
     try {
+      const forbidden = await checkCurrentBufferForbidden(nvim);
+      if (forbidden) return forbidden;
       const line = args.line ?? 0;
       const col = args.col ?? 0;
       const shouldJump = args.jump !== false;
@@ -415,6 +441,8 @@ export const editorActionsTool = {
     const nvim = await requireNvim();
     if (!nvim) return NO_EDITOR;
     try {
+      const forbidden = await checkCurrentBufferForbidden(nvim);
+      if (forbidden) return forbidden;
       const line = args.line ?? 0;
       const col = args.col ?? 0;
       const applyIdx = args.apply ?? -1;
@@ -506,6 +534,8 @@ export const editorRenameTool = {
     const nvim = await requireNvim();
     if (!nvim) return NO_EDITOR;
     try {
+      const forbidden = await checkCurrentBufferForbidden(nvim);
+      if (forbidden) return forbidden;
       const line = args.line ?? 0;
       const col = args.col ?? 0;
       const newName = args.newName;
@@ -518,7 +548,7 @@ export const editorRenameTool = {
         end
         local pos = vim.api.nvim_win_get_cursor(0)
         local params = vim.lsp.util.make_position_params(0)
-        params.newName = "${newName.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"
+        params.newName = select(1, ...)
         local results = vim.lsp.buf_request_sync(0, 'textDocument/rename', params, 5000)
         if not results then return '__FAIL__' end
         local changed = 0
@@ -540,7 +570,7 @@ export const editorRenameTool = {
         vim.cmd('wall')
         return tostring(changed)
       `;
-      const result = await nvim.api.executeLua(lua, []);
+      const result = await nvim.api.executeLua(lua, [newName]);
       if (result === "__NO_LSP__") {
         return { success: false, output: "LSP not active", error: "LSP not active" };
       }
@@ -571,6 +601,8 @@ export const editorLspStatusTool = {
     const nvim = await requireNvim();
     if (!nvim) return NO_EDITOR;
     try {
+      const forbidden = await checkCurrentBufferForbidden(nvim);
+      if (forbidden) return forbidden;
       const lua = `
         local clients = vim.lsp.get_clients({ bufnr = 0 })
         if #clients == 0 then return '__NO_LSP__' end
@@ -631,6 +663,8 @@ export const editorFormatTool = {
     const nvim = await requireNvim();
     if (!nvim) return NO_EDITOR;
     try {
+      const forbidden = await checkCurrentBufferForbidden(nvim);
+      if (forbidden) return forbidden;
       const hasRange = args.startLine != null && args.endLine != null;
       const startIdx = hasRange ? (args.startLine as number) - 1 : 0;
       const endIdx = hasRange ? (args.endLine as number) : 0;
@@ -688,6 +722,8 @@ export const editorHoverTool = {
     const nvim = await requireNvim();
     if (!nvim) return NO_EDITOR;
     try {
+      const forbidden = await checkCurrentBufferForbidden(nvim);
+      if (forbidden) return forbidden;
       const line = args.line ?? 0;
       const col = args.col ?? 0;
       const lua = `

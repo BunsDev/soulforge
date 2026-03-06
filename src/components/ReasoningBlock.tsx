@@ -1,9 +1,12 @@
-import { Box, Text } from "ink";
-import { useEffect, useState } from "react";
+import { icon } from "../core/icons.js";
+import { SPINNER_FRAMES, useSpinnerFrame } from "./shared.js";
 
-const BRAIN_ICON = "󰘦"; // nf-md-head_cog U+F0626
-const DIMMED = "#555";
-const RAIL_COLOR = "#444";
+const brainIcon = () => icon("brain");
+const BORDER = "#333";
+const BORDER_ACTIVE = "#3a3050";
+const TEXT_COLOR = "#444";
+const MUTED = "#333";
+const DIMMED = "#3a3a3a";
 
 interface Props {
   content: string;
@@ -11,79 +14,61 @@ interface Props {
   isStreaming?: boolean;
 }
 
-const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-
 function ThinkingSpinner() {
-  const [frame, setFrame] = useState(0);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setFrame((f) => (f + 1) % SPINNER.length);
-    }, 80);
-    return () => clearInterval(timer);
-  }, []);
-
-  return (
-    <Text color="#8B5CF6" bold>
-      {SPINNER[frame]}
-    </Text>
-  );
+  const frame = useSpinnerFrame();
+  return <text fg="#5a4a70">{SPINNER_FRAMES[frame]}</text>;
 }
 
 export function ReasoningBlock({ content, expanded, isStreaming }: Props) {
   const lineCount = content.split("\n").length;
 
-  // While streaming: show wrapped block with spinner
-  if (isStreaming) {
-    if (!expanded) {
+  if (!expanded) {
+    if (isStreaming) {
       return (
-        <Box height={1} flexShrink={0}>
-          <Text color={RAIL_COLOR}>│ </Text>
+        <box height={1} flexShrink={0} flexDirection="row">
           <ThinkingSpinner />
-          <Text color={DIMMED}> {BRAIN_ICON} reasoning</Text>
-          {lineCount > 1 && <Text color="#444"> ({String(lineCount)} lines)</Text>}
-        </Box>
+          <text fg={DIMMED}> {brainIcon()} reasoning</text>
+          {lineCount > 1 && <text fg={MUTED}> ({String(lineCount)} lines)</text>}
+          <text fg="#2a2a2a"> ^T</text>
+        </box>
       );
     }
-
-    // Streaming + expanded: show live content in wrapped block
-    const lines = content.split("\n");
-    const maxLines = 6;
-    const visible = lines.slice(-maxLines);
+    const firstLine = (content.split("\n")[0] ?? "").trim();
+    const preview = firstLine.length > 60 ? `${firstLine.slice(0, 57)}...` : firstLine;
     return (
-      <Box flexDirection="column">
-        <Box height={1} flexShrink={0}>
-          <Text color={RAIL_COLOR}>│ </Text>
-          <ThinkingSpinner />
-          <Text color={DIMMED}> {BRAIN_ICON} reasoning</Text>
-        </Box>
-        {visible.map((line, i) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: stable line order
-          <Box key={i}>
-            <Text color={RAIL_COLOR}>│ </Text>
-            <Text color="#555">{line}</Text>
-          </Box>
-        ))}
-        {lines.length > maxLines && (
-          <Box>
-            <Text color={RAIL_COLOR}>│ </Text>
-            <Text color="#444">...{String(lines.length - maxLines)} more</Text>
-          </Box>
-        )}
-      </Box>
+      <box height={1} flexShrink={0}>
+        <text fg={DIMMED} truncate>
+          <span fg="#1a5">✓</span> {brainIcon()}{" "}
+          <span fg={TEXT_COLOR}>{preview || "Reasoned"}</span>
+          {lineCount > 1 && <span fg={MUTED}> ({String(lineCount)} lines)</span>}
+          <span fg="#333"> ^T</span>
+        </text>
+      </box>
     );
   }
 
-  // Finished: collapsed one-liner summary
-  const firstLine = (content.split("\n")[0] ?? "").trim();
-  const preview = firstLine.length > 60 ? `${firstLine.slice(0, 57)}...` : firstLine;
+  const bc = isStreaming ? BORDER_ACTIVE : BORDER;
+  const label = isStreaming ? "reasoning…" : "reasoning";
+  const trimmed = content.trim();
 
   return (
-    <Box height={1} flexShrink={0}>
-      <Text color={DIMMED} wrap="truncate">
-        <Text color="#2d5">✓</Text> {BRAIN_ICON} <Text color="#666">{preview || "Reasoned"}</Text>
-        {lineCount > 1 && <Text color="#444"> ({String(lineCount)} lines)</Text>}
-      </Text>
-    </Box>
+    <box flexDirection="column" flexShrink={0} border borderStyle="rounded" borderColor={bc}>
+      <box
+        height={1}
+        flexShrink={0}
+        paddingX={1}
+        backgroundColor="#1a1a1a"
+        alignSelf="flex-start"
+        marginTop={-1}
+      >
+        <text truncate>
+          <span fg="#5a4a70">{brainIcon()}</span> <span fg="#6a5a80">{label}</span>
+          <span fg="#333"> ^T</span>
+        </text>
+      </box>
+      <box paddingX={1}>
+        <text fg={TEXT_COLOR}>{trimmed || " "}</text>
+      </box>
+    </box>
   );
 }

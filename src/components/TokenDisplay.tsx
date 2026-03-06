@@ -1,47 +1,88 @@
-import { Text } from "ink";
-import { useEffect, useRef, useState } from "react";
-import { useAnimatedNumber } from "../hooks/useAnimatedNumber.js";
+import { fg as fgStyle, StyledText, type TextRenderable } from "@opentui/core";
+import { useEffect, useRef } from "react";
+import { icon } from "../core/icons.js";
+import type { TokenUsage } from "../stores/statusbar.js";
+import { useStatusBarStore } from "../stores/statusbar.js";
 
-function formatTokens(n: number): string {
+function fmt(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return String(n);
 }
 
-interface Props {
-  prompt: number;
-  completion: number;
-  total: number;
+const STEP_MS = 50;
+const EASE = 0.35;
+
+function approach(current: number, target: number): number {
+  if (current === target) return target;
+  const next = current + (target - current) * EASE;
+  return Math.abs(next - target) < 1 ? target : Math.round(next);
 }
 
-export function TokenDisplay({ prompt, completion, total }: Props) {
-  const animPrompt = useAnimatedNumber(prompt);
-  const animCompletion = useAnimatedNumber(completion);
-  const animTotal = useAnimatedNumber(total);
+function approachUsage(current: TokenUsage, target: TokenUsage): TokenUsage {
+  return {
+    prompt: approach(current.prompt, target.prompt),
+    completion: approach(current.completion, target.completion),
+    total: approach(current.total, target.total),
+    cacheRead: approach(current.cacheRead, target.cacheRead),
+    subagentInput: approach(current.subagentInput, target.subagentInput),
+    subagentOutput: approach(current.subagentOutput, target.subagentOutput),
+  };
+}
 
-  // Flash brighter when total just changed
-  const [flash, setFlash] = useState(false);
-  const prevTotal = useRef(total);
-  useEffect(() => {
-    if (total > prevTotal.current) {
-      setFlash(true);
-      const timer = setTimeout(() => setFlash(false), 600);
-      prevTotal.current = total;
-      return () => clearTimeout(timer);
-    }
-    prevTotal.current = total;
-    return undefined;
-  }, [total]);
-
+function usageEqual(a: TokenUsage, b: TokenUsage): boolean {
   return (
-    <Text>
-      <Text color="#2d9bf0">{formatTokens(animPrompt)}</Text>
-      <Text color="#555">↑ </Text>
-      <Text color="#e0a020">{formatTokens(animCompletion)}</Text>
-      <Text color="#555">↓ </Text>
-      <Text color={flash ? "#fff" : "#888"} bold={flash}>
-        {formatTokens(animTotal)}
-      </Text>
-    </Text>
+    a.prompt === b.prompt &&
+    a.completion === b.completion &&
+    a.cacheRead === b.cacheRead &&
+    a.subagentInput === b.subagentInput &&
+    a.subagentOutput === b.subagentOutput
   );
+}
+
+function buildContent(u: TokenUsage): StyledText {
+  const chunks = [
+    fgStyle("#555")(`${icon("tokens")} `),
+    fgStyle("#2d9bf0")(fmt(u.prompt)),
+    fgStyle("#444")("↑"),
+    fgStyle("#e0a020")(fmt(u.completion)),
+    fgStyle("#444")("↓"),
+  ];
+  if (u.cacheRead > 0) {
+    const pct = u.prompt > 0 ? Math.round((u.cacheRead / u.prompt) * 100) : 0;
+    const color = pct >= 50 ? "#2d5" : pct >= 20 ? "#4a9" : "#666";
+    chunks.push(fgStyle(color)(` saved ${String(pct)}%`));
+  }
+  const sub = u.subagentInput + u.subagentOutput;
+  if (sub > 0) {
+    chunks.push(fgStyle("#9B30FF")(` ∂${fmt(sub)}`));
+  }
+  return new StyledText(chunks);
+}
+
+export function TokenDisplay() {
+  const textRef = useRef<TextRenderable>(null);
+
+  // Transient: catch state-changes in a reference, no re-render
+  const targetRef = useRef(useStatusBarStore.getState().tokenUsage);
+  useEffect(
+    () => useStatusBarStore.subscribe((state) => (targetRef.current = state.tokenUsage)),
+    [],
+  );
+
+  // Animation loop: lerp current → target, update renderable directly
+  const currentRef = useRef<TokenUsage>({ ...targetRef.current });
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const target = targetRef.current;
+      if (usageEqual(currentRef.current, target)) return;
+      currentRef.current = approachUsage(currentRef.current, target);
+      try {
+        if (textRef.current) textRef.current.content = buildContent(currentRef.current);
+      } catch {}
+    }, STEP_MS);
+    return () => clearInterval(timer);
+  }, []);
+
+  return <text ref={textRef} truncate content={buildContent(currentRef.current)} />;
 }

@@ -1,9 +1,10 @@
-import { Box, Text } from "ink";
+import { TextAttributes } from "@opentui/core";
 import { useEffect, useState } from "react";
+import { icon } from "../core/icons.js";
+import { BRAND_DIM_PURPLE, BRAND_PURPLE, WISP_FRAMES } from "./splash.js";
 
-const GHOST = "󰊠";
-const WISP = ["~∿~", "∿~∿", "·∿·", "∿·∿"];
-const SPEED = 120;
+const GHOST = () => icon("ghost");
+const SPEED = 500;
 
 export function GhostLogo() {
   const [tick, setTick] = useState(0);
@@ -15,16 +16,16 @@ export function GhostLogo() {
     return () => clearInterval(timer);
   }, []);
 
-  const wispFrame = WISP[tick % WISP.length] ?? WISP[0];
+  const wispFrame = WISP_FRAMES[tick % WISP_FRAMES.length] ?? WISP_FRAMES[0];
 
   return (
-    <Box flexDirection="column" alignItems="center">
-      <Text color="#9B30FF" bold>
-        {GHOST}
-      </Text>
-      <Text color="#4a1a6b" dimColor>
+    <box flexDirection="column" alignItems="center">
+      <text fg={BRAND_PURPLE}>
+        <b>{GHOST()}</b>
+      </text>
+      <text fg={BRAND_DIM_PURPLE} attributes={TextAttributes.DIM}>
         {wispFrame}
-      </Text>
-    </Box>
+      </text>
+    </box>
   );
 }

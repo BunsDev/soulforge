@@ -1,9 +1,61 @@
-import { spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import type { ToolResult } from "../../types";
 
 interface GlobArgs {
   pattern: string;
   path?: string;
+}
+
+let _fdBin: string | null | undefined;
+function getFdBin(): string | null {
+  if (_fdBin !== undefined) return _fdBin;
+  for (const bin of ["fd", "fdfind"]) {
+    try {
+      execSync(`command -v ${bin}`, { stdio: "ignore" });
+      _fdBin = bin;
+      return bin;
+    } catch {}
+  }
+  _fdBin = null;
+  return null;
+}
+
+function runFd(bin: string, pattern: string, basePath: string): Promise<ToolResult | null> {
+  return new Promise((resolve) => {
+    const proc = spawn(
+      bin,
+      ["--glob", pattern, basePath, "--max-results", "50", "--max-depth", "8"],
+      {
+        cwd: process.cwd(),
+        timeout: 10_000,
+      },
+    );
+    const chunks: string[] = [];
+    proc.stdout.on("data", (data: Buffer) => chunks.push(data.toString()));
+    proc.on("error", () => resolve(null));
+    proc.on("close", (code: number | null) => {
+      if (code === 0) {
+        resolve({ success: true, output: chunks.join("") || "No files found." });
+      } else {
+        resolve(null);
+      }
+    });
+  });
+}
+
+function runFind(pattern: string, basePath: string): Promise<ToolResult> {
+  return new Promise((resolve) => {
+    const proc = spawn("find", [basePath, "-name", pattern, "-maxdepth", "5"], {
+      cwd: process.cwd(),
+      timeout: 10_000,
+    });
+    const chunks: string[] = [];
+    proc.stdout.on("data", (data: Buffer) => chunks.push(data.toString()));
+    proc.on("error", () => resolve({ success: true, output: "No files found." }));
+    proc.on("close", () => {
+      resolve({ success: true, output: chunks.join("") || "No files found." });
+    });
+  });
 }
 
 export const globTool = {
@@ -13,35 +65,11 @@ export const globTool = {
     const pattern = args.pattern;
     const basePath = args.path ?? ".";
 
-    return new Promise((resolve) => {
-      const proc = spawn("fd", ["--glob", pattern, basePath, "--max-results", "50"], {
-        cwd: process.cwd(),
-        timeout: 10_000,
-      });
-
-      const chunks: string[] = [];
-      proc.stdout.on("data", (data: Buffer) => chunks.push(data.toString()));
-
-      proc.on("close", (code: number | null) => {
-        if (code === 0) {
-          resolve({ success: true, output: chunks.join("") || "No files found." });
-        } else {
-          // Fallback to find
-          const findProc = spawn("find", [basePath, "-name", pattern, "-maxdepth", "5"], {
-            cwd: process.cwd(),
-            timeout: 10_000,
-          });
-
-          const findChunks: string[] = [];
-          findProc.stdout.on("data", (data: Buffer) => findChunks.push(data.toString()));
-          findProc.on("close", () => {
-            resolve({
-              success: true,
-              output: findChunks.join("") || "No files found.",
-            });
-          });
-        }
-      });
-    });
+    const fdBin = getFdBin();
+    if (fdBin) {
+      const result = await runFd(fdBin, pattern, basePath);
+      if (result) return result;
+    }
+    return runFind(pattern, basePath);
   },
 };

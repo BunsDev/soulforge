@@ -52,8 +52,8 @@ export const anthropic: ProviderDefinition = {
   ],
 
   contextWindows: [
-    ["claude-opus-4", 1_000_000],
-    ["claude-sonnet-4", 1_000_000],
+    ["claude-opus-4", 200_000],
+    ["claude-sonnet-4", 200_000],
     ["claude-haiku-4", 200_000],
     ["claude-3.5-sonnet", 200_000],
     ["claude-3-5-sonnet", 200_000],

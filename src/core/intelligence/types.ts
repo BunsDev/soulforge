@@ -1,7 +1,27 @@
 // ─── Code Intelligence Types ───
 
 /** Languages with dedicated backend support */
-export type Language = "typescript" | "javascript" | "python" | "go" | "rust" | "unknown";
+export type Language =
+  | "typescript"
+  | "javascript"
+  | "python"
+  | "go"
+  | "rust"
+  | "java"
+  | "c"
+  | "cpp"
+  | "csharp"
+  | "ruby"
+  | "php"
+  | "swift"
+  | "kotlin"
+  | "scala"
+  | "lua"
+  | "elixir"
+  | "dart"
+  | "zig"
+  | "bash"
+  | "unknown";
 
 /** A location in source code */
 export interface SourceLocation {
@@ -101,6 +121,65 @@ export interface TypeInfo {
   documentation?: string;
 }
 
+/** A code action (quick-fix or refactoring suggestion) */
+export interface CodeAction {
+  title: string;
+  kind?: string;
+  diagnostics?: Diagnostic[];
+  isPreferred?: boolean;
+}
+
+/** Result of a format operation */
+export interface FormatEdit {
+  file: string;
+  edits: {
+    startLine: number;
+    startCol: number;
+    endLine: number;
+    endCol: number;
+    newText: string;
+  }[];
+}
+
+/** An item in a call hierarchy */
+export interface CallHierarchyItem {
+  name: string;
+  kind: SymbolKind;
+  file: string;
+  line: number;
+  column: number;
+}
+
+/** Result of a call hierarchy query */
+export interface CallHierarchyResult {
+  item: CallHierarchyItem;
+  incoming: CallHierarchyItem[];
+  outgoing: CallHierarchyItem[];
+}
+
+/** An item in a type hierarchy */
+export interface TypeHierarchyItem {
+  name: string;
+  kind: SymbolKind;
+  file: string;
+  line: number;
+}
+
+/** Result of a type hierarchy query */
+export interface TypeHierarchyResult {
+  item: TypeHierarchyItem;
+  supertypes: TypeHierarchyItem[];
+  subtypes: TypeHierarchyItem[];
+}
+
+/** An unused import or export */
+export interface UnusedItem {
+  name: string;
+  kind: "import" | "export";
+  file: string;
+  line: number;
+}
+
 // ─── Backend Interface ───
 
 /**
@@ -177,6 +256,47 @@ export interface IntelligenceBackend {
     endLine: number,
     variableName: string,
   ): Promise<RefactorResult | null>;
+
+  // ─── LSP Fundamentals ───
+  getCodeActions?(
+    file: string,
+    startLine: number,
+    endLine: number,
+    diagnosticCodes?: (string | number)[],
+  ): Promise<CodeAction[] | null>;
+
+  findWorkspaceSymbols?(query: string): Promise<SymbolInfo[] | null>;
+
+  formatDocument?(file: string): Promise<FormatEdit | null>;
+
+  formatRange?(file: string, startLine: number, endLine: number): Promise<FormatEdit | null>;
+
+  organizeImports?(file: string): Promise<RefactorResult | null>;
+
+  // ─── Advanced Intelligence ───
+  getCallHierarchy?(
+    file: string,
+    symbol: string,
+    line?: number,
+    column?: number,
+  ): Promise<CallHierarchyResult | null>;
+
+  // ─── Power Features ───
+  findImplementation?(
+    file: string,
+    symbol: string,
+    line?: number,
+    column?: number,
+  ): Promise<SourceLocation[] | null>;
+
+  getTypeHierarchy?(
+    file: string,
+    symbol: string,
+    line?: number,
+    column?: number,
+  ): Promise<TypeHierarchyResult | null>;
+
+  findUnused?(file: string): Promise<UnusedItem[] | null>;
 }
 
 // ─── Config ───

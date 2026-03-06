@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
-const ANIM_DURATION = 400; // ms
-const ANIM_STEPS = 8;
+const ANIM_DURATION = 200; // ms
+const ANIM_STEPS = 4;
 const STEP_MS = ANIM_DURATION / ANIM_STEPS;
 
 /** Smoothly animates from previous value to target over ~400ms with ease-out. */

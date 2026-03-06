@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { platform } from "node:os";
-import { Box, Text, useInput } from "ink";
+import { TextAttributes } from "@opentui/core";
+import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useCallback, useState } from "react";
 import {
   detectInstalledFonts,
@@ -15,7 +16,8 @@ import {
 } from "../core/setup/prerequisites.js";
 import { POPUP_BG, POPUP_HL, PopupRow } from "./shared.js";
 
-const POPUP_WIDTH = 64;
+const MAX_POPUP_WIDTH = 64;
+const CHROME_ROWS = 10;
 
 type Tab = "tools" | "fonts";
 
@@ -26,12 +28,35 @@ interface Props {
 }
 
 export function SetupGuide({ visible, onClose, onSystemMessage }: Props) {
+  const { width: termCols, height: termRows } = useTerminalDimensions();
+  const containerRows = termRows - 2;
+  const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.7));
+  const innerW = popupWidth - 2;
+  const maxVisible = Math.max(4, Math.floor(containerRows * 0.7) - CHROME_ROWS);
   const [statuses, setStatuses] = useState<PrerequisiteStatus[]>(() => checkPrerequisites());
   const [cursor, setCursor] = useState(0);
+  const [scrollOffset, setScrollOffset] = useState(0);
   const [installing, setInstalling] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("tools");
   const [fontCursor, setFontCursor] = useState(0);
+  const [fontScrollOffset, setFontScrollOffset] = useState(0);
   const [installedFonts, setInstalledFonts] = useState<NerdFont[]>(() => detectInstalledFonts());
+
+  const adjustScroll = (next: number) => {
+    setScrollOffset((prev) => {
+      if (next < prev) return next;
+      if (next >= prev + maxVisible) return next - maxVisible + 1;
+      return prev;
+    });
+  };
+
+  const adjustFontScroll = (next: number) => {
+    setFontScrollOffset((prev) => {
+      if (next < prev) return next;
+      if (next >= prev + maxVisible) return next - maxVisible + 1;
+      return prev;
+    });
+  };
 
   const os = platform();
   const osLabel = os === "darwin" ? "macOS" : os === "win32" ? "Windows" : "Linux";
@@ -100,103 +125,114 @@ export function SetupGuide({ visible, onClose, onSystemMessage }: Props) {
       });
   }, [fontCursor, installedFonts, onSystemMessage, refresh]);
 
-  useInput(
-    (input, key) => {
-      if (installing) return;
+  useKeyboard((evt) => {
+    if (!visible) return;
+    if (installing) return;
 
-      if (key.escape) {
-        onClose();
-        return;
-      }
+    if (evt.name === "escape") {
+      onClose();
+      return;
+    }
 
-      // Tab switching
-      if (key.tab || input === "1" || input === "2") {
-        if (key.tab) {
-          setTab((t) => (t === "tools" ? "fonts" : "tools"));
-        } else if (input === "1") {
-          setTab("tools");
-        } else {
-          setTab("fonts");
-        }
-        return;
-      }
-
-      if (tab === "tools") {
-        if (key.upArrow || input === "k") {
-          setCursor((p) => (p > 0 ? p - 1 : statuses.length - 1));
-          return;
-        }
-        if (key.downArrow || input === "j") {
-          setCursor((p) => (p < statuses.length - 1 ? p + 1 : 0));
-          return;
-        }
-        if (key.return || input === "i") {
-          installSelected();
-          return;
-        }
-        if (input === "r") {
-          refresh();
-          return;
-        }
-        if (input === "a") {
-          const missing = statuses.filter((s) => !s.installed);
-          if (missing.length === 0) return;
-          const cmds: string[] = [];
-          for (const s of missing) {
-            const c = getInstallCommands(s.prerequisite.name).find(
-              (l) => !l.startsWith("#") && l.trim().length > 0,
-            );
-            if (c) cmds.push(c);
-          }
-          if (cmds.length === 0) return;
-          setInstalling("all");
-          onSystemMessage(`Installing ${String(cmds.length)} prerequisites...`);
-          const fullCmd = cmds.join(" && ");
-          const proc = spawn("sh", ["-c", fullCmd], { stdio: "pipe" });
-          proc.on("close", (code) => {
-            setInstalling(null);
-            onSystemMessage(
-              code === 0
-                ? "All prerequisites installed!"
-                : "Some installs may have failed. Run /setup to check.",
-            );
-            refresh();
-          });
-          proc.on("error", () => {
-            setInstalling(null);
-            onSystemMessage("Failed to run install commands.");
-          });
-        }
+    if (evt.name === "tab" || evt.name === "1" || evt.name === "2") {
+      if (evt.name === "tab") {
+        setTab((t) => (t === "tools" ? "fonts" : "tools"));
+      } else if (evt.name === "1") {
+        setTab("tools");
       } else {
-        // fonts tab
-        if (key.upArrow || input === "k") {
-          setFontCursor((p) => (p > 0 ? p - 1 : NERD_FONTS.length - 1));
-          return;
-        }
-        if (key.downArrow || input === "j") {
-          setFontCursor((p) => (p < NERD_FONTS.length - 1 ? p + 1 : 0));
-          return;
-        }
-        if (key.return || input === "i") {
-          installSelectedFont();
-          return;
-        }
-        if (input === "r") {
-          refresh();
-        }
+        setTab("fonts");
       }
-    },
-    { isActive: visible },
-  );
+      return;
+    }
+
+    if (tab === "tools") {
+      if (evt.name === "up" || evt.name === "k") {
+        setCursor((p) => {
+          const next = p > 0 ? p - 1 : statuses.length - 1;
+          adjustScroll(next);
+          return next;
+        });
+        return;
+      }
+      if (evt.name === "down" || evt.name === "j") {
+        setCursor((p) => {
+          const next = p < statuses.length - 1 ? p + 1 : 0;
+          adjustScroll(next);
+          return next;
+        });
+        return;
+      }
+      if (evt.name === "return" || evt.name === "i") {
+        installSelected();
+        return;
+      }
+      if (evt.name === "r") {
+        refresh();
+        return;
+      }
+      if (evt.name === "a") {
+        const missing = statuses.filter((s) => !s.installed);
+        if (missing.length === 0) return;
+        const cmds: string[] = [];
+        for (const s of missing) {
+          const c = getInstallCommands(s.prerequisite.name).find(
+            (l) => !l.startsWith("#") && l.trim().length > 0,
+          );
+          if (c) cmds.push(c);
+        }
+        if (cmds.length === 0) return;
+        setInstalling("all");
+        onSystemMessage(`Installing ${String(cmds.length)} prerequisites...`);
+        const fullCmd = cmds.join(" && ");
+        const proc = spawn("sh", ["-c", fullCmd], { stdio: "pipe" });
+        proc.on("close", (code) => {
+          setInstalling(null);
+          onSystemMessage(
+            code === 0
+              ? "All prerequisites installed!"
+              : "Some installs may have failed. Run /setup to check.",
+          );
+          refresh();
+        });
+        proc.on("error", () => {
+          setInstalling(null);
+          onSystemMessage("Failed to run install commands.");
+        });
+      }
+    } else {
+      if (evt.name === "up" || evt.name === "k") {
+        setFontCursor((p) => {
+          const next = p > 0 ? p - 1 : NERD_FONTS.length - 1;
+          adjustFontScroll(next);
+          return next;
+        });
+        return;
+      }
+      if (evt.name === "down" || evt.name === "j") {
+        setFontCursor((p) => {
+          const next = p < NERD_FONTS.length - 1 ? p + 1 : 0;
+          adjustFontScroll(next);
+          return next;
+        });
+        return;
+      }
+      if (evt.name === "return" || evt.name === "i") {
+        installSelectedFont();
+        return;
+      }
+      if (evt.name === "r") {
+        refresh();
+      }
+    }
+  });
 
   if (!visible) return null;
 
-  const innerW = POPUP_WIDTH - 2;
   const allInstalled = statuses.every((s) => s.installed);
   const missingCount = statuses.filter((s) => !s.installed).length;
 
   return (
-    <Box
+    <box
       position="absolute"
       flexDirection="column"
       alignItems="center"
@@ -204,167 +240,215 @@ export function SetupGuide({ visible, onClose, onSystemMessage }: Props) {
       width="100%"
       height="100%"
     >
-      <Box flexDirection="column" borderStyle="round" borderColor="#8B5CF6" width={POPUP_WIDTH}>
-        {/* Title */}
+      <box
+        flexDirection="column"
+        borderStyle="rounded"
+        border={true}
+        borderColor="#8B5CF6"
+        width={popupWidth}
+      >
         <PopupRow w={innerW}>
-          <Text color="#9B30FF" bold backgroundColor={POPUP_BG}>
+          <text fg="#9B30FF" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
             󰊠
-          </Text>
-          <Text color="white" bold backgroundColor={POPUP_BG}>
+          </text>
+          <text fg="white" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
             {" "}
             SoulForge Setup
-          </Text>
-          <Text color="#555" backgroundColor={POPUP_BG}>
+          </text>
+          <text fg="#555" bg={POPUP_BG}>
             {"  "}
             {osLabel}
-          </Text>
+          </text>
         </PopupRow>
 
-        {/* Tabs */}
         <PopupRow w={innerW}>
-          <Text
-            color={tab === "tools" ? "#9B30FF" : "#555"}
-            bold={tab === "tools"}
-            backgroundColor={POPUP_BG}
+          <text
+            fg={tab === "tools" ? "#9B30FF" : "#555"}
+            attributes={tab === "tools" ? TextAttributes.BOLD : undefined}
+            bg={POPUP_BG}
           >
             [1] Tools
-          </Text>
-          <Text color="#333" backgroundColor={POPUP_BG}>
+          </text>
+          <text fg="#333" bg={POPUP_BG}>
             {"  "}
-          </Text>
-          <Text
-            color={tab === "fonts" ? "#9B30FF" : "#555"}
-            bold={tab === "fonts"}
-            backgroundColor={POPUP_BG}
+          </text>
+          <text
+            fg={tab === "fonts" ? "#9B30FF" : "#555"}
+            attributes={tab === "fonts" ? TextAttributes.BOLD : undefined}
+            bg={POPUP_BG}
           >
             [2] Fonts
-          </Text>
+          </text>
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <Text color="#333" backgroundColor={POPUP_BG}>
+          <text fg="#333" bg={POPUP_BG}>
             {"─".repeat(innerW - 4)}
-          </Text>
+          </text>
         </PopupRow>
 
         {tab === "tools" ? (
           <>
             {allInstalled ? (
               <PopupRow w={innerW}>
-                <Text color="#2d5" backgroundColor={POPUP_BG}>
+                <text fg="#2d5" bg={POPUP_BG}>
                   ✓ All prerequisites are installed!
-                </Text>
+                </text>
               </PopupRow>
             ) : (
               <PopupRow w={innerW}>
-                <Text color="#FF8C00" backgroundColor={POPUP_BG}>
+                <text fg="#FF8C00" bg={POPUP_BG}>
                   {String(missingCount)} missing — select to install
-                </Text>
+                </text>
               </PopupRow>
             )}
 
             <PopupRow w={innerW}>
-              <Text>{""}</Text>
+              <text>{""}</text>
             </PopupRow>
 
-            {/* Prerequisites list */}
-            {statuses.map((s, i) => {
-              const isActive = i === cursor;
-              const bg = isActive ? POPUP_HL : POPUP_BG;
-              const icon = s.installed ? "✓" : s.prerequisite.required ? "✗" : "○";
-              const iconColor = s.installed ? "#2d5" : s.prerequisite.required ? "#f44" : "#FF8C00";
-              const nameColor = s.installed ? "#555" : isActive ? "#FF0040" : "#aaa";
+            <box
+              flexDirection="column"
+              height={Math.min(statuses.length || 1, maxVisible)}
+              overflow="hidden"
+            >
+              {statuses.slice(scrollOffset, scrollOffset + maxVisible).map((s, vi) => {
+                const i = vi + scrollOffset;
+                const isActive = i === cursor;
+                const bg = isActive ? POPUP_HL : POPUP_BG;
+                const icon = s.installed ? "✓" : s.prerequisite.required ? "✗" : "○";
+                const iconColor = s.installed
+                  ? "#2d5"
+                  : s.prerequisite.required
+                    ? "#f44"
+                    : "#FF8C00";
+                const nameColor = s.installed ? "#555" : isActive ? "#FF0040" : "#aaa";
 
-              return (
-                <PopupRow key={s.prerequisite.name} bg={bg} w={innerW}>
-                  <Text backgroundColor={bg} color={isActive ? "#FF0040" : "#333"}>
-                    {isActive ? "› " : "  "}
-                  </Text>
-                  <Text backgroundColor={bg} color={iconColor}>
-                    {icon}{" "}
-                  </Text>
-                  <Text backgroundColor={bg} color={nameColor} bold={isActive && !s.installed}>
-                    {s.prerequisite.name.padEnd(28)}
-                  </Text>
-                  <Text backgroundColor={bg} color={s.installed ? "#333" : "#666"}>
-                    {s.installed ? "installed" : s.prerequisite.required ? "required" : "optional"}
-                  </Text>
-                </PopupRow>
-              );
-            })}
+                return (
+                  <PopupRow key={s.prerequisite.name} bg={bg} w={innerW}>
+                    <text bg={bg} fg={isActive ? "#FF0040" : "#333"}>
+                      {isActive ? "› " : "  "}
+                    </text>
+                    <text bg={bg} fg={iconColor}>
+                      {icon}{" "}
+                    </text>
+                    <text
+                      bg={bg}
+                      fg={nameColor}
+                      attributes={isActive && !s.installed ? TextAttributes.BOLD : undefined}
+                    >
+                      {s.prerequisite.name.padEnd(28)}
+                    </text>
+                    <text bg={bg} fg={s.installed ? "#333" : "#666"}>
+                      {s.installed
+                        ? "installed"
+                        : s.prerequisite.required
+                          ? "required"
+                          : "optional"}
+                    </text>
+                  </PopupRow>
+                );
+              })}
+            </box>
+            {statuses.length > maxVisible && (
+              <PopupRow w={innerW}>
+                <text fg="#555" bg={POPUP_BG}>
+                  {scrollOffset > 0 ? "↑ " : "  "}
+                  {cursor + 1}/{statuses.length}
+                  {scrollOffset + maxVisible < statuses.length ? " ↓" : ""}
+                </text>
+              </PopupRow>
+            )}
           </>
         ) : (
           <>
-            {/* Font selection */}
             <PopupRow w={innerW}>
-              <Text color="#555" backgroundColor={POPUP_BG}>
+              <text fg="#555" bg={POPUP_BG}>
                 Select a Nerd Font to install:
-              </Text>
+              </text>
             </PopupRow>
 
             <PopupRow w={innerW}>
-              <Text>{""}</Text>
+              <text>{""}</text>
             </PopupRow>
 
-            {NERD_FONTS.map((font, i) => {
-              const isActive = i === fontCursor;
-              const bg = isActive ? POPUP_HL : POPUP_BG;
-              const isInstalled = installedFonts.some((f) => f.id === font.id);
-              const icon = isInstalled ? "✓" : "○";
-              const iconColor = isInstalled ? "#2d5" : "#FF8C00";
-              const nameColor = isInstalled ? "#555" : isActive ? "#FF0040" : "#aaa";
+            <box
+              flexDirection="column"
+              height={Math.min(NERD_FONTS.length || 1, maxVisible)}
+              overflow="hidden"
+            >
+              {NERD_FONTS.slice(fontScrollOffset, fontScrollOffset + maxVisible).map((font, vi) => {
+                const i = vi + fontScrollOffset;
+                const isActive = i === fontCursor;
+                const bg = isActive ? POPUP_HL : POPUP_BG;
+                const isInstalled = installedFonts.some((f) => f.id === font.id);
+                const icon = isInstalled ? "✓" : "○";
+                const iconColor = isInstalled ? "#2d5" : "#FF8C00";
+                const nameColor = isInstalled ? "#555" : isActive ? "#FF0040" : "#aaa";
 
-              return (
-                <PopupRow key={font.id} bg={bg} w={innerW}>
-                  <Text backgroundColor={bg} color={isActive ? "#FF0040" : "#333"}>
-                    {isActive ? "› " : "  "}
-                  </Text>
-                  <Text backgroundColor={bg} color={iconColor}>
-                    {icon}{" "}
-                  </Text>
-                  <Text backgroundColor={bg} color={nameColor} bold={isActive && !isInstalled}>
-                    {font.name.padEnd(20)}
-                  </Text>
-                  <Text backgroundColor={bg} color={isInstalled ? "#333" : "#666"}>
-                    {isInstalled ? "installed" : font.description.slice(0, 26)}
-                  </Text>
-                </PopupRow>
-              );
-            })}
+                return (
+                  <PopupRow key={font.id} bg={bg} w={innerW}>
+                    <text bg={bg} fg={isActive ? "#FF0040" : "#333"}>
+                      {isActive ? "› " : "  "}
+                    </text>
+                    <text bg={bg} fg={iconColor}>
+                      {icon}{" "}
+                    </text>
+                    <text
+                      bg={bg}
+                      fg={nameColor}
+                      attributes={isActive && !isInstalled ? TextAttributes.BOLD : undefined}
+                    >
+                      {font.name.padEnd(20)}
+                    </text>
+                    <text bg={bg} fg={isInstalled ? "#333" : "#666"}>
+                      {isInstalled ? "installed" : font.description.slice(0, 26)}
+                    </text>
+                  </PopupRow>
+                );
+              })}
+            </box>
+            {NERD_FONTS.length > maxVisible && (
+              <PopupRow w={innerW}>
+                <text fg="#555" bg={POPUP_BG}>
+                  {fontScrollOffset > 0 ? "↑ " : "  "}
+                  {fontCursor + 1}/{NERD_FONTS.length}
+                  {fontScrollOffset + maxVisible < NERD_FONTS.length ? " ↓" : ""}
+                </text>
+              </PopupRow>
+            )}
 
             <PopupRow w={innerW}>
-              <Text>{""}</Text>
+              <text>{""}</text>
             </PopupRow>
 
             <PopupRow w={innerW}>
-              <Text color="#555" backgroundColor={POPUP_BG}>
+              <text fg="#555" bg={POPUP_BG}>
                 After install, set terminal font to the name shown
-              </Text>
+              </text>
             </PopupRow>
           </>
         )}
 
         <PopupRow w={innerW}>
-          <Text>{""}</Text>
+          <text>{""}</text>
         </PopupRow>
 
-        {/* Installing indicator */}
         {installing && (
           <PopupRow w={innerW}>
-            <Text color="#9B30FF" backgroundColor={POPUP_BG}>
+            <text fg="#9B30FF" bg={POPUP_BG}>
               ⠹ Installing {installing}...
-            </Text>
+            </text>
           </PopupRow>
         )}
 
-        {/* Hints */}
         <PopupRow w={innerW}>
-          <Text color="#555" backgroundColor={POPUP_BG}>
-            {"⏎"}/i install{"  "}
-            {tab === "tools" ? "a install all  " : ""}r refresh{"  "}tab switch{"  "}esc close
-          </Text>
+          <text fg="#555" bg={POPUP_BG}>
+            {"⏎"}/i install{tab === "tools" ? " | a install all" : ""} | r refresh | tab switch |
+            esc close
+          </text>
         </PopupRow>
-      </Box>
-    </Box>
+      </box>
+    </box>
   );
 }

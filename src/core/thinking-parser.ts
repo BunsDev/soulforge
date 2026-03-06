@@ -1,6 +1,12 @@
 /**
- * Streaming state machine for parsing `<thinking>...</thinking>` tags
+ * Streaming state machine for parsing thinking/reasoning tags
  * embedded in text-delta content. Handles partial tags split across deltas.
+ *
+ * Supported tag pairs:
+ *   <thinking>...</thinking>
+ *   <think>...</think>
+ *   <reasoning>...</reasoning>
+ *   <reason>...</reason>
  */
 
 export interface ParsedChunk {
@@ -10,8 +16,14 @@ export interface ParsedChunk {
 
 type State = "outside" | "inside";
 
-const OPEN_TAG = "<thinking>";
-const CLOSE_TAG = "</thinking>";
+const TAG_PAIRS = [
+  { open: "<thinking>", close: "</thinking>" },
+  { open: "<think>", close: "</think>" },
+  { open: "<reasoning>", close: "</reasoning>" },
+  { open: "<reason>", close: "</reason>" },
+];
+
+const MAX_TAG_LEN = Math.max(...TAG_PAIRS.map((p) => Math.max(p.open.length, p.close.length)));
 
 export function createThinkingParser(): {
   feed(delta: string): ParsedChunk[];
@@ -19,6 +31,22 @@ export function createThinkingParser(): {
 } {
   let state: State = "outside";
   let pendingTag = "";
+  let activeClose = "";
+
+  function tryMatchOpen(buf: string): { tag: (typeof TAG_PAIRS)[0]; len: number } | null {
+    for (const pair of TAG_PAIRS) {
+      if (buf.startsWith(pair.open)) return { tag: pair, len: pair.open.length };
+    }
+    return null;
+  }
+
+  function couldBeOpenPrefix(buf: string): boolean {
+    return TAG_PAIRS.some((p) => p.open.startsWith(buf));
+  }
+
+  function couldBeClosePrefix(buf: string): boolean {
+    return activeClose.startsWith(buf);
+  }
 
   function feed(delta: string): ParsedChunk[] {
     const chunks: ParsedChunk[] = [];
@@ -29,72 +57,48 @@ export function createThinkingParser(): {
       if (state === "outside") {
         const tagIdx = buf.indexOf("<");
         if (tagIdx === -1) {
-          // No potential tag start — all text
           if (buf.length > 0) chunks.push({ type: "text", content: buf });
           buf = "";
         } else {
-          // Emit text before the `<`
           if (tagIdx > 0) {
             chunks.push({ type: "text", content: buf.slice(0, tagIdx) });
             buf = buf.slice(tagIdx);
           }
-          // Check if we have enough to match the open tag
-          if (buf.length >= OPEN_TAG.length) {
-            if (buf.startsWith(OPEN_TAG)) {
-              chunks.push({ type: "reasoning-start", content: "" });
-              state = "inside";
-              buf = buf.slice(OPEN_TAG.length);
-            } else {
-              // Not a thinking tag — emit the `<` as text and continue
-              chunks.push({ type: "text", content: "<" });
-              buf = buf.slice(1);
-            }
+          const match = tryMatchOpen(buf);
+          if (match) {
+            chunks.push({ type: "reasoning-start", content: "" });
+            state = "inside";
+            activeClose = match.tag.close;
+            buf = buf.slice(match.len);
+          } else if (buf.length < MAX_TAG_LEN && couldBeOpenPrefix(buf)) {
+            pendingTag = buf;
+            buf = "";
           } else {
-            // Partial — could be `<thin` etc. Buffer it.
-            if (OPEN_TAG.startsWith(buf)) {
-              pendingTag = buf;
-              buf = "";
-            } else {
-              // Doesn't match open tag prefix — emit `<` as text
-              chunks.push({ type: "text", content: "<" });
-              buf = buf.slice(1);
-            }
+            chunks.push({ type: "text", content: "<" });
+            buf = buf.slice(1);
           }
         }
       } else {
-        // state === "inside"
         const tagIdx = buf.indexOf("<");
         if (tagIdx === -1) {
-          // No potential tag — all reasoning content
           if (buf.length > 0) chunks.push({ type: "reasoning-content", content: buf });
           buf = "";
         } else {
-          // Emit reasoning content before the `<`
           if (tagIdx > 0) {
             chunks.push({ type: "reasoning-content", content: buf.slice(0, tagIdx) });
             buf = buf.slice(tagIdx);
           }
-          // Check for close tag
-          if (buf.length >= CLOSE_TAG.length) {
-            if (buf.startsWith(CLOSE_TAG)) {
-              chunks.push({ type: "reasoning-end", content: "" });
-              state = "outside";
-              buf = buf.slice(CLOSE_TAG.length);
-            } else {
-              // Not a close tag — emit `<` as reasoning content
-              chunks.push({ type: "reasoning-content", content: "<" });
-              buf = buf.slice(1);
-            }
+          if (buf.length >= activeClose.length && buf.startsWith(activeClose)) {
+            chunks.push({ type: "reasoning-end", content: "" });
+            state = "outside";
+            buf = buf.slice(activeClose.length);
+            activeClose = "";
+          } else if (buf.length < activeClose.length && couldBeClosePrefix(buf)) {
+            pendingTag = buf;
+            buf = "";
           } else {
-            // Partial — could be `</thin` etc. Buffer it.
-            if (CLOSE_TAG.startsWith(buf)) {
-              pendingTag = buf;
-              buf = "";
-            } else {
-              // Doesn't match close tag prefix — emit `<` as reasoning content
-              chunks.push({ type: "reasoning-content", content: "<" });
-              buf = buf.slice(1);
-            }
+            chunks.push({ type: "reasoning-content", content: "<" });
+            buf = buf.slice(1);
           }
         }
       }
@@ -106,7 +110,6 @@ export function createThinkingParser(): {
   function flush(): ParsedChunk[] {
     const chunks: ParsedChunk[] = [];
     if (pendingTag.length > 0) {
-      // Buffered partial tag never resolved — emit as text/content
       const chunkType = state === "outside" ? "text" : "reasoning-content";
       chunks.push({ type: chunkType, content: pendingTag });
       pendingTag = "";
@@ -114,6 +117,7 @@ export function createThinkingParser(): {
     if (state === "inside") {
       chunks.push({ type: "reasoning-end", content: "" });
       state = "outside";
+      activeClose = "";
     }
     return chunks;
   }
