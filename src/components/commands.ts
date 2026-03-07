@@ -48,7 +48,6 @@ export interface CommandContext {
   handleSuspend: (opts: { command: string; args?: string[]; noAltScreen?: boolean }) => void;
   openGitMenu: () => void;
   openEditorWithFile: (file: string) => void;
-  setSessionConfig: React.Dispatch<React.SetStateAction<Partial<AppConfig> | null>>;
   effectiveNvimConfig: NvimConfigMode | undefined;
   vimHints: boolean;
   verbose: boolean;
@@ -94,12 +93,10 @@ function applyRepoMapToggle(
     if (!cm.isRepoMapReady()) cm.refreshRepoMap().catch(() => {});
   } else {
     if (cm.isSemanticEnabled()) {
-      cm.setSemanticSummaries(false);
-      ctx.saveToScope({ semanticSummaries: false }, toScope);
+      cm.setSemanticSummaries("off");
+      ctx.saveToScope({ semanticSummaries: "off" }, toScope);
     }
-    if (toScope !== "session") {
-      cm.clearRepoMap();
-    }
+    cm.clearRepoMap();
   }
 
   sysMsg(ctx, `Repo map ${nowEnabled ? "enabled" : "disabled"} (${toScope}).`);
@@ -168,21 +165,35 @@ function openRepoMapMenu(ctx: CommandContext): void {
       },
       {
         value: "semantic",
-        label: cm.isSemanticEnabled() ? "Semantic Summaries ✓" : "Semantic Summaries",
+        label: cm.getSemanticMode() === "llm" ? "LLM Summaries ✓" : "LLM Summaries",
         description:
           !enabled || !ready
             ? "requires repo map to be active"
-            : cm.isSemanticEnabled()
+            : cm.getSemanticMode() === "llm"
               ? `ON — ${String(stats.summaries)} cached [${getShortModelLabel(cm.getSemanticModelId(ctx.chat.activeModel))}]`
-              : "OFF — generate AI descriptions for top symbols",
+              : "generate AI descriptions for top symbols",
+      },
+      {
+        value: "semantic-ast",
+        label: cm.getSemanticMode() === "ast" ? "AST Docstrings ✓" : "AST Docstrings",
+        description:
+          !enabled || !ready
+            ? "requires repo map to be active"
+            : cm.getSemanticMode() === "ast"
+              ? `ON — ${String(stats.summaries)} extracted from comments`
+              : "extract summaries from JSDoc/docstrings (free, instant)",
       },
       ...(cm.isSemanticEnabled() && enabled && ready
         ? [
-            {
-              value: "semantic-regen",
-              label: "Regenerate Summaries",
-              description: "clear cache and regenerate all summaries",
-            },
+            ...(cm.getSemanticMode() === "llm"
+              ? [
+                  {
+                    value: "semantic-regen",
+                    label: "Regenerate Summaries",
+                    description: "clear cache and regenerate all summaries",
+                  },
+                ]
+              : []),
             {
               value: "semantic-clear",
               label: "Clear Summaries",
@@ -198,32 +209,48 @@ function openRepoMapMenu(ctx: CommandContext): void {
     ],
     onSelect: (value, scope) => {
       if (value === "enable" || value === "disable") {
-        applyRepoMapToggle(ctx, value === "enable", scope ?? "session");
+        applyRepoMapToggle(ctx, value === "enable", scope ?? "project");
       } else if (value === "refresh") {
         sysMsg(ctx, "Rebuilding repo map...");
         cm.refreshRepoMap().catch(() => {});
       } else if (value === "clear") {
         if (cm.isSemanticEnabled()) {
-          cm.setSemanticSummaries(false);
-          ctx.saveToScope({ semanticSummaries: false }, scope ?? "session");
+          cm.setSemanticSummaries("off");
+          ctx.saveToScope({ semanticSummaries: "off" }, scope ?? "project");
         }
         cm.setRepoMapEnabled(false);
         cm.clearRepoMap();
-        ctx.saveToScope({ repoMap: false }, scope ?? "session");
-        sysMsg(ctx, `Repo map disabled and index cleared (${scope ?? "session"}).`);
+        ctx.saveToScope({ repoMap: false }, scope ?? "project");
+        sysMsg(ctx, `Repo map disabled and index cleared (${scope ?? "project"}).`);
       } else if (value === "semantic") {
         if (!cm.isRepoMapEnabled() || !cm.isRepoMapReady()) {
           sysMsg(ctx, "Enable repo map first — semantic summaries depend on the symbol index.");
           return;
         }
-        const wasEnabled = cm.isSemanticEnabled();
-        cm.setSemanticSummaries(!wasEnabled);
-        ctx.saveToScope({ semanticSummaries: !wasEnabled }, scope ?? "session");
-        if (!wasEnabled) {
+        const current = cm.getSemanticMode();
+        const next = current === "llm" ? "off" : "llm";
+        cm.setSemanticSummaries(next);
+        ctx.saveToScope({ semanticSummaries: next }, scope ?? "project");
+        if (next === "llm") {
           triggerSemanticGeneration(ctx, cm);
         } else {
-          sysMsg(ctx, `Semantic summaries disabled (${scope ?? "session"}).`);
+          sysMsg(ctx, `LLM summaries disabled (${scope ?? "project"}).`);
         }
+      } else if (value === "semantic-ast") {
+        if (!cm.isRepoMapEnabled() || !cm.isRepoMapReady()) {
+          sysMsg(ctx, "Enable repo map first — semantic summaries depend on the symbol index.");
+          return;
+        }
+        const current = cm.getSemanticMode();
+        const next = current === "ast" ? "off" : "ast";
+        cm.setSemanticSummaries(next);
+        ctx.saveToScope({ semanticSummaries: next }, scope ?? "project");
+        sysMsg(
+          ctx,
+          next === "ast"
+            ? `AST docstring summaries enabled (${scope ?? "project"}). Rebuilding index...`
+            : `Semantic summaries disabled (${scope ?? "project"}).`,
+        );
       } else if (value === "semantic-regen") {
         cm.clearSemanticSummaries();
         sysMsg(ctx, "Cleared cached summaries.");
@@ -493,17 +520,12 @@ function openMemoryMenu(ctx: CommandContext): void {
             options: [
               { value: "global", label: "Global", description: "write to global memory" },
               { value: "project", label: "Project", description: "write to project memory" },
-              {
-                value: "session",
-                label: "Session",
-                description: "write to session memory (lost on exit)",
-              },
               { value: "none", label: "None", description: "disable memory writes" },
             ],
             onSelect: (ws) => {
               memMgr.scopeConfig = {
                 ...memMgr.scopeConfig,
-                writeScope: ws as "global" | "project" | "session" | "none",
+                writeScope: ws as "global" | "project" | "none",
               };
               ctx.chat.setMessages((prev) => [
                 ...prev,
@@ -526,17 +548,16 @@ function openMemoryMenu(ctx: CommandContext): void {
               {
                 value: "all",
                 label: "All",
-                description: "read from all scopes (session > project > global)",
+                description: "read from all scopes (project > global)",
               },
               { value: "global", label: "Global", description: "read global only" },
               { value: "project", label: "Project", description: "read project only" },
-              { value: "session", label: "Session", description: "read session only" },
               { value: "none", label: "None", description: "disable memory reads" },
             ],
             onSelect: (rs) => {
               memMgr.scopeConfig = {
                 ...memMgr.scopeConfig,
-                readScope: rs as "global" | "project" | "session" | "all" | "none",
+                readScope: rs as "global" | "project" | "all" | "none",
               };
               ctx.chat.setMessages((prev) => [
                 ...prev,
@@ -556,7 +577,6 @@ function openMemoryMenu(ctx: CommandContext): void {
             icon: "󰍽",
             currentValue: memMgr.settingsScope,
             options: [
-              { value: "session", label: "Session", description: "settings lost on exit" },
               {
                 value: "project",
                 label: "Project",
@@ -569,7 +589,7 @@ function openMemoryMenu(ctx: CommandContext): void {
               },
             ],
             onSelect: (ss) => {
-              memMgr.setSettingsScope(ss as "session" | "project" | "global");
+              memMgr.setSettingsScope(ss as "project" | "global");
               ctx.chat.setMessages((prev) => [
                 ...prev,
                 {
@@ -583,7 +603,7 @@ function openMemoryMenu(ctx: CommandContext): void {
             },
           });
         } else if (value === "view") {
-          const scopes = ["session", "project", "global"] as const;
+          const scopes = ["project", "global"] as const;
           const lines: import("./InfoPopup.js").InfoPopupLine[] = [];
           for (const scope of scopes) {
             const memories = memMgr.listByScope(scope);
@@ -608,13 +628,12 @@ function openMemoryMenu(ctx: CommandContext): void {
             title: "Clear Memories",
             icon: "󰍽",
             options: [
-              { value: "session", label: "Session", description: "clear session memories" },
               { value: "project", label: "Project", description: "clear project memories" },
               { value: "global", label: "Global", description: "clear global memories" },
               { value: "all", label: "All", description: "clear all memories" },
             ],
             onSelect: (scope) => {
-              const cleared = memMgr.clearScope(scope as "session" | "project" | "global" | "all");
+              const cleared = memMgr.clearScope(scope as "project" | "global" | "all");
               ctx.chat.setMessages((prev) => [
                 ...prev,
                 {
@@ -775,13 +794,13 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
 
     const applyChatStyle = (style: "accent" | "bubble", scope?: ConfigScope) => {
       ctx.setChatStyle(style);
-      ctx.saveToScope(patch(style), scope ?? "session");
+      ctx.saveToScope(patch(style), scope ?? "project");
       ctx.chat.setMessages((prev) => [
         ...prev,
         {
           id: crypto.randomUUID(),
           role: "system",
-          content: `Chat style: ${style} (${scope ?? "session"})`,
+          content: `Chat style: ${style} (${scope ?? "project"})`,
           timestamp: Date.now(),
         },
       ]);
@@ -853,13 +872,13 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
 
     const applyMode = (mode: Mode, scope?: ConfigScope) => {
       ctx.setForgeMode(mode);
-      ctx.saveToScope(patch(mode), scope ?? "session");
+      ctx.saveToScope(patch(mode), scope ?? "project");
       ctx.chat.setMessages((prev) => [
         ...prev,
         {
           id: crypto.randomUUID(),
           role: "system",
-          content: `Forge mode set to: ${mode} (${scope ?? "session"})`,
+          content: `Forge mode set to: ${mode} (${scope ?? "project"})`,
           timestamp: Date.now(),
         },
       ]);
@@ -884,7 +903,7 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
         icon: "󰚩",
         currentValue: ctx.currentMode,
         scopeEnabled: true,
-        initialScope: ctx.detectScope("forgeMode"),
+        initialScope: ctx.detectScope("defaultForgeMode"),
         options: [
           {
             value: "default",
@@ -994,13 +1013,13 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
 
     const applyCoAuthor = (enabled: boolean, scope?: ConfigScope) => {
       ctx.chat.setCoAuthorCommits(enabled);
-      ctx.saveToScope(patch(enabled ? "enable" : "disable"), scope ?? "session");
+      ctx.saveToScope(patch(enabled ? "enable" : "disable"), scope ?? "project");
       ctx.chat.setMessages((prev) => [
         ...prev,
         {
           id: crypto.randomUUID(),
           role: "system",
-          content: `Co-author commits ${enabled ? "enabled" : "disabled"} (${scope ?? "session"}).`,
+          content: `Co-author commits ${enabled ? "enabled" : "disabled"} (${scope ?? "project"}).`,
           timestamp: Date.now(),
         },
       ]);
@@ -1092,10 +1111,6 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
     case "/web-search":
       ctx.openWebSearchSettings();
       break;
-    case "/panel":
-    case "/plan-panel":
-      ctx.chat.setShowPlanPanel((prev: boolean) => !prev);
-      break;
     case "/changes":
     case "/files":
       ctx.toggleChanges();
@@ -1112,15 +1127,6 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
       break;
     case "/summarize":
     case "/compact":
-      ctx.chat.setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "system",
-          content: "Compacting conversation context...",
-          timestamp: Date.now(),
-        },
-      ]);
       ctx.chat.summarizeConversation();
       break;
     case "/commit":
@@ -1715,13 +1721,13 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
         const matched = validModes.find((m) => m === arg);
 
         const applyNvimConfig = (mode: (typeof validModes)[number], scope?: ConfigScope) => {
-          ctx.saveToScope({ nvimConfig: mode }, scope ?? "session");
+          ctx.saveToScope({ nvimConfig: mode }, scope ?? "project");
           ctx.chat.setMessages((prev) => [
             ...prev,
             {
               id: crypto.randomUUID(),
               role: "system",
-              content: `Neovim config set to: ${mode} (${scope ?? "session"})\nReopen the editor (Ctrl+E twice) for changes to take effect.`,
+              content: `Neovim config set to: ${mode} (${scope ?? "project"})\nReopen the editor (Ctrl+E twice) for changes to take effect.`,
               timestamp: Date.now(),
             },
           ]);
@@ -1779,13 +1785,13 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
             { value: "off", label: "Off", description: "show compact tool call summaries" },
           ],
           onSelect: (value, scope) => {
-            ctx.saveToScope(patch(value), scope ?? "session");
+            ctx.saveToScope(patch(value), scope ?? "project");
             ctx.chat.setMessages((prev) => [
               ...prev,
               {
                 id: crypto.randomUUID(),
                 role: "system",
-                content: `Verbose mode ${value === "on" ? "on" : "off"} (${scope ?? "session"})`,
+                content: `Verbose mode ${value === "on" ? "on" : "off"} (${scope ?? "project"})`,
                 timestamp: Date.now(),
               },
             ]);
@@ -1808,13 +1814,13 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
           ],
           onSelect: (value, scope) => {
             ctx.setShowReasoning(value === "on");
-            ctx.saveToScope(patch(value), scope ?? "session");
+            ctx.saveToScope(patch(value), scope ?? "project");
             ctx.chat.setMessages((prev) => [
               ...prev,
               {
                 id: crypto.randomUUID(),
                 role: "system",
-                content: `Reasoning ${value === "on" ? "visible" : "hidden"} (${scope ?? "session"})`,
+                content: `Reasoning ${value === "on" ? "visible" : "hidden"} (${scope ?? "project"})`,
                 timestamp: Date.now(),
               },
             ]);
@@ -1857,13 +1863,13 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
           ],
           currentValue: ctx.diffStyle,
           onSelect: (value, scope) => {
-            ctx.saveToScope(patch(value), scope ?? "session");
+            ctx.saveToScope(patch(value), scope ?? "project");
             ctx.chat.setMessages((prev) => [
               ...prev,
               {
                 id: crypto.randomUUID(),
                 role: "system",
-                content: `Diff style: ${value} (${scope ?? "session"})`,
+                content: `Diff style: ${value} (${scope ?? "project"})`,
                 timestamp: Date.now(),
               },
             ]);
@@ -1889,13 +1895,13 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
             { value: "hidden", label: "Hidden", description: "hide vim keybinding hints" },
           ],
           onSelect: (value, scope) => {
-            ctx.saveToScope(patch(value), scope ?? "session");
+            ctx.saveToScope(patch(value), scope ?? "project");
             ctx.chat.setMessages((prev) => [
               ...prev,
               {
                 id: crypto.randomUUID(),
                 role: "system",
-                content: `Vim hints ${value === "visible" ? "visible" : "hidden"} (${scope ?? "session"})`,
+                content: `Vim hints ${value === "visible" ? "visible" : "hidden"} (${scope ?? "project"})`,
                 timestamp: Date.now(),
               },
             ]);

@@ -65,17 +65,12 @@ export function loadProjectConfig(cwd: string): Partial<AppConfig> | null {
 }
 
 /**
- * Merge configs with priority: session > project > global.
+ * Merge configs with priority: project > global.
  * Nested objects (editor, theme) are shallow-merged.
  */
-export function mergeConfigs(
-  global: AppConfig,
-  project: Partial<AppConfig> | null,
-  session: Partial<AppConfig> | null,
-): AppConfig {
+export function mergeConfigs(global: AppConfig, project: Partial<AppConfig> | null): AppConfig {
   const layers: Partial<AppConfig>[] = [global];
   if (project) layers.push(project);
-  if (session) layers.push(session);
 
   let merged: AppConfig = { ...global };
   for (const layer of layers.slice(1)) {

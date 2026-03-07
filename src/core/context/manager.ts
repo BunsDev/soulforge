@@ -9,7 +9,68 @@ import { resolveModel } from "../llm/provider.js";
 import { MemoryManager } from "../memory/manager.js";
 import { getModeInstructions } from "../modes/prompts.js";
 import { buildForbiddenContext, isForbidden } from "../security/forbidden.js";
-import { setFileEventHandlers } from "../tools/file-events.js";
+import { onFileEdited, onFileRead } from "../tools/file-events.js";
+
+// Static prompt sections — extracted for stable cache prefix across turns and subagents
+const STATIC_TOOL_GUIDANCE = [
+  "## Intelligence Layer",
+  "You have LSP-powered code intelligence with multi-tier fallback (LSP → ts-morph → tree-sitter → regex). Use it as the primary way to understand code.",
+  "",
+  "**Symbol operations** — the right tool for each job:",
+  "- Find/read a symbol → `read_code` (extracts function, class, type, interface by name)",
+  "- Definition, references, call hierarchy, implementations → `navigate`",
+  "- File structure, diagnostics, types, unused symbols → `analyze`",
+  "- Rename across all files → `rename_symbol` (compiler-guaranteed, auto-verifies)",
+  "- Move to another file → `move_symbol` (extracts + updates all importers atomically)",
+  "- Extract function/variable → `refactor`",
+  "- Discover patterns/architecture → `discover_pattern`",
+  "- Tests/build/lint/typecheck → `project` (auto-detects toolchain)",
+  "",
+  "**Low-level tools** — use only when intelligence can't help:",
+  "- `read_file` → config files (json/yaml/toml), markdown, raw text, or content after intelligence read",
+  "- `grep` → string literals, log messages, non-code patterns (check Repo Map dependency counts first)",
+  "- `glob` → finding files by pattern when not in the Repo Map",
+  "- `shell` → only when `project` can't handle custom flags or non-standard commands",
+  "",
+  "**Compound tools** — `rename_symbol`, `move_symbol`, `project` do the COMPLETE job. Do not add extra verification steps.",
+];
+
+const STATIC_DISPATCH_GUIDANCE = [
+  "## Dispatch — Parallel Agents",
+  "Dispatch runs parallel agents with a shared read cache — instant dedup across agents.",
+  "",
+  "**Use dispatch for:** multi-file implementation (agents own distinct files), parallel research across 3+ areas, simultaneous code + web research.",
+  "**Do NOT dispatch for:** ≤3 tool calls (do it yourself), rename/move (already atomic), single-file edits, sequential work.",
+  "",
+  "**Task quality — extraction, not investigation:**",
+  "- Tasks are DATA EXTRACTION requests. Tell the agent exactly what to read and what to return.",
+  "- Every task MUST include exact file paths and symbol names from the Repo Map.",
+  "- Include line numbers when the Repo Map shows them (e.g. `read lines 181-265 of src/hooks/useChat.ts`).",
+  "- Split by file ownership, not by concept. Overlapping files = wasted cache.",
+  "- If a symbol isn't in the Repo Map, give targeted search keywords — never open-ended exploration.",
+  "",
+  "**You have the Repo Map — USE IT.** Before writing any task, look up every file and symbol you need.",
+  "The Repo Map gives you exact paths, symbol names, and line ranges. Put ALL of them in the task.",
+  "A task without specific file paths and symbol names is a BAD task — the agent will wander.",
+  "",
+  '**Web search tasks:** ONE focused query per task. Never compound ("search for X, Y, Z, W").',
+  "Compound queries dilute focus — the agent splits attention and returns shallow results for each.",
+  "If you need 3 web searches, either dispatch 3 agents with 1 query each, or do them yourself.",
+  "",
+  "BAD (vague, concept-driven — agent wanders and returns summaries):",
+  '  "Find where context percentage is displayed in the header"',
+  '  "Investigate how model switching affects token tracking"',
+  '  "Search for: 1) smooth streaming techniques, 2) ANSI fade effects, 3) React terminal animation, 4) SDK options"',
+  '  "Read the streaming implementation in useChat.ts"',
+  "GOOD (precise, extraction-driven — agent reads exact targets and returns code):",
+  '  "Read `ContextBar` from `src/components/ContextBar.tsx` and `useStatusBarStore` from `src/stores/statusbar.ts`. Return their full implementations."',
+  '  "In `src/hooks/useChat.ts`, read `flushStreamState` (line 181), `queueMicrotaskFlush` (line 269), and `appendText` (line 1076). Also read lines 1121-1170 (the stream loop text-delta handler). Return exact code for all four."',
+  '  "Search the web for: Vercel AI SDK smoothStream delayInMs recommended values and chunking options. Return the full API surface with defaults."',
+  "",
+  "**After dispatch returns:** trust the results. Do NOT re-read files the agents already returned code from. If a dispatch result is missing code you need, your task was too vague — fix the task pattern next time, don't compensate by re-reading.",
+];
+
+export { STATIC_TOOL_GUIDANCE, STATIC_DISPATCH_GUIDANCE };
 
 const IGNORED_DIRS = new Set([
   "node_modules",
@@ -65,11 +126,12 @@ export class ContextManager {
     this.startRepoMapScan();
   }
 
+  private unsubEdit: (() => void) | null = null;
+  private unsubRead: (() => void) | null = null;
+
   private wireFileEventHandlers(): void {
-    setFileEventHandlers({
-      onFileEdited: (absPath, _content) => this.onFileChanged(absPath),
-      onFileRead: (absPath) => this.trackMentionedFile(absPath),
-    });
+    this.unsubEdit = onFileEdited((absPath) => this.onFileChanged(absPath));
+    this.unsubRead = onFileRead((absPath) => this.trackMentionedFile(absPath));
   }
 
   private startRepoMapScan(): void {
@@ -88,6 +150,12 @@ export class ContextManager {
       if (success) {
         this.repoMapReady = true;
         this.syncRepoMapStore("ready");
+        if (!this.repoMap.isSemanticEnabled()) {
+          const persisted = this.repoMap.detectPersistedSemanticMode();
+          if (persisted !== "off") {
+            this.setSemanticSummaries(persisted);
+          }
+        }
       } else {
         this.syncRepoMapStore("error");
       }
@@ -210,20 +278,41 @@ export class ContextManager {
     }
   }
 
-  setSemanticSummaries(enabled: boolean): void {
-    this.repoMap.setSemanticSummaries(enabled);
+  setSemanticSummaries(modeOrBool: "off" | "ast" | "llm" | boolean): void {
+    const mode = modeOrBool === true ? "llm" : modeOrBool === false ? "off" : modeOrBool;
+    this.repoMap.setSemanticMode(mode);
     const store = useRepoMapStore.getState();
-    if (!enabled) {
+    if (mode === "off") {
       store.setSemanticStatus("off");
+      store.setSemanticCount(0);
       store.setSemanticProgress("");
       store.setSemanticModel("");
+    } else if (mode === "ast") {
+      store.setSemanticModel("");
+      const stats = this.repoMap.getStats();
+      if (stats.summaries > 0) {
+        store.setSemanticCount(stats.summaries);
+        store.setSemanticStatus("ready");
+        store.setSemanticProgress(`ast — ${String(stats.summaries)} extracted`);
+      } else if (this.repoMapReady) {
+        store.setSemanticStatus("generating");
+        store.setSemanticProgress("extracting docstrings...");
+        store.setSemanticCount(0);
+        const count = this.repoMap.generateAstSummaries();
+        store.setSemanticCount(count);
+        store.setSemanticStatus("ready");
+        store.setSemanticProgress(`ast — ${String(count)} extracted`);
+      } else {
+        store.setSemanticStatus("off");
+        store.setSemanticCount(0);
+        store.setSemanticProgress("waiting for repo map...");
+      }
     } else {
+      store.setSemanticModel("");
+      store.setSemanticProgress("");
       const stats = this.repoMap.getStats();
       store.setSemanticCount(stats.summaries);
-      if (stats.summaries > 0) {
-        store.setSemanticStatus("ready");
-      }
-      // Don't set "off" here — generateSemanticSummaries will set "generating" immediately
+      store.setSemanticStatus(stats.summaries > 0 ? "ready" : "off");
     }
   }
 
@@ -239,6 +328,10 @@ export class ContextManager {
 
   isSemanticEnabled(): boolean {
     return this.repoMap.isSemanticEnabled();
+  }
+
+  getSemanticMode(): "off" | "ast" | "llm" {
+    return this.repoMap.getSemanticMode();
   }
 
   setTaskRouter(router: TaskRouter | undefined): void {
@@ -325,7 +418,10 @@ export class ContextManager {
   dispose(): void {
     this.repoMap.close();
     this.memoryManager.close();
-    setFileEventHandlers({});
+    this.unsubEdit?.();
+    this.unsubRead?.();
+    this.unsubEdit = null;
+    this.unsubRead = null;
   }
 
   async refreshRepoMap(): Promise<void> {
@@ -455,36 +551,14 @@ export class ContextManager {
     const repoMapContent = this.repoMapEnabled && this.repoMapReady ? this.renderRepoMap() : null;
     const codebaseSection = repoMapContent
       ? [
-          "## Repo Map — SINGLE SOURCE OF TRUTH",
-          "Live-updated after every edit. Ranked by importance (PageRank + git co-change + context). `+` = exported.",
-          "`(→N)` = N files depend on this file (blast radius). `[NEW]` = appeared since last render.",
-          "This map shows every file, symbol, and dependency in the project RIGHT NOW. Trust it completely.",
-          "When you need to find a file or symbol — look HERE first, not grep/glob. If it's in the map, you already know where it is.",
+          "## Repo Map",
+          "Live-updated after every edit. Ranked by PageRank + git co-change + conversation context.",
+          "`+` = exported. `(→N)` = blast radius (N files depend on this). `[NEW]` = new since last render.",
+          "This is the COMPLETE index of every file, symbol, and dependency in the project.",
+          "Scan it FIRST before any tool call — if a file or symbol is here, you already know its exact path.",
           "```",
           repoMapContent,
           "```",
-          "",
-          "## MANDATORY: Repo Map Inspection Before Tool Calls",
-          "",
-          "**Before making ANY tool call, complete this analysis in your response:**",
-          "",
-          "1. **User's request:** [restate what the user asked for]",
-          "2. **Concepts/keywords:** [extract key terms: component names, features, file types, etc.]",
-          "3. **Repo Map scan:**",
-          "   - **Found:** [list all files/symbols from the Repo Map that match the concepts]",
-          "     - Example: `MemoryIndicator` in `src/components/MemoryIndicator.tsx`",
-          "   - **Not found:** [concepts that don't appear in the map]",
-          "4. **Action plan:**",
-          "   - **Direct reads:** `read_code(target, name, file)` for symbols found in map",
-          "   - **Searches needed:** `navigate workspace_symbols` or `grep` only for items NOT in map",
-          '   - **Relationships:** `navigate references` for "who uses this"',
-          "",
-          "**Then execute the plan. Skip this inspection ONLY for:**",
-          "- `/commands` (context clear, git, sessions, etc.)",
-          "- Simple lookups where you're just showing info to user",
-          "- Follow-up edits in same conversation (map already scanned)",
-          "",
-          "**If you call `grep` or `navigate workspace_symbols` for a symbol that IS in the Repo Map, you have failed.**",
         ]
       : ["## Files", "```", this.getFileTree(3), "```"];
 
@@ -492,85 +566,52 @@ export class ContextManager {
       "You are Forge, the AI inside SoulForge (terminal IDE). Always call yourself Forge.",
       "Always use tools — never guess file contents or code structure.",
       "",
-      "## Style",
-      "- Direct, concise, no filler. Terminal UI — keep it short.",
-      "- Markdown code blocks with language hints. Never paste raw numbered lines.",
-      "- Don't touch code you weren't asked to change (no comments, docstrings, type annotations).",
-      "",
       "## Project",
       `cwd: ${this.cwd}`,
       projectInfo ? `\n${projectInfo}` : "",
       "",
       ...codebaseSection,
       "",
-      "## Tool Priorities — FOLLOW STRICTLY",
-      "You have LSP-powered code intelligence. USE IT. Do NOT fall back to grep/glob/read_file for code understanding.",
-      "- **Find a symbol?** → `navigate definition` or `navigate workspace_symbols`. NEVER grep for it.",
-      "- **Read a function/class/type?** → `read_code` with the symbol name. NEVER read_file and scroll.",
-      "- **Who calls X? Who uses X?** → `navigate references` or `navigate call_hierarchy`. NEVER grep.",
-      "- **What's in a file?** → `analyze outline` for structure, `navigate symbols` for listing. NEVER read_file to skim.",
-      "- **Type of a variable?** → `analyze type_info`. NEVER guess from context.",
-      "- **Errors in a file?** → `analyze diagnostics`. NEVER shell out to tsc.",
-      "- **Imports/exports?** → `navigate imports`/`navigate exports`. NEVER regex-parse them.",
-      "- `read_file`: ONLY for config files (json/yaml/toml), .md files, or when you need the full raw text after read_code.",
-      "- `grep`/`glob`: ONLY for string literals, log messages, or non-code patterns that symbols can't capture.",
-      "- **Rename a symbol?** → `rename_symbol` then `project test`. DONE. Two calls total. Do NOT grep/glob/read before or after — it auto-finds and auto-verifies.",
-      "- **Move a symbol to another file?** → `move_symbol` — extracts definition + imports, updates all importers atomically. Works across all languages.",
-      "- **Extract code?** → `refactor extract_function` or `refactor extract_variable`. NEVER cut-and-paste manually.",
-      "- **Run tests/build/lint/typecheck?** → `project test|build|lint|typecheck` auto-detects the right command. Use `shell` only when you need custom flags.",
-      "- Edit: `edit_file` (disk). On failure: re-read file, retry with exact text.",
-      "- Memory: proactively save preferences. Check memory for complex tasks.",
+      ...STATIC_TOOL_GUIDANCE,
+      ...(this.repoMapReady && this.repoMap.getStats().symbols === 0
+        ? [
+            "",
+            "**⚠ Code intelligence limited**: No symbols indexed (tree-sitter may be unavailable). Intelligence tools will fall back to regex.",
+          ]
+        : []),
       "",
-      "## Dispatch — Parallel Agents",
-      "Dispatch runs multiple agents in parallel with a shared read cache — the 2nd agent reading the same file gets an instant hit. Use it for any task with genuinely parallel work.",
-      "**Quick check:** if the task is a simple read or single-file edit (≤3 tool calls), do it yourself with read_code/navigate/edit_file — no agent overhead. Everything else: dispatch.",
-      "",
-      "**When to dispatch:**",
-      "- Multi-file implementation → parallel code agents each owning distinct files",
-      "- Code extraction + web research running simultaneously",
-      "- Gathering data from 3+ unrelated areas of the codebase in parallel",
-      "- Any task where parallelism saves time over sequential tool calls",
-      "**When NOT to dispatch:**",
-      "- Simple investigation you can answer with 1-3 read_code/navigate/analyze calls",
-      "- rename_symbol / move_symbol — already atomic and cross-file",
-      "- Single-file edits — one edit_file call is faster than an agent",
-      "- Sequential research where step 2 depends on step 1's answer",
-      "",
-      "**Before every dispatch:**",
-      "1. Scan the Repo Map. Find every file and symbol relevant to the task.",
-      "2. Copy exact paths and symbol names into your agent task descriptions.",
-      "3. Write extraction tasks, not exploration tasks. Agents go to coordinates you give them.",
-      "The Repo Map already answers 'where is X?' — dispatch tells agents WHAT to extract from those locations.",
-      "",
-      "**Task format — be surgical:**",
-      '- BAD: "investigate how the LSP backend works" — vague, agent wastes tool calls on discovery',
-      '- GOOD: "Read executeLua from src/core/intelligence/backends/lsp/nvim-bridge.ts, findServerForLanguage and resolveCommand from server-registry.ts. Return their full implementations."',
-      "Every task MUST include specific file paths and symbol names. No task should say 'investigate', 'explore', or 'look into'.",
-      "",
-      "**Discovery fallback — when the Repo Map doesn't show the file:**",
-      "If a symbol or file isn't in the Repo Map, give the agent a targeted search — NOT an open-ended exploration.",
-      '- GOOD: "Search workspace_symbols for `registry` and `mason`. Read any matching files with read_code. Return their implementations."',
-      '- BAD: "Check if there\'s any LSP server discovery/registry code somewhere in the codebase."',
-      "Name specific symbol keywords to search for. The agent will `navigate workspace_symbols` once and go straight to the result.",
-      "",
-      "**Agent count (up to 5):**",
-      "- Scale agents to the work: 2 for focused tasks, 3-4 for broad multi-file work, 5 for large implementations.",
-      "- Split by file ownership, not by concept. Overlapping files = wasted work.",
-      "- Each agent should own a distinct set of files or a distinct concern (e.g., code + web research + tests).",
-      "**Rules:** assign distinct files per code agent. Use `dependsOn` only when genuinely needed. Default to parallel.",
+      ...STATIC_DISPATCH_GUIDANCE,
       "",
       ...this.buildEditorToolsSection(),
       "",
       "## Planning",
       "Plan when: 3+ steps, multi-file, or architectural. Skip for: simple edits, lookups, 'just do it'.",
-      "1. Research → 2. `plan` (title + steps) → 3. User confirms → 4. Execute with `update_plan_step`.",
-      "The plan tool renders a live checklist. Do NOT repeat plan steps in text — redundant.",
+      "1. Research every file you'll touch using intelligence tools → 2. `plan` (self-contained) → 3. User confirms → 4. Execute with `update_plan_step`.",
+      "The plan tool renders a live checklist. Do NOT repeat plan steps in text.",
+      "**Plan must be SELF-CONTAINED — zero exploration during execution:**",
+      "- `files[]` — every file, exact paths from the Repo Map.",
+      "- `files[].symbols[]` — every symbol to add/modify/remove, with current signatures and exact changes.",
+      "- `steps[].details` — full implementation instructions for each step.",
+      "- After confirm → execute DIRECTLY. No new plan, no dispatch, no exploration.",
+      "- If you can't fill in symbols and details, you haven't researched enough.",
       "",
-      "## Critical Rules",
-      "- **RENAME** → `rename_symbol` then `project test`. EXACTLY two tool calls. The rename is compiler-guaranteed — no grep, no read_file, no verification. If you do more than 2 calls for a rename, you are wasting time.",
-      "- The user sees only a one-line tool summary (e.g. 'ok'). They CANNOT see full tool output. When asked to show file contents or results, include them in your text response.",
+      "## Style",
+      "- Direct, concise, no filler. Terminal UI — keep it short.",
+      "- Markdown code blocks with language hints. Never paste raw numbered lines.",
+      "- Don't touch code you weren't asked to change.",
+      "",
+      "## Rules",
+      "- Compound tools (`rename_symbol`, `move_symbol`, `project`) do the complete job — no extra verification.",
+      "- The user sees only a one-line tool summary. Include file contents or results in your text when asked.",
       "- On tool failure: read the error, adjust approach. Never retry the exact same call.",
       "- User can abort with Ctrl+X, resume with `/continue`.",
+      ...(repoMapContent
+        ? [
+            "",
+            "## IMPORTANT",
+            "The Repo Map is your index. If a symbol is indexed, `grep` and `workspace_symbols` will auto-redirect you to `read_code` with the exact path. Use the map paths directly — redundant searches are intercepted.",
+          ]
+        : []),
     ];
 
     const showEditorContext = this.editorIntegration?.editorContext !== false;

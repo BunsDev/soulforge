@@ -3,8 +3,8 @@ import { useEffect, useState } from "react";
 export const POPUP_BG = "#111122";
 export const POPUP_HL = "#1a1a3e";
 
-export type ConfigScope = "session" | "project" | "global";
-export const CONFIG_SCOPES: ConfigScope[] = ["session", "project", "global"];
+export type ConfigScope = "project" | "global";
+export const CONFIG_SCOPES: ConfigScope[] = ["project", "global"];
 
 export const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -22,36 +22,36 @@ export const SPINNER_FRAMES_FILLED = [
 ];
 
 let globalFrame = 0;
-const listeners = new Set<() => void>();
+let refCount = 0;
 let tickTimer: ReturnType<typeof setInterval> | null = null;
+const frameListeners = new Set<(frame: number) => void>();
 
-function startTick() {
+function ensureTick() {
   if (tickTimer) return;
   tickTimer = setInterval(() => {
     globalFrame = (globalFrame + 1) % SPINNER_FRAMES.length;
-    for (const cb of listeners) cb();
-  }, 120);
+    for (const fn of frameListeners) fn(globalFrame);
+  }, 150);
 }
 
-function stopTick() {
-  if (tickTimer !== null && listeners.size === 0) {
-    clearInterval(tickTimer);
-    tickTimer = null;
-  }
-}
-
-export function useSpinnerFrame(enabled = true): number {
+export function useSpinnerFrame(): number {
   const [frame, setFrame] = useState(globalFrame);
   useEffect(() => {
-    if (!enabled) return;
-    const cb = () => setFrame(globalFrame);
-    listeners.add(cb);
-    startTick();
+    refCount++;
+    frameListeners.add(setFrame);
+    ensureTick();
     return () => {
-      listeners.delete(cb);
-      stopTick();
+      frameListeners.delete(setFrame);
+      refCount--;
+      if (refCount <= 0) {
+        refCount = 0;
+        if (tickTimer) {
+          clearInterval(tickTimer);
+          tickTimer = null;
+        }
+      }
     };
-  }, [enabled]);
+  }, []);
   return frame;
 }
 

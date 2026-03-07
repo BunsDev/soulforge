@@ -102,7 +102,8 @@ function getClaudeGen(model: string): ClaudeGen {
 }
 
 function getModelCapabilities(modelId: string): ModelCapabilities {
-  const gen = getClaudeGen(extractBaseModel(modelId));
+  const base = extractBaseModel(modelId);
+  const gen = getClaudeGen(base);
 
   if (gen === "non-claude" || gen === "legacy") {
     return {
@@ -126,11 +127,13 @@ function getModelCapabilities(modelId: string): ModelCapabilities {
     };
   }
 
+  const hasSpeed = base.includes("opus");
+
   return {
     thinking: true,
     adaptiveThinking: true,
     effort: true,
-    speed: true,
+    speed: hasSpeed,
     contextManagement: true,
     interleavedThinking: true,
   };
@@ -189,6 +192,7 @@ const TASK_EFFORT: Record<TaskType, string> = {
   coding: "high",
   exploration: "medium",
   webSearch: "medium",
+  compact: "medium",
   default: "high",
 };
 
@@ -254,7 +258,7 @@ export function buildProviderOptions(
   let thinkingEnabled = false;
 
   if (caps.thinking) {
-    const mode = config.thinking?.mode ?? "disabled";
+    const mode = config.thinking?.mode ?? "off";
 
     if (mode === "auto" || mode === "adaptive") {
       if (caps.adaptiveThinking) {
@@ -271,11 +275,11 @@ export function buildProviderOptions(
     }
   }
 
-  if (caps.effort && config.performance?.effort) {
+  if (caps.effort && config.performance?.effort && config.performance.effort !== "off") {
     anthropic.effort = resolveEffort(taskType ?? "default", config.performance.effort);
   }
 
-  if (caps.speed && config.performance?.speed) {
+  if (caps.speed && config.performance?.speed && config.performance.speed !== "off") {
     anthropic.speed = config.performance.speed;
   }
 

@@ -19,45 +19,87 @@ export function buildInteractiveTools(
     plan: tool({
       description:
         "Create an implementation plan before executing multi-step tasks. " +
-        "Use this to outline your approach — each step will be displayed as a live checklist the user can see. " +
         "The user MUST confirm before you proceed. " +
-        "Call update_plan_step to mark steps as active/done/skipped as you progress.",
+        "CRITICAL: Research BEFORE calling plan — read every file you'll touch so the plan has exact details. " +
+        "The plan must be SELF-CONTAINED: exact file paths, symbol names, signatures, and implementation details " +
+        "so execution requires ZERO exploration or dispatch. Every file and symbol you'll touch must be listed. " +
+        "If you can't fill in exact details, you haven't researched enough — go read the code first.",
       inputSchema: z.object({
         title: z.string().describe("Short plan title (2-6 words)"),
         context: z.string().describe("What problem this solves and why these changes are needed"),
         files: z
           .array(
             z.object({
-              path: z.string().describe("File path relative to project root"),
+              path: z.string().describe("Exact file path from Repo Map or research — never guess"),
               action: z.enum(["create", "modify", "delete"]).describe("Type of change"),
               description: z.string().describe("What changes to make in this file"),
+              symbols: z
+                .array(
+                  z.object({
+                    name: z.string().describe("Symbol name (function, class, type, variable)"),
+                    kind: z
+                      .string()
+                      .describe("Symbol kind: function, class, interface, type, method, variable"),
+                    action: z
+                      .enum(["add", "modify", "remove", "rename"])
+                      .describe("What to do with this symbol"),
+                    details: z
+                      .string()
+                      .describe(
+                        "Exact change: new signature, parameter changes, logic to add/remove. " +
+                          "Include current signature for modifications.",
+                      ),
+                    line: z
+                      .number()
+                      .optional()
+                      .describe("Current line number if modifying/removing"),
+                  }),
+                )
+                .optional()
+                .catch(undefined)
+                .describe("Symbols to change in this file — include for all modify/delete actions"),
             }),
           )
-          .optional()
-          .describe("Files to change"),
+          .describe("All files to change — REQUIRED"),
         steps: z
           .array(
             z.object({
               id: z.string().describe("Step ID (step-1, step-2, etc.)"),
-              label: z.string().describe("Short step description"),
+              label: z.string().describe("Short step label for the checklist"),
+              details: z
+                .string()
+                .optional()
+                .default("")
+                .describe(
+                  "Exact implementation instructions: what to read_code, what to edit_file (old → new), " +
+                    "what to shell/project. Must be executable without further research.",
+                ),
             }),
           )
-          .describe("Ordered implementation steps"),
-        verification: z.array(z.string()).optional().describe("How to verify the changes work"),
+          .describe("Ordered implementation steps with full details"),
+        verification: z
+          .array(z.string())
+          .optional()
+          .catch(undefined)
+          .describe("How to verify the changes work"),
       }),
       execute: async (args) => {
         const lines = [`# ${args.title}`, "", `## Context`, "", args.context, "", `## Files`];
-        if (args.files) {
-          for (const f of args.files) {
-            lines.push(`- **${f.action}** \`${f.path}\` — ${f.description}`);
+        for (const f of args.files) {
+          lines.push(`- **${f.action}** \`${f.path}\` — ${f.description}`);
+          if (f.symbols?.length) {
+            for (const s of f.symbols) {
+              const loc = s.line ? `:${String(s.line)}` : "";
+              lines.push(`  - ${s.action} \`${s.name}\` (${s.kind}${loc}): ${s.details}`);
+            }
           }
         }
         lines.push("", "## Steps");
         for (const s of args.steps) {
-          lines.push(`${s.id}. ${s.label}`);
+          lines.push(`### ${s.id}. ${s.label}`, "", s.details, "");
         }
         if (args.verification?.length) {
-          lines.push("", "## Verification");
+          lines.push("## Verification");
           for (const v of args.verification) {
             lines.push(`- ${v}`);
           }
@@ -78,11 +120,17 @@ export function buildInteractiveTools(
         };
         callbacks.onPlanCreate(plan);
 
-        const action = await callbacks.onPlanReview(plan, `.soulforge/plans/${fname}`);
+        const action = await callbacks.onPlanReview(
+          plan,
+          `.soulforge/plans/${fname}`,
+          lines.join("\n"),
+        );
 
+        const planFile = `.soulforge/plans/${fname}`;
         if (action === "execute") {
           return {
             success: true,
+            file: planFile,
             output:
               "Plan confirmed by user. Proceed with execution step by step. Call update_plan_step to mark steps as active/done/skipped.",
           };
@@ -90,16 +138,22 @@ export function buildInteractiveTools(
         if (action === "clear_execute") {
           return {
             success: true,
+            file: planFile,
             output: "Plan confirmed. Context will be cleared and plan re-submitted for execution.",
           };
         }
         if (action === "cancel" || action === "__skipped__") {
           return {
             success: true,
+            file: planFile,
             output: "Plan cancelled by user. Wait for further instructions.",
           };
         }
-        return { success: true, output: `User wants changes to the plan: ${action}` };
+        return {
+          success: true,
+          file: planFile,
+          output: `User wants changes to the plan: ${action}`,
+        };
       },
     }),
 

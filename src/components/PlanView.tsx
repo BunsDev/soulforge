@@ -140,53 +140,49 @@ function InlinePlan({
   allDone: boolean;
 }) {
   const counterText = allDone ? "done" : `${String(doneCount)}/${String(totalCount)}`;
-  const titleLen = plan.title.length + 4;
-  const maxLabel = Math.max(titleLen, ...plan.steps.map((s) => s.label.length + 4));
-  const counterLen = counterText.length + 4;
-  const innerW = Math.max(30, Math.min(56, maxLabel + counterLen));
-
-  const headerContent = `  \uF0CB ${plan.title} `;
-  const headerRight = ` ${counterText} `;
-  const headerFill = Math.max(0, innerW - headerContent.length - headerRight.length);
 
   return (
-    <box flexDirection="column">
-      <text>
-        <span fg="#6A0DAD">╭──</span>
-        <span fg="#9B30FF" attributes={TextAttributes.BOLD}>
-          {headerContent}
-        </span>
-        <span fg="#6A0DAD">{"─".repeat(headerFill)}</span>
-        <span fg="#555">{headerRight}</span>
-        <span fg="#6A0DAD">╮</span>
-      </text>
-      {plan.steps.slice(0, MAX_VISIBLE).map((step) => {
-        const label = `${STATUS_ICONS[step.status]} ${step.label}`;
-        const pad = Math.max(0, innerW - label.length - 1);
-        return (
-          <box key={step.id} height={1}>
-            <text truncate>
-              <span fg="#6A0DAD">│ </span>
-              <span fg={STATUS_COLORS[step.status]}>{label}</span>
-              <span>{" ".repeat(pad)}</span>
-              <span fg="#6A0DAD">│</span>
-            </text>
-          </box>
-        );
-      })}
-      {plan.steps.length > MAX_VISIBLE && (
-        <box height={1}>
-          <text truncate>
-            <span fg="#6A0DAD">│ </span>
-            <span fg="#555">+{String(plan.steps.length - MAX_VISIBLE)} more</span>
-            <span>{" ".repeat(Math.max(0, innerW - 8))}</span>
-            <span fg="#6A0DAD">│</span>
+    <box flexDirection="column" flexShrink={0} border borderStyle="rounded" borderColor="#333">
+      <box
+        height={1}
+        flexShrink={0}
+        paddingX={1}
+        backgroundColor="#1a1a1a"
+        alignSelf="flex-start"
+        marginTop={-1}
+      >
+        <text truncate>
+          <span fg="#9B30FF">{"\uF0CB"}</span>{" "}
+          <span fg="#9B30FF" attributes={TextAttributes.BOLD}>
+            {plan.title}
+          </span>
+          <span fg="#555">
+            {"  "}
+            {counterText}
+          </span>
+        </text>
+      </box>
+      {plan.steps.slice(0, MAX_VISIBLE).map((step) => (
+        <box key={step.id} height={1} paddingX={1}>
+          {step.status === "active" ? (
+            <Spinner />
+          ) : (
+            <text fg={STATUS_COLORS[step.status]}>{STATUS_ICONS[step.status]}</text>
+          )}
+          <text
+            fg={step.status === "active" ? "#eee" : STATUS_COLORS[step.status]}
+            attributes={step.status === "active" ? TextAttributes.BOLD : undefined}
+          >
+            {" "}
+            {step.label}
           </text>
         </box>
+      ))}
+      {plan.steps.length > MAX_VISIBLE && (
+        <box height={1} paddingX={1}>
+          <text fg="#555">+{String(plan.steps.length - MAX_VISIBLE)} more</text>
+        </box>
       )}
-      <text>
-        <span fg="#6A0DAD">╰{"─".repeat(innerW)}╯</span>
-      </text>
     </box>
   );
 }

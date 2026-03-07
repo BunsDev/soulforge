@@ -14,6 +14,7 @@ interface Props {
   cursorCol?: number;
   onClosed?: () => void;
   showHints?: boolean;
+  error?: string | null;
 }
 
 type Direction = "opening" | "idle";
@@ -78,6 +79,7 @@ export const EditorPanel = memo(function EditorPanel({
   cursorCol,
   onClosed,
   showHints = true,
+  error,
 }: Props) {
   const [animFrame, setAnimFrame] = useState(0);
   const [direction, setDirection] = useState<Direction>("idle");
@@ -130,6 +132,46 @@ export const EditorPanel = memo(function EditorPanel({
         <text fg="#444" attributes={TextAttributes.DIM}>
           loading forge...
         </text>
+      </box>
+    );
+  }
+
+  if (error) {
+    return (
+      <box
+        flexDirection="column"
+        width="60%"
+        borderStyle="rounded"
+        border={true}
+        borderColor={borderColor}
+      >
+        <box flexDirection="row" paddingX={1} flexShrink={0} height={1}>
+          <text bg="#6A0DAD" fg="white" attributes={TextAttributes.BOLD}>
+            {` ${UI_ICONS.editor} `}
+          </text>
+          <text fg="#888"> editor</text>
+        </box>
+        <box paddingX={1} flexShrink={0} height={1}>
+          <text fg="#333" truncate>
+            {"─".repeat(200)}
+          </text>
+        </box>
+        {error === "neovim-not-found" ? (
+          <NvimNotFoundSplash />
+        ) : (
+          <box flexDirection="column" flexGrow={1} justifyContent="center" alignItems="center">
+            <text fg="#FF0040" attributes={TextAttributes.BOLD}>
+              Editor Failed to Start
+            </text>
+            <text> </text>
+            <text fg="#666">{error}</text>
+          </box>
+        )}
+        <box paddingX={1} flexShrink={0} height={1}>
+          <text fg="#333" truncate>
+            {"─".repeat(200)}
+          </text>
+        </box>
       </box>
     );
   }
@@ -216,6 +258,71 @@ export const EditorPanel = memo(function EditorPanel({
     </box>
   );
 });
+
+const INSTALL_CMDS: Record<string, { cmd: string; label: string }[]> = {
+  darwin: [
+    { cmd: "brew install neovim", label: "Homebrew" },
+    { cmd: "sudo port install neovim", label: "MacPorts" },
+    {
+      cmd: "curl -LO https://github.com/neovim/neovim/releases/latest/download/nvim-macos-arm64.tar.gz",
+      label: "Direct (Apple Silicon)",
+    },
+    {
+      cmd: "curl -LO https://github.com/neovim/neovim/releases/latest/download/nvim-macos-x86_64.tar.gz",
+      label: "Direct (Intel)",
+    },
+  ],
+  win32: [
+    { cmd: "winget install Neovim.Neovim", label: "winget" },
+    { cmd: "scoop install neovim", label: "Scoop" },
+    { cmd: "choco install neovim", label: "Chocolatey" },
+  ],
+  linux: [
+    {
+      cmd: "curl -LO https://github.com/neovim/neovim/releases/latest/download/nvim-linux-x86_64.appimage",
+      label: "AppImage (recommended)",
+    },
+    { cmd: "sudo snap install nvim --classic", label: "Snap" },
+    { cmd: "sudo dnf install -y neovim", label: "Fedora" },
+    { cmd: "sudo pacman -S neovim", label: "Arch" },
+    { cmd: "sudo apt install neovim", label: "Debian / Ubuntu (may be outdated)" },
+  ],
+};
+
+function NvimNotFoundSplash() {
+  const cmds = INSTALL_CMDS[process.platform] ?? INSTALL_CMDS.linux ?? [];
+  const longest = cmds.reduce((max, c) => Math.max(max, c.cmd.length), 0);
+
+  return (
+    <box flexDirection="column" flexGrow={1} justifyContent="center" paddingX={4}>
+      <text fg="#FF0040" attributes={TextAttributes.BOLD}>
+        Neovim Not Found
+      </text>
+      <text> </text>
+      <text fg="#666">The editor requires Neovim (v0.11+)</text>
+      <text> </text>
+      <text fg="#6A0DAD" attributes={TextAttributes.BOLD}>
+        Install:
+      </text>
+      {cmds.map(({ cmd, label }) => (
+        <text key={cmd}>
+          <span fg="#555">{"  $ "}</span>
+          <span fg="#00AA00">{cmd}</span>
+          <span fg="#333">
+            {" ".repeat(Math.max(2, longest - cmd.length + 2))}
+            {label}
+          </span>
+        </text>
+      ))}
+      <text> </text>
+      <text fg="#555">https://github.com/neovim/neovim/releases</text>
+      <text> </text>
+      <text fg="#444" attributes={TextAttributes.DIM}>
+        Restart SoulForge after installing.
+      </text>
+    </box>
+  );
+}
 
 function VimHints({ mode }: { mode: string }) {
   const isInsert = mode === "insert";

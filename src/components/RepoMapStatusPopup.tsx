@@ -91,7 +91,7 @@ export function RepoMapStatusPopup({ visible, onClose }: Props) {
     semanticStatus === "generating"
       ? `${frame} ${semanticProgress || "generating..."}`
       : semanticStatus === "ready"
-        ? `● ${String(semanticCount)} cached`
+        ? `● ${semanticProgress || `${String(semanticCount)} cached`}`
         : semanticStatus === "error"
           ? "● error"
           : "● off";

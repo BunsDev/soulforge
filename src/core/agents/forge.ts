@@ -4,6 +4,7 @@ import { stepCountIs, ToolLoopAgent } from "ai";
 import type { EditorIntegration, ForgeMode, InteractiveCallbacks } from "../../types/index.js";
 import type { ContextManager } from "../context/manager.js";
 import { buildInteractiveTools, buildRestrictedModeTools, buildTools } from "../tools/index.js";
+import { repairToolCall, sanitizeToolInputsStep, smoothStreamOptions } from "./stream-options.js";
 import { buildSubagentTools, type SharedCacheRef } from "./subagent-tools.js";
 
 const RESTRICTED_MODES = new Set<ForgeMode>(["architect", "socratic", "challenge"]);
@@ -50,11 +51,14 @@ export function createForgeAgent({
   sharedCacheRef,
 }: ForgeAgentOptions) {
   const isRestricted = RESTRICTED_MODES.has(forgeMode);
+  const repoMap = contextManager.isRepoMapReady() ? contextManager.getRepoMap() : undefined;
+
   const directTools = isRestricted
-    ? buildRestrictedModeTools(editorIntegration, onApproveWebSearch, { webSearchModel })
+    ? buildRestrictedModeTools(editorIntegration, onApproveWebSearch, { webSearchModel, repoMap })
     : buildTools(undefined, editorIntegration, onApproveWebSearch, {
         codeExecution,
         webSearchModel,
+        repoMap,
       });
 
   const repoMapContext = contextManager.isRepoMapReady()
@@ -72,6 +76,7 @@ export function createForgeAgent({
           onApproveWebSearch,
           readOnly: true,
           repoMapContext,
+          repoMap,
           sharedCacheRef,
         }).dispatch,
       }
@@ -84,12 +89,14 @@ export function createForgeAgent({
         headers,
         onApproveWebSearch,
         repoMapContext,
+        repoMap,
         sharedCacheRef,
       });
 
   return new ToolLoopAgent({
     id: "forge",
     model,
+    ...smoothStreamOptions,
     tools: {
       ...directTools,
       ...subagentTools,
@@ -101,6 +108,8 @@ export function createForgeAgent({
       providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
     },
     stopWhen: stepCountIs(500),
+    prepareStep: sanitizeToolInputsStep,
+    experimental_repairToolCall: repairToolCall,
     ...(providerOptions && Object.keys(providerOptions).length > 0 ? { providerOptions } : {}),
     ...(headers ? { headers } : {}),
   });

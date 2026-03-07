@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join, relative } from "node:path";
 import { isForbidden } from "../security/forbidden.js";
 import type { Language, SymbolKind } from "./types.js";
@@ -76,7 +76,7 @@ const IGNORED_DIRS = new Set([
 
 const MAX_FILE_SIZE = 500_000;
 const MAX_DEPTH = 10;
-const MAX_REFS_PER_FILE = 300;
+const MAX_REFS_PER_FILE = 500;
 const PAGERANK_ITERATIONS = 20;
 const PAGERANK_DAMPING = 0.85;
 const DEFAULT_TOKEN_BUDGET = 2500;
@@ -241,8 +241,9 @@ export class RepoMap {
   private dirty = false;
   private dirtyTimer: ReturnType<typeof setTimeout> | null = null;
   private hasGit: boolean | null = null;
-  private prevRenderedPaths: string[] = [];
-  private semanticEnabled = false;
+  private seenPaths = new Set<string>();
+  private entryPointsCache: string[] | null = null;
+  private semanticMode: "off" | "ast" | "llm" = "off";
   private summaryGenerator: SummaryGenerator | null = null;
   onProgress: ((indexed: number, total: number) => void) | null = null;
   onScanComplete: ((success: boolean) => void) | null = null;
@@ -324,14 +325,49 @@ export class RepoMap {
     `);
 
     this.db.run(`
-      CREATE TABLE IF NOT EXISTS semantic_summaries (
-        symbol_id INTEGER PRIMARY KEY REFERENCES symbols(id) ON DELETE CASCADE,
-        summary TEXT NOT NULL,
-        file_mtime REAL NOT NULL
+      CREATE TABLE IF NOT EXISTS external_imports (
+        file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+        package TEXT NOT NULL,
+        specifiers TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (file_id, package)
       );
+      CREATE INDEX IF NOT EXISTS idx_ext_imports_pkg ON external_imports(package);
     `);
 
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS semantic_summaries (
+        symbol_id INTEGER NOT NULL REFERENCES symbols(id) ON DELETE CASCADE,
+        source TEXT NOT NULL DEFAULT 'llm',
+        summary TEXT NOT NULL,
+        file_mtime REAL NOT NULL,
+        PRIMARY KEY (symbol_id, source)
+      );
+    `);
+    this.migrateSemanticSource();
+
     this.rebuildFts();
+  }
+
+  private migrateSemanticSource(): void {
+    try {
+      const cols = this.db
+        .query<{ name: string }, []>("PRAGMA table_info(semantic_summaries)")
+        .all();
+      if (cols.length > 0 && !cols.some((c) => c.name === "source")) {
+        this.db.run("DROP TABLE semantic_summaries");
+        this.db.run(`
+          CREATE TABLE semantic_summaries (
+            symbol_id INTEGER NOT NULL REFERENCES symbols(id) ON DELETE CASCADE,
+            source TEXT NOT NULL DEFAULT 'llm',
+            summary TEXT NOT NULL,
+            file_mtime REAL NOT NULL,
+            PRIMARY KEY (symbol_id, source)
+          );
+        `);
+      }
+    } catch {
+      // fresh db or already migrated
+    }
   }
 
   get isReady(): boolean {
@@ -403,6 +439,7 @@ export class RepoMap {
 
       this.buildCoChanges();
 
+      this.compactIfNeeded();
       this.ready = true;
       this.onScanComplete?.(true);
     } catch (err) {
@@ -443,6 +480,7 @@ export class RepoMap {
     if (existing) {
       this.db.query("DELETE FROM symbols WHERE file_id = ?").run(existing.id);
       this.db.query("DELETE FROM refs WHERE file_id = ?").run(existing.id);
+      this.db.query("DELETE FROM external_imports WHERE file_id = ?").run(existing.id);
       this.db
         .query("DELETE FROM edges WHERE source_file_id = ? OR target_file_id = ?")
         .run(existing.id, existing.id);
@@ -516,6 +554,10 @@ export class RepoMap {
         }
       });
       tx();
+
+      if (this.semanticMode === "ast") {
+        this.extractAstSummaries(fileId, outline.symbols, exportedNames, lines, mtime);
+      }
     }
 
     const identifiers = this.extractIdentifiers(content, language);
@@ -528,6 +570,39 @@ export class RepoMap {
         }
       });
       tx();
+    }
+
+    if (outline && outline.imports.length > 0) {
+      const extImports = new Map<string, Set<string>>();
+      for (const imp of outline.imports) {
+        if (
+          imp.source.startsWith(".") ||
+          imp.source.startsWith("/") ||
+          imp.source.startsWith("node:") ||
+          imp.source.startsWith("bun:")
+        )
+          continue;
+        const pkg = imp.source.startsWith("@")
+          ? imp.source.split("/").slice(0, 2).join("/")
+          : (imp.source.split("/")[0] ?? imp.source);
+        let specs = extImports.get(pkg);
+        if (!specs) {
+          specs = new Set();
+          extImports.set(pkg, specs);
+        }
+        for (const s of imp.specifiers) specs.add(s);
+      }
+      if (extImports.size > 0) {
+        const insertExt = this.db.prepare(
+          "INSERT OR REPLACE INTO external_imports (file_id, package, specifiers) VALUES (?, ?, ?)",
+        );
+        const tx = this.db.transaction(() => {
+          for (const [pkg, specs] of extImports) {
+            insertExt.run(fileId, pkg, [...specs].join(","));
+          }
+        });
+        tx();
+      }
     }
   }
 
@@ -585,14 +660,18 @@ export class RepoMap {
       )
       .all();
 
+    const totalFiles =
+      this.db.query<{ c: number }, []>("SELECT COUNT(*) AS c FROM files").get()?.c ?? 1;
+
     const edgeWeights = new Map<string, number>();
     for (const row of rows) {
-      let mul = 1.0;
       const name = row.name;
+      // IDF: symbols defined in many files are generic (low specificity)
+      const idf = Math.log(totalFiles / Math.max(1, row.def_count));
+      let mul = Math.max(0.5, idf / Math.log(totalFiles));
       const isCamelOrSnake = /[a-z][A-Z]/.test(name) || name.includes("_");
-      if (isCamelOrSnake && name.length >= 8) mul *= 10;
+      if (isCamelOrSnake && name.length >= 8) mul *= 3;
       if (name.startsWith("_")) mul *= 0.1;
-      if (row.def_count > 5) mul *= 0.1;
       const w = Math.sqrt(row.ref_count) * mul;
 
       const key = `${String(row.source_file_id)}:${String(row.target_file_id)}`;
@@ -813,16 +892,144 @@ export class RepoMap {
     return result;
   }
 
-  setSemanticSummaries(enabled: boolean): void {
-    this.semanticEnabled = enabled;
+  private getEntryPoints(): string[] {
+    if (this.entryPointsCache !== null) return this.entryPointsCache;
+    this.entryPointsCache = [];
+    try {
+      const pkgPath = join(this.cwd, "package.json");
+      const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+      for (const field of ["module", "main", "source"]) {
+        if (typeof pkg[field] === "string") {
+          this.entryPointsCache.push(pkg[field].replace(/^\.\//, ""));
+        }
+      }
+      if (typeof pkg.bin === "string") {
+        this.entryPointsCache.push(pkg.bin.replace(/^\.\//, ""));
+      } else if (pkg.bin && typeof pkg.bin === "object") {
+        for (const v of Object.values(pkg.bin)) {
+          if (typeof v === "string") this.entryPointsCache.push(v.replace(/^\.\//, ""));
+        }
+      }
+    } catch {}
+    for (const p of ["src/main.rs", "src/lib.rs", "main.go"]) {
+      if (existsSync(join(this.cwd, p))) this.entryPointsCache.push(p);
+    }
+    return this.entryPointsCache;
+  }
+
+  private getExternalDepsSummary(): string | null {
+    const deps = this.db
+      .query<{ package: string; file_count: number; all_specs: string | null }, []>(
+        `SELECT package, COUNT(DISTINCT file_id) AS file_count,
+                GROUP_CONCAT(specifiers) AS all_specs
+         FROM external_imports
+         GROUP BY package
+         HAVING file_count >= 3
+         ORDER BY file_count DESC
+         LIMIT 8`,
+      )
+      .all();
+    if (deps.length === 0) return null;
+
+    const depLines: string[] = ["Key dependencies:"];
+    for (const dep of deps) {
+      const allSpecs = new Set<string>();
+      if (dep.all_specs) {
+        for (const s of dep.all_specs.split(",")) {
+          if (s.trim()) allSpecs.add(s.trim());
+        }
+      }
+      const topSpecs = [...allSpecs].slice(0, 5);
+      const specStr =
+        topSpecs.length > 0 ? ` (${topSpecs.join(", ")}${allSpecs.size > 5 ? ", …" : ""})` : "";
+      depLines.push(`  ${dep.package}: ${String(dep.file_count)} files${specStr}`);
+    }
+    return depLines.join("\n");
+  }
+
+  setSemanticMode(mode: "off" | "ast" | "llm"): void {
+    this.semanticMode = mode;
+  }
+
+  getSemanticMode(): "off" | "ast" | "llm" {
+    return this.semanticMode;
   }
 
   isSemanticEnabled(): boolean {
-    return this.semanticEnabled;
+    return this.semanticMode !== "off";
+  }
+
+  detectPersistedSemanticMode(): "off" | "ast" | "llm" {
+    const llm =
+      this.db
+        .query<{ c: number }, []>(
+          "SELECT COUNT(*) as c FROM semantic_summaries WHERE source = 'llm'",
+        )
+        .get()?.c ?? 0;
+    if (llm > 0) return "llm";
+    const ast =
+      this.db
+        .query<{ c: number }, []>(
+          "SELECT COUNT(*) as c FROM semantic_summaries WHERE source = 'ast'",
+        )
+        .get()?.c ?? 0;
+    if (ast > 0) return "ast";
+    return "off";
   }
 
   setSummaryGenerator(generator: SummaryGenerator | null): void {
     this.summaryGenerator = generator;
+  }
+
+  generateAstSummaries(): number {
+    if (!this.ready) return 0;
+    const rows = this.db
+      .query<
+        {
+          id: number;
+          file_id: number;
+          name: string;
+          kind: string;
+          line: number;
+          path: string;
+          mtime_ms: number;
+        },
+        []
+      >(
+        `SELECT s.id, s.file_id, s.name, s.kind, s.line, f.path, f.mtime_ms
+         FROM symbols s JOIN files f ON f.id = s.file_id
+         WHERE s.is_exported = 1
+           AND s.kind IN ('function','method','class','interface','type')
+         ORDER BY f.pagerank DESC LIMIT 500`,
+      )
+      .all();
+
+    const upsert = this.db.prepare(
+      `INSERT OR REPLACE INTO semantic_summaries (symbol_id, source, summary, file_mtime) VALUES (?, 'ast', ?, ?)`,
+    );
+    let count = 0;
+    const fileCache = new Map<string, string[]>();
+    const tx = this.db.transaction(() => {
+      for (const row of rows) {
+        let lines = fileCache.get(row.path);
+        if (!lines) {
+          try {
+            const content = readFileSync(join(this.cwd, row.path), "utf-8");
+            lines = content.split("\n");
+            fileCache.set(row.path, lines);
+          } catch {
+            continue;
+          }
+        }
+        const doc = extractDocComment(lines, row.line - 1);
+        if (doc) {
+          upsert.run(row.id, doc, row.mtime_ms);
+          count++;
+        }
+      }
+    });
+    tx();
+    return count;
   }
 
   clearSemanticSummaries(): void {
@@ -857,11 +1064,11 @@ export class RepoMap {
       )
       .all(maxSymbols);
 
-    // Filter to symbols that need (re)generation
+    // Filter to symbols that need (re)generation — only check LLM source
     const existing = new Map<number, number>();
     for (const row of this.db
       .query<{ symbol_id: number; file_mtime: number }, []>(
-        "SELECT symbol_id, file_mtime FROM semantic_summaries",
+        "SELECT symbol_id, file_mtime FROM semantic_summaries WHERE source = 'llm'",
       )
       .all()) {
       existing.set(row.symbol_id, row.file_mtime);
@@ -941,8 +1148,8 @@ export class RepoMap {
     for (const r of results) summaryMap.set(r.name, r.summary);
 
     const upsert = this.db.prepare(
-      `INSERT OR REPLACE INTO semantic_summaries (symbol_id, summary, file_mtime)
-       VALUES (?, ?, ?)`,
+      `INSERT OR REPLACE INTO semantic_summaries (symbol_id, source, summary, file_mtime)
+       VALUES (?, 'llm', ?, ?)`,
     );
     const symExists = this.db.prepare("SELECT 1 FROM symbols WHERE id = ?");
     let count = 0;
@@ -959,14 +1166,45 @@ export class RepoMap {
     return count;
   }
 
+  private extractAstSummaries(
+    fileId: number,
+    symbols: import("./types.js").SymbolInfo[],
+    exportedNames: Set<string>,
+    lines: string[],
+    mtime: number,
+  ): void {
+    const upsert = this.db.prepare(
+      `INSERT OR REPLACE INTO semantic_summaries (symbol_id, source, summary, file_mtime) VALUES (?, 'ast', ?, ?)`,
+    );
+    const symLookup = this.db.prepare<{ id: number }, [number, string, number]>(
+      "SELECT id FROM symbols WHERE file_id = ? AND name = ? AND line = ?",
+    );
+
+    const summaryKinds = new Set(["function", "method", "class", "interface", "type"]);
+    const tx = this.db.transaction(() => {
+      for (const sym of symbols) {
+        if (!exportedNames.has(sym.name)) continue;
+        if (!summaryKinds.has(sym.kind)) continue;
+
+        const doc = extractDocComment(lines, sym.location.line - 1);
+        if (!doc) continue;
+
+        const row = symLookup.get(fileId, sym.name, sym.location.line);
+        if (row) upsert.run(row.id, doc, mtime);
+      }
+    });
+    tx();
+  }
+
   private getSemanticSummaries(symbolIds: number[]): Map<number, string> {
-    if (!this.semanticEnabled || symbolIds.length === 0) return new Map();
+    if (!this.isSemanticEnabled() || symbolIds.length === 0) return new Map();
     const placeholders = symbolIds.map(() => "?").join(",");
+    const source = this.semanticMode;
     const rows = this.db
-      .query<{ symbol_id: number; summary: string }, number[]>(
-        `SELECT symbol_id, summary FROM semantic_summaries WHERE symbol_id IN (${placeholders})`,
+      .query<{ symbol_id: number; summary: string }, [...number[], string]>(
+        `SELECT symbol_id, summary FROM semantic_summaries WHERE symbol_id IN (${placeholders}) AND source = ?`,
       )
-      .all(...symbolIds);
+      .all(...symbolIds, source);
     const result = new Map<number, string>();
     for (const row of rows) result.set(row.symbol_id, row.summary);
     return result;
@@ -1037,8 +1275,8 @@ export class RepoMap {
     // Semantic summaries: load cached summaries for all candidate symbols
     const semanticMap = this.getSemanticSummaries(allSymbols.map((s) => s.id));
 
-    // Diff-aware: track which files are new since last render
-    const prevPathSet = new Set(this.prevRenderedPaths);
+    // Diff-aware: [NEW] marks files the agent has never seen in any render
+    const prevPathSet = this.seenPaths;
 
     // Pre-compute all file blocks for binary search
     const blocks: Array<{ path: string; fileLine: string; symbolLines: string; tokens: number }> =
@@ -1089,7 +1327,42 @@ export class RepoMap {
       }
     }
 
+    // Directory coverage: ensure major directories aren't invisible
+    const coverageBlocks: typeof blocks = [];
+    {
+      const representedDirs = new Set<string>();
+      for (let i = 0; i < bestCount; i++) {
+        const dir = getDirGroup(blocks[i]?.path ?? "");
+        if (dir) representedDirs.add(dir);
+      }
+      const dirCounts = new Map<string, number>();
+      for (const b of blocks) {
+        const dir = getDirGroup(b.path);
+        if (dir) dirCounts.set(dir, (dirCounts.get(dir) ?? 0) + 1);
+      }
+      let usedTokens = 0;
+      for (let i = 0; i < bestCount; i++) usedTokens += blocks[i]?.tokens ?? 0;
+      const reserve = budget * 0.1;
+      for (let i = bestCount; i < blocks.length; i++) {
+        const b = blocks[i];
+        if (!b) continue;
+        const dir = getDirGroup(b.path);
+        if (!dir || representedDirs.has(dir) || (dirCounts.get(dir) ?? 0) < 3) continue;
+        if (usedTokens + b.tokens > budget + reserve) continue;
+        coverageBlocks.push(b);
+        usedTokens += b.tokens;
+        representedDirs.add(dir);
+      }
+    }
+
     const lines: string[] = [];
+    const depsSummary = this.getExternalDepsSummary();
+    if (depsSummary) lines.push(depsSummary, "");
+    if (semanticMap.size > 0) {
+      const tag = this.semanticMode === "ast" ? "[AST]" : "[LLM]";
+      lines.push(`Summaries: ${tag} ${String(semanticMap.size)} symbols`, "");
+    }
+
     const currentPaths: string[] = [];
     for (let i = 0; i < bestCount; i++) {
       const block = blocks[i];
@@ -1098,8 +1371,13 @@ export class RepoMap {
       if (block.symbolLines) lines.push(block.symbolLines.trimEnd());
       currentPaths.push(block.path);
     }
+    for (const block of coverageBlocks) {
+      lines.push(block.fileLine);
+      if (block.symbolLines) lines.push(block.symbolLines.trimEnd());
+      currentPaths.push(block.path);
+    }
 
-    this.prevRenderedPaths = currentPaths;
+    for (const p of currentPaths) this.seenPaths.add(p);
     return lines.join("\n");
   }
 
@@ -1108,8 +1386,10 @@ export class RepoMap {
     const mentionedSet = new Set((opts.mentionedFiles ?? []).map((f) => relative(this.cwd, f)));
     const editedSet = new Set((opts.editedFiles ?? []).map((f) => relative(this.cwd, f)));
     const editorRel = opts.editorFile ? relative(this.cwd, opts.editorFile) : null;
+    const entryPoints = new Set(this.getEntryPoints());
 
-    if (mentionedSet.size === 0 && editedSet.size === 0 && !editorRel) return pv;
+    if (mentionedSet.size === 0 && editedSet.size === 0 && !editorRel && entryPoints.size === 0)
+      return pv;
 
     const allFiles = this.db
       .query<{ id: number; path: string }, []>("SELECT id, path FROM files")
@@ -1131,6 +1411,10 @@ export class RepoMap {
         boost += base * 2;
         contextFileIds.add(f.id);
       }
+      if (entryPoints.has(f.path)) {
+        boost += base * 4;
+        contextFileIds.add(f.id);
+      }
       if (boost > base) pv.set(f.id, boost);
     }
 
@@ -1147,7 +1431,9 @@ export class RepoMap {
 
   private computeBudget(conversationTokens?: number): number {
     if (!conversationTokens || conversationTokens < 1000) return DEFAULT_TOKEN_BUDGET;
-    const scale = Math.max(0, 1 - conversationTokens / 100_000);
+    // Gentle decay — keeps 80% of budget even at 100k tokens.
+    // Deep conversations need MORE context, not less.
+    const scale = Math.max(0.6, 1 - (conversationTokens / 100_000) * 0.4);
     return Math.round(MIN_TOKEN_BUDGET + (MAX_TOKEN_BUDGET - MIN_TOKEN_BUDGET) * scale);
   }
 
@@ -1208,30 +1494,82 @@ export class RepoMap {
 
     // PageRank already incorporates mentioned/edited/editor boosts via personalization.
     // Post-hoc: add FTS, neighbor, and co-change signals that PageRank can't capture.
-    const scored = allFiles.map((f) => {
-      let score = f.pagerank * 1000;
-      if (ftsMatches.has(f.id)) score += 0.5;
-      if (neighborFiles.has(f.id)) score += 1;
-      const cochangeCount = coChangePartners.get(f.id);
-      if (cochangeCount) score += Math.min(cochangeCount / 5, 3);
-      return { ...f, score };
-    });
+    const contextFileIds = new Set([...boostFileIds, ...neighborFiles]);
+    const scored = allFiles
+      .filter((f) => {
+        // Skip config/data files with no symbols unless they're in the conversation context
+        if (f.symbol_count === 0 && !contextFileIds.has(f.id)) return false;
+        return true;
+      })
+      .map((f) => {
+        let score = f.pagerank * 1000;
+        if (ftsMatches.has(f.id)) score += 0.5;
+        if (neighborFiles.has(f.id)) score += 1;
+        const cochangeCount = coChangePartners.get(f.id);
+        if (cochangeCount) score += Math.min(cochangeCount / 5, 3);
+        return { ...f, score };
+      });
 
     scored.sort((a, b) => b.score - a.score);
     return scored;
   }
 
-  /** Find a symbol by exact name across all indexed files. Returns the absolute file path or null. */
-  findSymbol(name: string): string | null {
-    const row = this.db
-      .query<{ path: string }, [string]>(
-        `SELECT f.path FROM symbols s JOIN files f ON f.id = s.file_id
-         WHERE s.name = ? AND s.kind IN ('interface','type','class','function','enum')
-         ORDER BY s.is_exported DESC, f.pagerank DESC LIMIT 1`,
+  /** Find symbol matches by name (case-insensitive). Returns ranked results with mtime validation. */
+  findSymbols(
+    name: string,
+  ): Array<{ path: string; kind: string; isExported: boolean; pagerank: number }> {
+    const rows = this.db
+      .query<
+        { path: string; kind: string; is_exported: number; pagerank: number; mtime_ms: number },
+        [string, string]
+      >(
+        `SELECT f.path, s.kind, s.is_exported, f.pagerank, f.mtime_ms
+         FROM symbols s JOIN files f ON f.id = s.file_id
+         WHERE (s.name = ? OR LOWER(s.name) = LOWER(?))
+           AND s.kind IN ('interface','type','class','function','enum','variable','method')
+         ORDER BY s.is_exported DESC, f.pagerank DESC
+         LIMIT 10`,
       )
-      .get(name);
-    if (!row) return null;
-    return join(this.cwd, row.path);
+      .all(name, name);
+
+    const results: Array<{ path: string; kind: string; isExported: boolean; pagerank: number }> =
+      [];
+    const seenPaths = new Set<string>();
+    for (const row of rows) {
+      const absPath = join(this.cwd, row.path);
+
+      // Deduplicate by path
+      if (seenPaths.has(absPath)) continue;
+      seenPaths.add(absPath);
+
+      // Mtime check — skip stale entries
+      try {
+        const stat = statSync(absPath);
+        if (Math.abs(stat.mtimeMs - row.mtime_ms) > 1000) continue;
+      } catch {
+        continue; // file no longer exists
+      }
+
+      results.push({
+        path: absPath,
+        kind: row.kind,
+        isExported: row.is_exported === 1,
+        pagerank: row.pagerank,
+      });
+    }
+
+    // Deprioritize .d.ts files when non-.d.ts matches exist
+    const hasSource = results.some((r) => !r.path.endsWith(".d.ts"));
+    if (hasSource) {
+      return results.filter((r) => !r.path.endsWith(".d.ts"));
+    }
+    return results;
+  }
+
+  /** Legacy single-result lookup. Returns the best match absolute path or null. */
+  findSymbol(name: string): string | null {
+    const matches = this.findSymbols(name);
+    return matches.length > 0 ? (matches[0] as { path: string }).path : null;
   }
 
   getStats(): { files: number; symbols: number; edges: number; summaries: number } {
@@ -1239,9 +1577,13 @@ export class RepoMap {
     const symbols =
       this.db.query<{ c: number }, []>("SELECT COUNT(*) as c FROM symbols").get()?.c ?? 0;
     const edges = this.db.query<{ c: number }, []>("SELECT COUNT(*) as c FROM edges").get()?.c ?? 0;
+    const source = this.semanticMode === "off" ? "llm" : this.semanticMode;
     const summaries =
-      this.db.query<{ c: number }, []>("SELECT COUNT(*) as c FROM semantic_summaries").get()?.c ??
-      0;
+      this.db
+        .query<{ c: number }, [string]>(
+          "SELECT COUNT(*) as c FROM semantic_summaries WHERE source = ?",
+        )
+        .get(source)?.c ?? 0;
     return { files, symbols, edges, summaries };
   }
 
@@ -1249,6 +1591,7 @@ export class RepoMap {
     this.db.run("DROP TRIGGER IF EXISTS symbols_ai");
     this.db.run("DROP TRIGGER IF EXISTS symbols_ad");
     this.db.run("DELETE FROM semantic_summaries");
+    this.db.run("DELETE FROM external_imports");
     this.db.run("DELETE FROM cochanges");
     this.db.run("DELETE FROM edges");
     this.db.run("DELETE FROM refs");
@@ -1257,7 +1600,7 @@ export class RepoMap {
     this.rebuildFts();
     this.ready = false;
     this.scanPromise = null;
-    this.prevRenderedPaths = [];
+    this.seenPaths.clear();
   }
 
   private rebuildFts(): void {
@@ -1276,6 +1619,18 @@ export class RepoMap {
     this.db.run("INSERT INTO symbols_fts(rowid, name, kind) SELECT id, name, kind FROM symbols");
   }
 
+  private compactIfNeeded(): void {
+    const bytes = this.dbSizeBytes();
+    if (bytes > 50 * 1024 * 1024) {
+      try {
+        this.db.run("PRAGMA wal_checkpoint(TRUNCATE)");
+        this.db.run("VACUUM");
+      } catch {
+        // compaction is best-effort
+      }
+    }
+  }
+
   dbSizeBytes(): number {
     try {
       const row = this.db
@@ -1290,6 +1645,10 @@ export class RepoMap {
   }
 
   close(): void {
+    if (this.dirtyTimer) {
+      clearTimeout(this.dirtyTimer);
+      this.dirtyTimer = null;
+    }
     this.db.close();
   }
 }
@@ -1351,9 +1710,121 @@ function kindTag(kind: SymbolKind): string {
   }
 }
 
+/**
+ * Extract a doc comment immediately above the symbol line and return
+ * a one-line summary (max 80 chars). Handles:
+ * - JSDoc/Javadoc: /** ... * /
+ * - Rust/Go/C#: /// or // comment block
+ * - Python: docstring (first """...""" or '''...''' inside function body)
+ * - Hash comments: # comment block (Ruby, Python standalone)
+ */
+function extractDocComment(lines: string[], symbolLineIdx: number): string | null {
+  // --- Python docstring: first line inside the body ---
+  const symbolLine = lines[symbolLineIdx];
+  if (symbolLine && /^\s*(def |class |async def )/.test(symbolLine)) {
+    for (let k = symbolLineIdx + 1; k < Math.min(symbolLineIdx + 3, lines.length); k++) {
+      const trimmed = lines[k]?.trim() ?? "";
+      const tripleMatch = /^("""|''')(.*)/.exec(trimmed);
+      if (tripleMatch) {
+        const quote = tripleMatch[1] as string;
+        const rest = tripleMatch[2] ?? "";
+        if (rest.includes(quote)) {
+          return trimDocLine(rest.slice(0, rest.indexOf(quote)));
+        }
+        const docLines = [rest];
+        for (let j = k + 1; j < Math.min(k + 10, lines.length); j++) {
+          const dl = lines[j]?.trim() ?? "";
+          if (dl.includes(quote)) {
+            docLines.push(dl.slice(0, dl.indexOf(quote)));
+            break;
+          }
+          docLines.push(dl);
+        }
+        return trimDocLine(docLines.filter(Boolean).join(" "));
+      }
+      if (trimmed) break;
+    }
+  }
+
+  // --- JSDoc / Javadoc: /** ... */ above symbol ---
+  for (let k = symbolLineIdx - 1; k >= Math.max(0, symbolLineIdx - 2); k--) {
+    const trimmed = lines[k]?.trim() ?? "";
+    if (trimmed === "" || trimmed === "*/" || trimmed.startsWith("*/")) continue;
+    if (trimmed.startsWith("*/")) continue;
+    if (trimmed.endsWith("*/")) {
+      // Single-line /** summary */
+      const m = /^\/\*\*?\s*(.*?)\s*\*\/$/.exec(trimmed);
+      if (m?.[1]) return trimDocLine(m[1]);
+    }
+    if (trimmed.startsWith("/**") || trimmed.startsWith("/*")) {
+      // Find closing */
+      const collected: string[] = [];
+      const firstContent = trimmed
+        .replace(/^\/\*\*?\s*/, "")
+        .replace(/\*\/\s*$/, "")
+        .trim();
+      if (firstContent) collected.push(firstContent);
+      for (let j = k + 1; j < symbolLineIdx; j++) {
+        const cl = (lines[j]?.trim() ?? "")
+          .replace(/^\*\s?/, "")
+          .replace(/\*\/\s*$/, "")
+          .trim();
+        if (cl.startsWith("@")) break;
+        if (cl) collected.push(cl);
+      }
+      if (collected.length > 0) return trimDocLine(collected.join(" "));
+    }
+    break;
+  }
+
+  // --- /// doc comments (Rust) or // comment block (Go, TS) ---
+  let commentEnd = symbolLineIdx - 1;
+  if (commentEnd >= 0 && (lines[commentEnd]?.trim() ?? "") === "") commentEnd--;
+  if (commentEnd >= 0) {
+    const first = lines[commentEnd]?.trim() ?? "";
+    if (first.startsWith("///") || first.startsWith("//")) {
+      const isTriple = first.startsWith("///");
+      const prefix = isTriple ? "///" : "//";
+      const collected: string[] = [];
+      let k = commentEnd;
+      while (k >= 0 && (lines[k]?.trim() ?? "").startsWith(prefix)) {
+        collected.unshift((lines[k]?.trim() ?? "").slice(prefix.length).trim());
+        k--;
+      }
+      if (collected.length > 0) return trimDocLine(collected.join(" "));
+    }
+
+    // --- # comment block (Ruby, Python) ---
+    if (first.startsWith("#") && !first.startsWith("#!")) {
+      const collected: string[] = [];
+      let k = commentEnd;
+      while (k >= 0 && (lines[k]?.trim() ?? "").startsWith("#")) {
+        collected.unshift((lines[k]?.trim() ?? "").slice(1).trim());
+        k--;
+      }
+      if (collected.length > 0) return trimDocLine(collected.join(" "));
+    }
+  }
+
+  return null;
+}
+
+function trimDocLine(text: string): string | null {
+  let s = text.replace(/\s+/g, " ").trim();
+  if (!s || s.length < 5) return null;
+  if (s.length > 80) s = `${s.slice(0, 77)}...`;
+  return s;
+}
+
 interface CollectedFile {
   path: string;
   mtimeMs: number;
+}
+
+function getDirGroup(filePath: string): string | null {
+  const parts = filePath.split("/");
+  if (parts.length < 2) return null;
+  return parts.length >= 3 ? `${parts[0]}/${parts[1]}` : (parts[0] ?? null);
 }
 
 function collectFiles(dir: string, depth = 0): CollectedFile[] {

@@ -4,20 +4,17 @@ type FileReadCallback = (absPath: string) => void;
 const editListeners = new Set<FileEditCallback>();
 const readListeners = new Set<FileReadCallback>();
 
-export function setFileEventHandlers(handlers: {
-  onFileEdited?: FileEditCallback;
-  onFileRead?: FileReadCallback;
-}): void {
-  editListeners.clear();
-  readListeners.clear();
-  if (handlers.onFileEdited) editListeners.add(handlers.onFileEdited);
-  if (handlers.onFileRead) readListeners.add(handlers.onFileRead);
-}
-
-export function onFileEditedEvent(cb: FileEditCallback): () => void {
+export function onFileEdited(cb: FileEditCallback): () => void {
   editListeners.add(cb);
   return () => {
     editListeners.delete(cb);
+  };
+}
+
+export function onFileRead(cb: FileReadCallback): () => void {
+  readListeners.add(cb);
+  return () => {
+    readListeners.delete(cb);
   };
 }
 

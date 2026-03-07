@@ -45,7 +45,7 @@ function formatWindow(tokens: number): string {
 interface BarTarget {
   pct: number;
   tokensX10: number;
-  windowSource: string;
+  live: boolean;
   flash: boolean;
 }
 
@@ -53,7 +53,7 @@ function buildContent(
   pct: number,
   tokensK: string,
   windowLabel: string,
-  windowSource: string,
+  live: boolean,
   flash: boolean,
 ): StyledText {
   const filled = Math.round((pct / 100) * BAR_WIDTH);
@@ -63,16 +63,15 @@ function buildContent(
 
   const pctColor = flash ? getFlashColor(pct) : getPctColor(pct);
   const chunks = [
+    fgStyle(live ? "#1a6" : "#444")("● "),
     fgStyle("#444")("ctx"),
     fgStyle("#333")("["),
     fgStyle(pulse ? "#b0002e" : barColor)("▰".repeat(filled)),
     fgStyle("#222")("▱".repeat(empty)),
     fgStyle("#333")("]"),
-    fgStyle(pctColor)(`${String(pct)}%`),
+    fgStyle(pctColor)(live ? `${String(pct)}%` : `~${String(pct)}%`),
     fgStyle("#444")(` ${tokensK}k/${windowLabel}`),
   ];
-  if (windowSource === "api") chunks.push(fgStyle("#1a6")(" ✓"));
-  if (windowSource === "fallback") chunks.push(fgStyle("#a07018")(" ~"));
   return new StyledText(chunks);
 }
 
@@ -90,14 +89,14 @@ export function ContextBar({ contextManager, modelId }: Props) {
   const targetRef = useRef<BarTarget>({
     pct: 0,
     tokensX10: 0,
-    windowSource: ctxInfo.source,
+    live: false,
     flash: false,
   });
   const prevTotalRef = useRef(0);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    return useStatusBarStore.subscribe((state) => {
+    const update = (state: { contextTokens: number; chatChars: number; subagentChars: number }) => {
       const isApi = state.contextTokens > 0;
       const breakdown = contextManager.getContextBreakdown();
       const systemChars = breakdown.reduce((sum, s) => sum + s.chars, 0);
@@ -105,7 +104,7 @@ export function ContextBar({ contextManager, modelId }: Props) {
       const totalTokens = isApi
         ? state.contextTokens + state.subagentChars / CHARS_PER_TOKEN
         : charEstimate;
-      const windowSource = isApi ? "api" : ctxInfo.source;
+      const live = isApi;
       const rawPct = (totalTokens / ctxInfo.tokens) * 100;
       const pct = totalTokens > 0 ? Math.min(100, Math.max(1, Math.round(rawPct))) : 0;
       const tokensX10 = Math.round(totalTokens / 100);
@@ -120,8 +119,11 @@ export function ContextBar({ contextManager, modelId }: Props) {
       }
       prevTotalRef.current = totalTokens;
 
-      targetRef.current = { pct, tokensX10, windowSource, flash };
-    });
+      targetRef.current = { pct, tokensX10, live, flash };
+    };
+    // Fire immediately so the bar reflects current state (subscribe alone only fires on change)
+    update(useStatusBarStore.getState());
+    return useStatusBarStore.subscribe(update);
   }, [contextManager, ctxInfo]);
 
   const currentPctRef = useRef(0);
@@ -141,7 +143,7 @@ export function ContextBar({ contextManager, modelId }: Props) {
             pct,
             (tok / 10).toFixed(1),
             windowLabel,
-            target.windowSource,
+            target.live,
             target.flash,
           );
         }
@@ -150,6 +152,6 @@ export function ContextBar({ contextManager, modelId }: Props) {
     return () => clearInterval(timer);
   }, [windowLabel]);
 
-  const initial = buildContent(0, "0.0", windowLabel, ctxInfo.source, false);
+  const initial = buildContent(0, "0.0", windowLabel, false, false);
   return <text ref={textRef} truncate content={initial} />;
 }

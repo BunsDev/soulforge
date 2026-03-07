@@ -110,12 +110,11 @@ export function ErrorLog({ visible, messages, onClose }: Props) {
   const [scrollOffset, setScrollOffset] = useState(0);
   const [detailScrollOffset, setDetailScrollOffset] = useState(0);
   const { width: termCols, height: termRows } = useTerminalDimensions();
-  const containerRows = termRows - 2;
-
-  const popupWidth = Math.max(60, termCols - 4);
+  const popupWidth = Math.max(60, Math.round(termCols * 0.8));
   const innerW = popupWidth - 2;
-  const maxListVisible = Math.max(8, containerRows - CHROME_ROWS);
-  const maxDetailLines = Math.max(10, containerRows - 6);
+  const popupHeight = Math.max(12, Math.round(termRows * 0.5));
+  const maxListVisible = Math.max(4, popupHeight - CHROME_ROWS);
+  const maxDetailLines = Math.max(4, popupHeight - 6);
 
   const bgErrors = useErrorStore((s) => s.errors);
   const entries = useMemo(() => {

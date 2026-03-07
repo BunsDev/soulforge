@@ -19,6 +19,7 @@ const SLOTS: SlotItem[] = [
   { key: "coding", label: "Coding", desc: "code subagent" },
   { key: "exploration", label: "Exploration", desc: "explore subagent" },
   { key: "webSearch", label: "Web Search", desc: "browser & web search tasks" },
+  { key: "compact", label: "Compact", desc: "context compaction summarizer" },
   { key: "semantic", label: "Semantic", desc: "repo map summary generation" },
   { key: "default", label: "Default", desc: "everything else" },
 ];

@@ -14,11 +14,20 @@ interface SearchResult {
 
 const searchCache = new Map<string, { results: SearchResult[]; ts: number; _backend: string }>();
 const CACHE_TTL = 5 * 60_000;
+const MAX_CACHE_SIZE = 100;
 
+let lastSweep = 0;
 function getCached(key: string): { results: SearchResult[]; backend: string } | null {
+  const now = Date.now();
+  if (now - lastSweep > CACHE_TTL) {
+    lastSweep = now;
+    for (const [k, v] of searchCache) {
+      if (now - v.ts > CACHE_TTL) searchCache.delete(k);
+    }
+  }
   const entry = searchCache.get(key);
   if (!entry) return null;
-  if (Date.now() - entry.ts > CACHE_TTL) {
+  if (now - entry.ts > CACHE_TTL) {
     searchCache.delete(key);
     return null;
   }
@@ -128,15 +137,16 @@ export const webSearchScraper = {
   execute: async (args: WebSearchArgs): Promise<ToolResult> => {
     const { query } = args;
     const count = args.count ?? 5;
-    const cacheKey = `${query}::${String(count)}`;
 
-    const cached = getCached(cacheKey);
-    if (cached) {
-      return {
-        success: true,
-        output: formatResults(query, cached.results),
-        backend: cached.backend,
-      };
+    for (const be of ["brave", "ddg"]) {
+      const cached = getCached(`${query}::${String(count)}::${be}`);
+      if (cached) {
+        return {
+          success: true,
+          output: formatResults(query, cached.results),
+          backend: cached.backend,
+        };
+      }
     }
 
     try {
@@ -148,6 +158,11 @@ export const webSearchScraper = {
         backend = "ddg";
       }
 
+      const cacheKey = `${query}::${String(count)}::${backend}`;
+      if (searchCache.size >= MAX_CACHE_SIZE) {
+        const oldest = searchCache.keys().next().value;
+        if (oldest) searchCache.delete(oldest);
+      }
       searchCache.set(cacheKey, { results, ts: Date.now(), _backend: backend });
       return { success: true, output: formatResults(query, results), backend };
     } catch (err: unknown) {

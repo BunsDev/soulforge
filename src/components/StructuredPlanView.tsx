@@ -19,207 +19,194 @@ const ACTION_ICONS: Record<string, string> = {
   modify: "~",
   delete: "-",
 };
+const SYMBOL_ACTION_COLORS: Record<string, string> = {
+  add: "#2d5",
+  modify: "#FF8C00",
+  remove: "#f44",
+  rename: "#5af",
+};
 
 const MAX_VISIBLE = 5;
 
 interface Props {
   plan: PlanOutput;
   result?: string;
+  planFile?: string;
 }
 
-export function StructuredPlanView({ plan, result }: Props) {
+export function StructuredPlanView({ plan, result, planFile }: Props) {
   const files = plan.files ?? [];
   const steps = plan.steps ?? [];
   const verification = plan.verification ?? [];
   const context = plan.context ?? "";
 
-  // Determine plan outcome from tool result
+  let resolvedFile = planFile;
+  if (!resolvedFile && result) {
+    try {
+      const parsed = JSON.parse(result);
+      if (typeof parsed.file === "string") resolvedFile = parsed.file as string;
+    } catch {
+      // result may not be JSON
+    }
+  }
+
   const isCancelled = result?.includes("cancelled by user");
   const isRevised = result?.startsWith("User wants changes to the plan:");
   const reviseFeedback =
     isRevised && result ? result.replace("User wants changes to the plan: ", "") : null;
   const isRejected = isCancelled || isRevised;
 
-  // Dim the border color for rejected plans
   const borderColor = isRejected ? "#222" : BORDER;
   const titleColor = isRejected ? "#555" : TITLE_COLOR;
 
   if (isRejected) {
     return (
-      <box flexDirection="column">
-        <box minHeight={1} flexShrink={0}>
-          <text>
-            <span fg={borderColor}>{"┌── "}</span>
+      <box
+        flexDirection="column"
+        flexShrink={0}
+        border
+        borderStyle="rounded"
+        borderColor={borderColor}
+      >
+        <box
+          height={1}
+          flexShrink={0}
+          paddingX={1}
+          backgroundColor="#1a1a1a"
+          alignSelf="flex-start"
+          marginTop={-1}
+        >
+          <text truncate>
+            <span fg={titleColor}>{"\uF0CB"}</span>{" "}
             <span fg={titleColor} attributes={TextAttributes.BOLD}>
-              {"\uF0CB"} {plan.title}
+              {plan.title}
             </span>
-            <span fg={borderColor}> {"─".repeat(Math.max(1, 40 - plan.title.length))}</span>
-          </text>
-        </box>
-        <box minHeight={1} flexShrink={0}>
-          <text>
-            <span fg={borderColor}>{"│ "}</span>
-            {isCancelled ? (
-              <span fg="#f44">✗ Plan cancelled</span>
-            ) : (
+            {resolvedFile ? (
               <>
-                <span fg="#FF8C00">↻ Revision requested: </span>
-                <span fg="#bbb">{reviseFeedback}</span>
+                <span fg="#333"> ─ </span>
+                <span fg="#444">{resolvedFile}</span>
               </>
-            )}
+            ) : null}
           </text>
         </box>
-        <box minHeight={1} flexShrink={0} flexDirection="row">
-          <text fg={borderColor}>{"└"}</text>
-          <text fg={borderColor}>{"─".repeat(50)}</text>
+        <box paddingX={1}>
+          {isCancelled ? (
+            <text fg="#f44">✗ Plan cancelled</text>
+          ) : (
+            <text>
+              <span fg="#FF8C00">↻ Revision requested: </span>
+              <span fg="#bbb">{reviseFeedback}</span>
+            </text>
+          )}
         </box>
       </box>
     );
   }
 
   return (
-    <box flexDirection="column">
-      <box minHeight={1} flexShrink={0}>
-        <text>
-          <span fg={BORDER}>{"┌── "}</span>
+    <box flexDirection="column" flexShrink={0} border borderStyle="rounded" borderColor={BORDER}>
+      <box
+        height={1}
+        flexShrink={0}
+        paddingX={1}
+        backgroundColor="#1a1a1a"
+        alignSelf="flex-start"
+        marginTop={-1}
+      >
+        <text truncate>
+          <span fg={TITLE_COLOR}>{"\uF0CB"}</span>{" "}
           <span fg={TITLE_COLOR} attributes={TextAttributes.BOLD}>
-            {"\uF0CB"} {plan.title}
+            {plan.title}
           </span>
-          <span fg={BORDER}> {"─".repeat(Math.max(1, 40 - plan.title.length))}</span>
+          {resolvedFile ? (
+            <>
+              <span fg="#333"> ─ </span>
+              <span fg="#555">{resolvedFile}</span>
+            </>
+          ) : null}
         </text>
       </box>
 
       {context && (
-        <>
-          <box minHeight={1} flexShrink={0}>
-            <text fg={BORDER}>{"│"}</text>
-          </box>
-          <box minHeight={1} flexShrink={0}>
-            <text>
-              <span fg={BORDER}>{"│ "}</span>
-              <span fg={SECTION_COLOR} attributes={TextAttributes.BOLD}>
-                Context
-              </span>
-            </text>
-          </box>
+        <box flexDirection="column" paddingX={1}>
+          <text fg={SECTION_COLOR} attributes={TextAttributes.BOLD}>
+            Context
+          </text>
           {context.split("\n").map((line, i) => (
-            <box key={`ctx-${String(i)}`} minHeight={1} flexShrink={0}>
-              <text>
-                <span fg={BORDER}>{"│  "}</span>
-                <span fg={TEXT_COLOR}>{line}</span>
-              </text>
-            </box>
+            <text key={`ctx-${String(i)}`} fg={TEXT_COLOR}>
+              {line}
+            </text>
           ))}
-        </>
+        </box>
       )}
 
       {files.length > 0 && (
-        <>
-          <box minHeight={1} flexShrink={0}>
-            <text fg={BORDER}>{"│"}</text>
-          </box>
-          <box minHeight={1} flexShrink={0}>
-            <text>
-              <span fg={BORDER}>{"│ "}</span>
-              <span fg={SECTION_COLOR} attributes={TextAttributes.BOLD}>
-                Files
-              </span>
-              <span fg="#555"> ({String(files.length)})</span>
-            </text>
-          </box>
+        <box flexDirection="column" paddingX={1} marginTop={context ? 1 : 0}>
+          <text>
+            <span fg={SECTION_COLOR} attributes={TextAttributes.BOLD}>
+              Files
+            </span>
+            <span fg="#555"> ({String(files.length)})</span>
+          </text>
           {files.slice(0, MAX_VISIBLE).map((f) => (
             <box key={f.path} flexDirection="column">
-              <box minHeight={1} flexShrink={0}>
-                <text>
-                  <span fg={BORDER}>{"│  "}</span>
-                  <span fg={ACTION_COLORS[f.action] ?? "#888"}>
-                    {ACTION_ICONS[f.action] ?? "?"}{" "}
-                  </span>
-                  <span fg={FILE_PATH_COLOR}>{f.path}</span>
+              <text>
+                <span fg={ACTION_COLORS[f.action] ?? "#888"}>{ACTION_ICONS[f.action] ?? "?"} </span>
+                <span fg={FILE_PATH_COLOR}>{f.path}</span>
+              </text>
+              <text fg="#777">
+                {"   "}
+                {f.description}
+              </text>
+              {f.symbols?.map((s, si) => (
+                <text key={`${f.path}-s${String(si)}`} fg="#666">
+                  {"     "}
+                  <span fg={SYMBOL_ACTION_COLORS[s.action] ?? "#888"}>{s.action}</span>{" "}
+                  <span fg="#aaa">{s.name}</span>
+                  <span fg="#555"> ({s.kind})</span>
                 </text>
-              </box>
-              <box minHeight={1} flexShrink={0}>
-                <text>
-                  <span fg={BORDER}>{"│    "}</span>
-                  <span fg="#777">{f.description}</span>
-                </text>
-              </box>
+              ))}
             </box>
           ))}
           {files.length > MAX_VISIBLE && (
-            <box minHeight={1} flexShrink={0}>
-              <text>
-                <span fg={BORDER}>{"│  "}</span>
-                <span fg="#555">+{String(files.length - MAX_VISIBLE)} more</span>
-              </text>
-            </box>
+            <text fg="#555">+{String(files.length - MAX_VISIBLE)} more</text>
           )}
-        </>
+        </box>
       )}
 
       {steps.length > 0 && (
-        <>
-          <box minHeight={1} flexShrink={0}>
-            <text fg={BORDER}>{"│"}</text>
-          </box>
-          <box minHeight={1} flexShrink={0}>
-            <text>
-              <span fg={BORDER}>{"│ "}</span>
-              <span fg={SECTION_COLOR} attributes={TextAttributes.BOLD}>
-                Steps
-              </span>
-              <span fg="#555"> ({String(steps.length)})</span>
-            </text>
-          </box>
+        <box flexDirection="column" paddingX={1} marginTop={files.length > 0 || context ? 1 : 0}>
+          <text>
+            <span fg={SECTION_COLOR} attributes={TextAttributes.BOLD}>
+              Steps
+            </span>
+            <span fg="#555"> ({String(steps.length)})</span>
+          </text>
           {steps.slice(0, MAX_VISIBLE).map((s, i) => (
-            <box key={s.id} minHeight={1} flexShrink={0}>
-              <text>
-                <span fg={BORDER}>{"│  "}</span>
-                <span fg={STEP_NUM_COLOR}>{String(i + 1)}. </span>
-                <span fg={TEXT_COLOR}>{s.label}</span>
-              </text>
-            </box>
+            <text key={s.id}>
+              <span fg={STEP_NUM_COLOR}>{String(i + 1)}. </span>
+              <span fg={TEXT_COLOR}>{s.label}</span>
+            </text>
           ))}
           {steps.length > MAX_VISIBLE && (
-            <box minHeight={1} flexShrink={0}>
-              <text>
-                <span fg={BORDER}>{"│  "}</span>
-                <span fg="#555">+{String(steps.length - MAX_VISIBLE)} more</span>
-              </text>
-            </box>
+            <text fg="#555">+{String(steps.length - MAX_VISIBLE)} more</text>
           )}
-        </>
+        </box>
       )}
 
       {verification.length > 0 && (
-        <>
-          <box minHeight={1} flexShrink={0}>
-            <text fg={BORDER}>{"│"}</text>
-          </box>
-          <box minHeight={1} flexShrink={0}>
-            <text>
-              <span fg={BORDER}>{"│ "}</span>
-              <span fg={SECTION_COLOR} attributes={TextAttributes.BOLD}>
-                Verification
-              </span>
-            </text>
-          </box>
+        <box flexDirection="column" paddingX={1} marginTop={1}>
+          <text fg={SECTION_COLOR} attributes={TextAttributes.BOLD}>
+            Verification
+          </text>
           {verification.map((v, i) => (
-            <box key={`v-${String(i)}`} minHeight={1} flexShrink={0}>
-              <text>
-                <span fg={BORDER}>{"│  "}</span>
-                <span fg={CHECK_COLOR}>{"✓ "}</span>
-                <span fg={TEXT_COLOR}>{v}</span>
-              </text>
-            </box>
+            <text key={`v-${String(i)}`}>
+              <span fg={CHECK_COLOR}>{"✓ "}</span>
+              <span fg={TEXT_COLOR}>{v}</span>
+            </text>
           ))}
-        </>
+        </box>
       )}
-
-      <box minHeight={1} flexShrink={0} flexDirection="row">
-        <text fg={BORDER}>{"└"}</text>
-        <text fg={BORDER}>{"─".repeat(50)}</text>
-      </box>
     </box>
   );
 }

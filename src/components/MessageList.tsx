@@ -125,6 +125,7 @@ function SystemMessage({ msg, animate = true }: { msg: ChatMessage; animate?: bo
     text.startsWith("Error:") || text.startsWith("Request failed:") || text.startsWith("Failed");
   const retry = parseRetry(text);
   const isInterrupt = text === "Generation interrupted.";
+  const isPinned = msg.showInChat === true;
 
   const displayText = isError
     ? categorizeError(text).detail
@@ -132,8 +133,8 @@ function SystemMessage({ msg, animate = true }: { msg: ChatMessage; animate?: bo
       ? `${categorizeError(retry.reason).category.toLowerCase()} — waiting ~${retry.delay}s`
       : text;
 
-  const railColor = isError ? ERROR_COLOR : retry ? RETRY_COLOR : SYSTEM_COLOR;
-  const textColor = isError ? "#e88" : retry ? "#777" : "#777";
+  const railColor = isPinned ? "#5af" : isError ? ERROR_COLOR : retry ? RETRY_COLOR : SYSTEM_COLOR;
+  const textColor = isPinned ? "#8ac" : isError ? "#e88" : retry ? "#777" : "#777";
 
   const chunkSize = Math.max(1, Math.ceil(displayText.length / MAX_REVEAL_STEPS));
   const totalSteps = Math.ceil(displayText.length / chunkSize);
@@ -153,14 +154,16 @@ function SystemMessage({ msg, animate = true }: { msg: ChatMessage; animate?: bo
   const visibleText = done ? displayText : displayText.slice(0, step * chunkSize);
   const lines = visibleText.split("\n");
 
-  const headerLabel = isError
-    ? categorizeError(text).category
-    : retry
-      ? `Retry ${retry.attempt}`
-      : isInterrupt
-        ? "Interrupted"
-        : "System";
-  const headerIcon = isError ? "✗" : retry ? "↻" : isInterrupt ? "⊘" : "";
+  const headerLabel = isPinned
+    ? "System"
+    : isError
+      ? categorizeError(text).category
+      : retry
+        ? `Retry ${retry.attempt}`
+        : isInterrupt
+          ? "Interrupted"
+          : "System";
+  const headerIcon = isPinned ? "⚡" : isError ? "✗" : retry ? "↻" : isInterrupt ? "⊘" : "";
 
   return (
     <box flexDirection="column" marginBottom={1}>
@@ -175,7 +178,10 @@ function SystemMessage({ msg, animate = true }: { msg: ChatMessage; animate?: bo
             {headerIcon} {headerLabel}
           </text>
         ) : (
-          <text fg={SYSTEM_COLOR}>
+          <text
+            fg={isPinned ? "#5af" : SYSTEM_COLOR}
+            attributes={isPinned ? TextAttributes.BOLD : undefined}
+          >
             {headerIcon ? `${headerIcon} ` : " "}
             {headerLabel}
           </text>
@@ -304,10 +310,21 @@ function parsePlanOutput(tc: ToolCall): PlanOutput | null {
   return null;
 }
 
+function parsePlanFile(tc: ToolCall): string | undefined {
+  if (!tc.result?.output) return undefined;
+  try {
+    const parsed = JSON.parse(tc.result.output);
+    if (typeof parsed.file === "string") return parsed.file as string;
+  } catch {
+    // not JSON
+  }
+  return undefined;
+}
+
 function WritePlanCall({ tc }: { tc: ToolCall }) {
   const plan = parsePlanOutput(tc);
   if (!plan) return <ToolCallRow tc={tc} />;
-  return <StructuredPlanView plan={plan} />;
+  return <StructuredPlanView plan={plan} planFile={parsePlanFile(tc)} />;
 }
 
 // ─── UserMessage (accent mode) ───

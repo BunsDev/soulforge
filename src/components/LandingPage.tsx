@@ -1,9 +1,11 @@
 import { TextAttributes } from "@opentui/core";
 import { useTerminalDimensions } from "@opentui/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { icon, providerIcon } from "../core/icons.js";
 import type { ProviderStatus } from "../core/llm/provider.js";
 import type { PrerequisiteStatus } from "../core/setup/prerequisites.js";
+import { useRepoMapStore } from "../stores/repomap.js";
+import { SPINNER_FRAMES } from "./shared.js";
 
 const PURPLE = "#9B30FF";
 const RED = "#FF0040";
@@ -11,15 +13,13 @@ const FAINT = "#222";
 const MUTED = "#555";
 const SUBTLE = "#444";
 const GREEN = "#2d5";
+const AMBER = "#FF8C00";
 
 const WORDMARK = [
   "┌─┐┌─┐┬ ┬┬  ┌─┐┌─┐┬─┐┌─┐┌─┐",
   "└─┐│ ││ ││  ├┤ │ │├┬┘│ ┬├┤ ",
   "└─┘└─┘└─┘┴─┘└  └─┘┴└─└─┘└─┘",
 ];
-
-const GHOST_SPEED = 500;
-const CURSOR_FRAMES = ["█", "▓", "▒", "░", " ", "░", "▒", "▓"];
 
 function hexToRgb(hex: string): [number, number, number] {
   const n = Number.parseInt(hex.slice(1), 16);
@@ -70,12 +70,6 @@ export function LandingPage({ bootProviders, bootPrereqs }: LandingPageProps) {
   const { width, height } = useTerminalDimensions();
   const columns = width ?? 80;
   const rows = height ?? 24;
-  const [tick, setTick] = useState(0);
-
-  useEffect(() => {
-    const t = setInterval(() => setTick((n) => n + 1), GHOST_SPEED);
-    return () => clearInterval(t);
-  }, []);
 
   const compact = rows < 20;
 
@@ -96,7 +90,6 @@ export function LandingPage({ bootProviders, bootPrereqs }: LandingPageProps) {
   );
 
   const divW = Math.min(wordmarkW || 30, columns - 8);
-  const cursorFrame = CURSOR_FRAMES[Math.floor(tick * 3) % CURSOR_FRAMES.length];
 
   return (
     <box flexDirection="column" flexGrow={1} flexShrink={1} minHeight={0} justifyContent="center">
@@ -160,6 +153,8 @@ export function LandingPage({ bootProviders, bootPrereqs }: LandingPageProps) {
           )}
         </box>
 
+        <IndexingStatus />
+
         {(missingRequired.length > 0 || !anyProvider) && (
           <text fg={SUBTLE}>/setup to configure</text>
         )}
@@ -177,14 +172,72 @@ export function LandingPage({ bootProviders, bootPrereqs }: LandingPageProps) {
         </box>
 
         <box height={compact ? 0 : 1} />
-
-        <box flexDirection="row" gap={1}>
-          <text fg={MUTED}>ask anything below</text>
-          <text fg={RED}>{cursorFrame}</text>
-        </box>
       </box>
     </box>
   );
+}
+
+function IndexingStatus() {
+  const [state, setState] = useState(() => {
+    const s = useRepoMapStore.getState();
+    return { status: s.status, files: s.files, scanProgress: s.scanProgress };
+  });
+  const spinnerRef = useRef(0);
+  const [tick, setTick] = useState(0);
+
+  useEffect(
+    () =>
+      useRepoMapStore.subscribe((s) => {
+        setState({ status: s.status, files: s.files, scanProgress: s.scanProgress });
+      }),
+    [],
+  );
+
+  useEffect(() => {
+    if (state.status !== "scanning") return;
+    const timer = setInterval(() => {
+      spinnerRef.current++;
+      setTick((t) => t + 1);
+    }, 80);
+    return () => clearInterval(timer);
+  }, [state.status]);
+
+  // Suppress unused var — tick drives re-renders for spinner animation
+  void tick;
+
+  const { status, files, scanProgress } = state;
+  const frame = SPINNER_FRAMES[spinnerRef.current % SPINNER_FRAMES.length] ?? "⠋";
+
+  if (status === "scanning") {
+    const label = scanProgress || "indexing";
+    return (
+      <box flexDirection="row" gap={0} justifyContent="center">
+        <text fg={AMBER}>
+          {frame} indexing repo {label}
+        </text>
+      </box>
+    );
+  }
+
+  if (status === "ready") {
+    return (
+      <box flexDirection="row" gap={0} justifyContent="center">
+        <text fg={MUTED}>
+          {icon("check")} {String(files)} files indexed
+        </text>
+      </box>
+    );
+  }
+
+  if (status === "error") {
+    return (
+      <box flexDirection="row" gap={0} justifyContent="center">
+        <text fg={RED}>○ indexing failed</text>
+      </box>
+    );
+  }
+
+  return null;
 }
 
 function Cmd({ name, arg }: { name: string; arg?: string }) {

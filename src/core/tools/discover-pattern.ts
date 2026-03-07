@@ -44,12 +44,17 @@ export const discoverPatternTool = {
 
       if (interfaces.length > 0) {
         parts.push(`\n## Interfaces & Types (${String(interfaces.length)})`);
-        for (const iface of interfaces.slice(0, 3)) {
-          const block = await router.executeWithFallback(language, "readSymbol", (b) =>
-            b.readSymbol
-              ? b.readSymbol(iface.location.file, iface.name, iface.kind)
-              : Promise.resolve(null),
-          );
+        const blocks = await Promise.all(
+          interfaces.slice(0, 3).map(async (iface) => {
+            const block = await router.executeWithFallback(language, "readSymbol", (b) =>
+              b.readSymbol
+                ? b.readSymbol(iface.location.file, iface.name, iface.kind)
+                : Promise.resolve(null),
+            );
+            return { iface, block };
+          }),
+        );
+        for (const { iface, block } of blocks) {
           if (block) {
             parts.push(
               `\n### ${iface.kind} ${iface.name} — ${iface.location.file}:${String(iface.location.line)}`,
@@ -95,10 +100,15 @@ export const discoverPatternTool = {
 
       const uniqueFiles = [...new Set(symbols.map((s) => s.location.file))].slice(0, 5);
       parts.push(`\n## Related files (${String(uniqueFiles.length)})`);
-      for (const f of uniqueFiles) {
-        const exports = await router.executeWithFallback(language, "findExports", (b) =>
-          b.findExports ? b.findExports(f) : Promise.resolve(null),
-        );
+      const fileExports = await Promise.all(
+        uniqueFiles.map(async (f) => {
+          const exports = await router.executeWithFallback(language, "findExports", (b) =>
+            b.findExports ? b.findExports(f) : Promise.resolve(null),
+          );
+          return { file: f, exports };
+        }),
+      );
+      for (const { file: f, exports } of fileExports) {
         if (exports && exports.length > 0) {
           parts.push(`  ${f}:`);
           for (const exp of exports.slice(0, 8)) {

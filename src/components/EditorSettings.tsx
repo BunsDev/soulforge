@@ -1,6 +1,6 @@
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { EditorIntegration } from "../types/index.js";
 import type { ConfigScope } from "./shared.js";
 import { CONFIG_SCOPES, POPUP_BG, POPUP_HL, PopupRow } from "./shared.js";
@@ -56,11 +56,12 @@ const ALL_OFF: EditorIntegration = {
 interface Props {
   visible: boolean;
   settings: EditorIntegration | undefined;
+  initialScope?: ConfigScope;
   onUpdate: (settings: EditorIntegration, toScope: ConfigScope, fromScope?: ConfigScope) => void;
   onClose: () => void;
 }
 
-export function EditorSettings({ visible, settings, onUpdate, onClose }: Props) {
+export function EditorSettings({ visible, settings, initialScope, onUpdate, onClose }: Props) {
   const { width: termCols, height: termRows } = useTerminalDimensions();
   const containerRows = termRows - 2;
   const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.7));
@@ -68,8 +69,12 @@ export function EditorSettings({ visible, settings, onUpdate, onClose }: Props) 
   const maxVisible = Math.max(4, Math.floor(containerRows * 0.7) - CHROME_ROWS);
   const [cursor, setCursor] = useState(0);
   const [scrollOffset, setScrollOffset] = useState(0);
-  const [scope, setScope] = useState<ConfigScope>("session");
+  const [scope, setScope] = useState<ConfigScope>(initialScope ?? "project");
   const current = settings ?? ALL_ON;
+
+  useEffect(() => {
+    if (visible) setScope(initialScope ?? "project");
+  }, [visible, initialScope]);
 
   const adjustScroll = (next: number) => {
     setScrollOffset((prev) => {
@@ -123,6 +128,9 @@ export function EditorSettings({ visible, settings, onUpdate, onClose }: Props) 
           evt.name === "left"
             ? CONFIG_SCOPES[(idx - 1 + CONFIG_SCOPES.length) % CONFIG_SCOPES.length]
             : CONFIG_SCOPES[(idx + 1) % CONFIG_SCOPES.length];
+        if (next && next !== prev) {
+          onUpdate({ ...current }, next, prev);
+        }
         return next ?? prev;
       });
       return;

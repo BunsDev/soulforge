@@ -71,14 +71,14 @@ export function getModelContextInfo(modelId: string): ContextWindowResult {
 
   // 1. Provider's own API data (most accurate)
   if (providerId && !getProvider(providerId)?.grouped) {
-    const cached = modelCache.get(providerId);
-    if (cached) {
-      const match = cached.find((m) => m.id === model);
+    const entry = modelCache.get(providerId);
+    if (entry && Date.now() - entry.ts <= MODEL_CACHE_TTL) {
+      const match = entry.models.find((m) => m.id === model);
       if (match?.contextWindow) return { tokens: match.contextWindow, source: "api" };
     }
   }
   if (providerId) {
-    const grouped = groupedCache.get(providerId);
+    const grouped = getCachedGroupedModels(providerId);
     if (grouped) {
       for (const models of Object.values(grouped.modelsByProvider)) {
         const match = models.find((m) => m.id === model || modelId.endsWith(m.id));
@@ -160,16 +160,17 @@ export function getShortModelLabel(modelId: string): string {
 
   // 1. Provider API cache (direct providers)
   if (providerId) {
-    const cached = modelCache.get(providerId);
-    if (cached) {
-      const match = cached.find((m) => m.id === bareModel);
+    const entry = modelCache.get(providerId);
+    if (entry && Date.now() - entry.ts <= MODEL_CACHE_TTL) {
+      const match = entry.models.find((m) => m.id === bareModel);
       if (match) return match.name;
     }
   }
 
   // 2. Grouped provider cache (gateway, proxy)
-  for (const grouped of groupedCache.values()) {
-    for (const models of Object.values(grouped.modelsByProvider)) {
+  for (const entry of groupedCache.values()) {
+    if (Date.now() - entry.ts > MODEL_CACHE_TTL) continue;
+    for (const models of Object.values(entry.result.modelsByProvider)) {
       const match = models.find((m) => m.id === bareModel || m.id === modelId);
       if (match && match.name !== match.id) return match.name;
     }
@@ -202,18 +203,25 @@ export function getShortModelLabel(modelId: string): string {
 
 // ─── Cache ───
 
-const modelCache = new Map<string, ProviderModelInfo[]>();
+const MODEL_CACHE_TTL = 30 * 60_000;
+const modelCache = new Map<string, { models: ProviderModelInfo[]; ts: number }>();
 
 export function getCachedModels(providerId: string): ProviderModelInfo[] | null {
-  return modelCache.get(providerId) ?? null;
+  const entry = modelCache.get(providerId);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > MODEL_CACHE_TTL) {
+    modelCache.delete(providerId);
+    return null;
+  }
+  return entry.models;
 }
 
 // ─── Public API ───
 
 export async function fetchProviderModels(providerId: string): Promise<FetchModelsResult> {
   // Check cache first
-  const cached = modelCache.get(providerId);
-  if (cached) return { models: cached };
+  const entry = modelCache.get(providerId);
+  if (entry && Date.now() - entry.ts <= MODEL_CACHE_TTL) return { models: entry.models };
 
   const provider = getProvider(providerId);
   if (!provider) return { models: [] };
@@ -221,7 +229,7 @@ export async function fetchProviderModels(providerId: string): Promise<FetchMode
   try {
     const models = await provider.fetchModels();
     if (models) {
-      modelCache.set(providerId, models);
+      modelCache.set(providerId, { models, ts: Date.now() });
       return { models };
     }
     return { models: provider.fallbackModels };
@@ -240,15 +248,21 @@ interface OpenAIModelEntry {
   type?: string;
 }
 
-const groupedCache = new Map<string, GroupedModelsResult>();
+const groupedCache = new Map<string, { result: GroupedModelsResult; ts: number }>();
 
 export function getCachedGroupedModels(providerId: string): GroupedModelsResult | null {
-  return groupedCache.get(providerId) ?? null;
+  const entry = groupedCache.get(providerId);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > MODEL_CACHE_TTL) {
+    groupedCache.delete(providerId);
+    return null;
+  }
+  return entry.result;
 }
 
 // Backward-compat wrapper
 export function getCachedGatewayModels(): GroupedModelsResult | null {
-  return groupedCache.get("gateway") ?? null;
+  return getCachedGroupedModels("gateway");
 }
 
 function titleCase(s: string): string {
@@ -288,8 +302,8 @@ const GROUP_DISPLAY_NAMES: Record<string, string> = {
 };
 
 export async function fetchGroupedModels(providerId: string): Promise<GroupedModelsResult> {
-  const cached = groupedCache.get(providerId);
-  if (cached) return cached;
+  const entry = groupedCache.get(providerId);
+  if (entry && Date.now() - entry.ts <= MODEL_CACHE_TTL) return entry.result;
 
   if (providerId === "gateway") return fetchGatewayGrouped();
   if (providerId === "proxy") return fetchProxyGrouped();
@@ -343,7 +357,7 @@ async function fetchGatewayGrouped(): Promise<GroupedModelsResult> {
       subProviders,
       modelsByProvider: grouped,
     };
-    groupedCache.set("gateway", result);
+    groupedCache.set("gateway", { result, ts: Date.now() });
     return result;
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
@@ -403,7 +417,7 @@ async function fetchProxyGrouped(): Promise<GroupedModelsResult> {
       subProviders,
       modelsByProvider: grouped,
     };
-    groupedCache.set("proxy", result);
+    groupedCache.set("proxy", { result, ts: Date.now() });
     return result;
   } catch {
     // Proxy not running — group fallback models by prefix

@@ -80,7 +80,6 @@ export function useTabs({ chat, defaultModel }: UseTabsOptions): UseTabsReturn {
           activeModel: defaultModel,
           activePlan: null,
           sidebarPlan: null,
-          showPlanPanel: true,
           tokenUsage: {
             prompt: 0,
             completion: 0,
@@ -123,7 +122,6 @@ export function useTabs({ chat, defaultModel }: UseTabsOptions): UseTabsReturn {
       activeModel: defaultModel,
       activePlan: null,
       sidebarPlan: null,
-      showPlanPanel: true,
       tokenUsage: {
         prompt: 0,
         completion: 0,
@@ -273,7 +271,6 @@ export function useTabs({ chat, defaultModel }: UseTabsOptions): UseTabsReturn {
           activeModel: tm.activeModel,
           activePlan: null,
           sidebarPlan: null,
-          showPlanPanel: tm.showPlanPanel,
           tokenUsage: { cacheRead: 0, subagentInput: 0, subagentOutput: 0, ...tm.tokenUsage },
           coAuthorCommits: tm.coAuthorCommits,
           sessionId: tm.sessionId,

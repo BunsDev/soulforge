@@ -146,6 +146,12 @@ export const shellTool = {
 
         if (code === 0) {
           resolve({ success: true, output: stdout || stderr });
+        } else if (code === null) {
+          resolve({
+            success: false,
+            output: stdout || stderr,
+            error: `Command timed out after ${String(timeout / 1000)}s`,
+          });
         } else {
           resolve({
             success: false,

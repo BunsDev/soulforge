@@ -2,6 +2,10 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ToolResult } from "../../types/index.js";
 
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
 type ProjectAction = "test" | "build" | "lint" | "typecheck" | "run";
 
 interface ProjectArgs {
@@ -310,7 +314,7 @@ export const projectTool = {
       case "test": {
         command = profile.test;
         if (command && args.file) {
-          command = `${command} ${args.file}`;
+          command = `${command} ${shellQuote(args.file)}`;
         }
         break;
       }
@@ -327,7 +331,7 @@ export const projectTool = {
           else if (command.includes("rubocop")) command += " -a";
         }
         if (command && args.file) {
-          command = `${command} ${args.file}`;
+          command = `${command} ${shellQuote(args.file)}`;
         }
         break;
       }
@@ -378,7 +382,15 @@ export const projectTool = {
       }
 
       const output = [stdout, stderr].filter(Boolean).join("\n").trim();
-      const truncated = output.length > 3000 ? `${output.slice(0, 3000)}\n... (truncated)` : output;
+      const MAX_OUTPUT = 10_000;
+      let truncated: string;
+      if (output.length <= MAX_OUTPUT) {
+        truncated = output;
+      } else {
+        const HEAD = 3000;
+        const TAIL = 5000;
+        truncated = `${output.slice(0, HEAD)}\n\n... (${String(output.length - HEAD - TAIL)} chars truncated) ...\n\n${output.slice(-TAIL)}`;
+      }
 
       if (exitCode === 0) {
         return {

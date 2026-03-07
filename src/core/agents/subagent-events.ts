@@ -5,8 +5,8 @@ export interface SubagentStep {
   state: "running" | "done" | "error";
   /** Agent ID within a multi-agent group (e.g. "researcher-1") */
   agentId?: string;
-  /** File cache event type (only for read_file cache interactions) */
-  cacheState?: "hit" | "wait";
+  /** Cache event type */
+  cacheState?: "hit" | "wait" | "store" | "invalidate";
   /** Agent that originally cached this file (for cache hits/waits) */
   sourceAgentId?: string;
   /** Intelligence backend that handled this call (ts-morph, lsp, tree-sitter, regex) */

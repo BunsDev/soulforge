@@ -1,4 +1,4 @@
-export type MemoryScope = "global" | "project" | "session";
+export type MemoryScope = "global" | "project";
 
 export interface MemoryScopeConfig {
   writeScope: MemoryScope | "none";

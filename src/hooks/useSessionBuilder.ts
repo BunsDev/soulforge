@@ -8,7 +8,6 @@ interface BuildParams {
   cwd: string;
   snapshot: WorkspaceSnapshot;
   currentTabMessages: ChatMessage[];
-  configOverrides?: Record<string, unknown> | null;
 }
 
 export function buildSessionMeta({
@@ -17,7 +16,6 @@ export function buildSessionMeta({
   cwd,
   snapshot,
   currentTabMessages,
-  configOverrides,
 }: BuildParams): { meta: SessionMeta; tabMessages: Map<string, ChatMessage[]> } {
   const tabMessages = new Map<string, ChatMessage[]>();
   const tabs: TabMeta[] = [];
@@ -26,7 +24,7 @@ export function buildSessionMeta({
     const isActiveTab = tabState.id === snapshot.activeTabId || tabState.sessionId === sessionId;
     const msgs = isActiveTab
       ? currentTabMessages
-      : tabState.messages.filter((m) => m.role !== "system");
+      : tabState.messages.filter((m) => m.role !== "system" || m.showInChat);
     tabMessages.set(tabState.id, msgs);
 
     tabs.push({
@@ -36,7 +34,6 @@ export function buildSessionMeta({
       sessionId: tabState.sessionId,
       planMode: tabState.planMode,
       planRequest: tabState.planRequest,
-      showPlanPanel: tabState.showPlanPanel,
       coAuthorCommits: tabState.coAuthorCommits,
       tokenUsage: tabState.tokenUsage,
       messageRange: { startLine: 0, endLine: msgs.length },
@@ -55,7 +52,6 @@ export function buildSessionMeta({
     activeTabId: snapshot.activeTabId,
     forgeMode: snapshot.forgeMode,
     tabs,
-    ...(configOverrides ? { configOverrides } : {}),
   };
 
   return { meta, tabMessages };

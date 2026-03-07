@@ -14,6 +14,7 @@ export interface TaskRouter {
   coding: string | null;
   exploration: string | null;
   webSearch: string | null;
+  compact: string | null;
   semantic: string | null;
   default: string | null;
 }
@@ -52,17 +53,26 @@ export interface Plan {
   createdAt: number;
 }
 
+export interface PlanSymbolChange {
+  name: string;
+  kind: string;
+  action: "add" | "modify" | "remove" | "rename";
+  details: string;
+  line?: number;
+}
+
 export interface PlanFileChange {
   path: string;
   action: "create" | "modify" | "delete";
   description: string;
+  symbols?: PlanSymbolChange[];
 }
 
 export interface PlanOutput {
   title: string;
   context: string;
   files: PlanFileChange[];
-  steps: Array<{ id: string; label: string }>;
+  steps: Array<{ id: string; label: string; details?: string }>;
   verification: string[];
 }
 
@@ -85,13 +95,14 @@ export type PlanReviewAction = "execute" | "clear_execute" | "cancel" | string;
 export interface PendingPlanReview {
   plan: Plan;
   planFile: string;
+  planContent: string;
   resolve: (action: PlanReviewAction) => void;
 }
 
 export interface InteractiveCallbacks {
   onPlanCreate: (plan: Plan) => void;
   onPlanStepUpdate: (stepId: string, status: PlanStepStatus) => void;
-  onPlanReview: (plan: Plan, planFile: string) => Promise<PlanReviewAction>;
+  onPlanReview: (plan: Plan, planFile: string, planContent: string) => Promise<PlanReviewAction>;
   onAskUser: (question: string, options: QuestionOption[], allowSkip: boolean) => Promise<string>;
   onOpenEditor: (file?: string) => Promise<void>;
   onWebSearchApproval: (query: string) => Promise<boolean>;
@@ -118,6 +129,8 @@ export interface ChatMessage {
   toolCalls?: ToolCall[];
   /** Ordered segments for interleaved text/tool rendering. */
   segments?: MessageSegment[];
+  /** When true, system messages render inline in chat instead of the ephemeral banner. */
+  showInChat?: boolean;
 }
 
 export interface ToolCall {
@@ -138,7 +151,7 @@ export interface CodeIntelligenceConfig {
 
 // ─── AI Provider Config Types ───
 
-export type ThinkingMode = "adaptive" | "enabled" | "disabled" | "auto";
+export type ThinkingMode = "off" | "adaptive" | "enabled" | "disabled" | "auto";
 
 export interface ThinkingConfig {
   /** "auto" enables adaptive thinking for Anthropic models. Default: "auto" */
@@ -150,10 +163,10 @@ export interface ThinkingConfig {
 export type EffortLevel = "low" | "medium" | "high" | "max";
 
 export interface PerformanceConfig {
-  /** Effort level for model reasoning. Default: "high" */
-  effort?: EffortLevel;
-  /** Speed mode — "fast" enables 2.5x output for Opus 4.6 */
-  speed?: "fast" | "standard";
+  /** Effort level for model reasoning. "off" = not sent to API. */
+  effort?: EffortLevel | "off";
+  /** Speed mode — "fast" enables 2.5x output for Opus 4.6. "off" = not sent to API. */
+  speed?: "off" | "fast" | "standard";
 }
 
 export interface ContextManagementConfig {
@@ -205,8 +218,8 @@ export interface AppConfig {
   defaultForgeMode?: ForgeMode;
   /** Enable AST-based repo map in system prompt instead of file tree. Default: true */
   repoMap?: boolean;
-  /** Enable AI-generated one-line descriptions for top symbols. Default: false */
-  semanticSummaries?: boolean;
+  /** Semantic summary mode: "off" (default), "ast" (extract docstrings), "llm" (AI-generated). Boolean for backward compat: true → "llm", false → "off". */
+  semanticSummaries?: "off" | "ast" | "llm" | boolean;
 }
 
 // ─── Focus Types ───

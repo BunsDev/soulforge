@@ -122,22 +122,6 @@ export class SessionManager {
     return { messages: msgs, coreMessages: rebuildCoreMessages(msgs) };
   }
 
-  saveSessionMemory(sessionId: string, data: unknown): void {
-    const sessionDir = join(this.dir, sessionId);
-    if (!existsSync(sessionDir)) return;
-    writeFileSync(join(sessionDir, "memory.json"), JSON.stringify(data), "utf-8");
-  }
-
-  loadSessionMemory(sessionId: string): unknown | null {
-    const memPath = join(this.dir, sessionId, "memory.json");
-    if (!existsSync(memPath)) return null;
-    try {
-      return JSON.parse(readFileSync(memPath, "utf-8"));
-    } catch {
-      return null;
-    }
-  }
-
   findByPrefix(prefix: string): string | null {
     if (!existsSync(this.dir)) return null;
     const normalizedPrefix = prefix.toLowerCase();

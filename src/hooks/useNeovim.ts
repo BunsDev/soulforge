@@ -74,6 +74,12 @@ export function useNeovim(
 
     launchingRef.current = true;
 
+    if (!nvimPath) {
+      setError("neovim-not-found");
+      launchingRef.current = false;
+      return;
+    }
+
     // Compute dimensions to match the actual editor panel:
     // Panel is 60% width with round border (2 chars horizontal, 2 rows vertical)
     // Vertical: app header(1) + app footer(1) + border(2) + title(1) + sep(1) + sep(1) + bottom bar(1) = 8

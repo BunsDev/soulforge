@@ -80,12 +80,8 @@ process.on("exit", () => {
   printExitBanner();
 });
 
-let sigintCount = 0;
 process.on("SIGINT", () => {
-  sigintCount++;
-  if (sigintCount >= 2) {
-    cleanupAndExit(130);
-  }
+  cleanupAndExit(130);
 });
 
 process.on("SIGTERM", () => {

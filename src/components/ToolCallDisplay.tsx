@@ -44,6 +44,8 @@ const COLORS = {
   error: "#f44",
 } as const;
 
+const RENDER_INTERVAL = 200;
+
 function backendLabel(tag: string): string {
   return BACKEND_LABELS[tag] ?? tag;
 }
@@ -168,10 +170,28 @@ function formatArgs(toolName: string, args?: string): string {
 
 function formatResult(toolName: string, result?: string): string {
   if (!result) return "";
+  try {
+    const p = JSON.parse(result);
+    if (p.repoMapHit && p.output) {
+      const out = String(p.output);
+      const match = out.match(/indexed at ([^\s]+)/);
+      return match ? `→ ${match[1]}` : out.slice(0, 40);
+    }
+  } catch {
+    // not JSON
+  }
   if (SUBAGENT_NAMES.has(toolName)) {
     try {
       const p = JSON.parse(result);
       if (p.success === false && p.error) return String(p.error).slice(0, 50);
+      if (Array.isArray(p.reads)) {
+        const paths = new Set((p.reads as Array<{ path: string }>).map((r) => r.path));
+        const parts: string[] = [];
+        if (paths.size > 0) parts.push(`${String(paths.size)} files read`);
+        if (Array.isArray(p.filesEdited) && p.filesEdited.length > 0)
+          parts.push(`${String(p.filesEdited.length)} edited`);
+        return parts.join(", ") || "done";
+      }
       if (p.output) {
         const out = String(p.output);
         const lines = out.split("\n").length;
@@ -297,77 +317,160 @@ const StatusIcon = memo(function StatusIcon({ state }: { state: LiveToolCall["st
   return <span fg={COLORS.error}>✗</span>;
 });
 
-function useSubagentSteps(parentId: string | null, maxSteps = 5) {
-  const [steps, setSteps] = useState<SubagentStep[]>([]);
+interface DispatchDisplayData {
+  steps: SubagentStep[];
+  progress: MultiAgentState | null;
+  stats: Map<string, AgentStatsEvent>;
+}
+
+const EMPTY_DISPATCH: DispatchDisplayData = {
+  steps: [],
+  progress: null,
+  stats: new Map(),
+};
+
+function useDispatchDisplay(
+  parentId: string | null,
+  maxSteps: number,
+  fallbackTotal: number,
+): DispatchDisplayData {
+  const stepsRef = useRef<SubagentStep[]>([]);
+  const progressRef = useRef<MultiAgentState | null>(null);
+  const statsRef = useRef<Map<string, AgentStatsEvent>>(new Map());
+  const dirtyRef = useRef(false);
   const maxStepsRef = useRef(maxSteps);
   maxStepsRef.current = maxSteps;
+  const fallbackRef = useRef(fallbackTotal);
+  fallbackRef.current = fallbackTotal;
+
+  const [, setTick] = useState(0);
 
   useEffect(() => {
     if (!parentId) return;
-    setSteps([]);
-    return onSubagentStep((step) => {
+    stepsRef.current = [];
+    progressRef.current = null;
+    statsRef.current = new Map();
+    dirtyRef.current = false;
+
+    const unsub1 = onSubagentStep((step) => {
       if (step.parentToolCallId !== parentId) return;
-      setSteps((prev) => {
-        const existing = prev.findIndex(
-          (s) => s.toolName === step.toolName && s.args === step.args && s.state === "running",
-        );
-        if (existing >= 0 && step.state !== "running") {
-          const next = [...prev];
-          next[existing] = step;
-          return next;
-        }
+      const prev = stepsRef.current;
+      const existing = prev.findIndex(
+        (s) => s.toolName === step.toolName && s.args === step.args && s.state === "running",
+      );
+      if (existing >= 0 && step.state !== "running") {
+        const next = [...prev];
+        next[existing] = step;
+        stepsRef.current = next;
+      } else {
         const next = [...prev, step];
         const max = maxStepsRef.current;
-        return next.length > max ? next.slice(-max) : next;
-      });
+        stepsRef.current = next.length > max ? next.slice(-max) : next;
+      }
+      dirtyRef.current = true;
     });
+
+    const unsub2 = onMultiAgentEvent((event: MultiAgentEvent) => {
+      if (event.parentToolCallId !== parentId) return;
+      progressRef.current = applyMultiAgentEvent(progressRef.current, event, fallbackRef.current);
+      dirtyRef.current = true;
+    });
+
+    const unsub3 = onAgentStats((event) => {
+      if (event.parentToolCallId !== parentId) return;
+      const next = new Map(statsRef.current);
+      next.set(event.agentId, event);
+      statsRef.current = next;
+      dirtyRef.current = true;
+    });
+
+    const timer = setInterval(() => {
+      if (dirtyRef.current) {
+        dirtyRef.current = false;
+        setTick((n) => n + 1);
+      }
+    }, RENDER_INTERVAL);
+
+    return () => {
+      unsub1();
+      unsub2();
+      unsub3();
+      clearInterval(timer);
+    };
   }, [parentId]);
 
-  return steps;
+  if (!parentId) return EMPTY_DISPATCH;
+  return {
+    steps: stepsRef.current,
+    progress: progressRef.current,
+    stats: statsRef.current,
+  };
 }
 
-function ChildStepRow({ step }: { step: SubagentStep }) {
-  const icon = TOOL_ICONS[step.toolName] ?? "\uF0AD";
-  const iconColor = TOOL_ICON_COLORS[step.toolName] ?? "#666";
-  const label = TOOL_LABELS[step.toolName] ?? step.toolName;
-  const staticCategory = TOOL_CATEGORIES[step.toolName];
-  const hasSplit = !!(step.backend && staticCategory && step.backend !== staticCategory);
-  const category = hasSplit ? staticCategory : (step.backend ?? staticCategory);
-  const backendTag = hasSplit ? step.backend : null;
-  const categoryColor =
-    (staticCategory ? CATEGORY_COLORS[staticCategory as ToolCategory] : null) ??
-    (step.backend ? (CATEGORY_COLORS[step.backend as ToolCategory] ?? "#888") : undefined) ??
-    "#888";
-  const backendColor = backendTag
-    ? (CATEGORY_COLORS[backendTag as ToolCategory] ?? "#888")
-    : undefined;
-  const isDone = step.state !== "running";
+const ChildStepRow = memo(
+  function ChildStepRow({ step }: { step: SubagentStep }) {
+    const icon = TOOL_ICONS[step.toolName] ?? "\uF0AD";
+    const iconColor = TOOL_ICON_COLORS[step.toolName] ?? "#666";
+    const label = TOOL_LABELS[step.toolName] ?? step.toolName;
+    const staticCategory = TOOL_CATEGORIES[step.toolName];
+    const hasSplit = !!(step.backend && staticCategory && step.backend !== staticCategory);
+    const category = hasSplit ? staticCategory : (step.backend ?? staticCategory);
+    const backendTag = hasSplit ? step.backend : null;
+    const categoryColor =
+      (staticCategory ? CATEGORY_COLORS[staticCategory as ToolCategory] : null) ??
+      (step.backend ? (CATEGORY_COLORS[step.backend as ToolCategory] ?? "#888") : undefined) ??
+      "#888";
+    const backendColor = backendTag
+      ? (CATEGORY_COLORS[backendTag as ToolCategory] ?? "#888")
+      : undefined;
+    const isDone = step.state !== "running";
 
-  return (
-    <box height={1} flexShrink={0} marginLeft={3}>
-      <text truncate>
-        <span fg="#333">├ </span>
-        {step.state === "running" ? (
-          <Spinner color="#666" />
-        ) : step.state === "done" ? (
-          <span fg="#2d5">✓</span>
-        ) : (
-          <span fg="#f44">✗</span>
-        )}
-        <span fg={isDone ? "#444" : iconColor}> {icon} </span>
-        {category ? <span fg={isDone ? "#333" : categoryColor}>[{category}]</span> : null}
-        {backendTag ? (
-          <span fg={isDone ? "#333" : backendColor}>[{backendLabel(backendTag)}] </span>
-        ) : category ? (
-          <span> </span>
-        ) : null}
-        <span fg={isDone ? "#444" : "#888"}>{label}</span>
-        {step.agentId ? <span fg={isDone ? "#333" : "#9B30FF"}> [{step.agentId}]</span> : null}
-        {step.args ? <span fg={isDone ? "#333" : "#666"}> {step.args}</span> : null}
-      </text>
-    </box>
-  );
-}
+    const cacheIcon = step.cacheState ? (CACHE_ICONS[step.cacheState] ?? "") : "";
+    const cacheColor = step.cacheState ? (CACHE_COLORS[step.cacheState] ?? "#888") : "";
+    const cacheLabel = getCacheLabel(step);
+
+    return (
+      <box height={1} flexShrink={0} marginLeft={3}>
+        <text truncate>
+          <span fg="#333">├ </span>
+          {step.cacheState === "wait" ? (
+            <Spinner color={CACHE_COLORS.wait} />
+          ) : step.state === "running" ? (
+            <Spinner color="#666" />
+          ) : step.state === "done" ? (
+            <span fg="#2d5">✓</span>
+          ) : (
+            <span fg="#f44">✗</span>
+          )}
+          <span fg={isDone ? "#444" : iconColor}> {icon} </span>
+          {category ? <span fg={isDone ? "#333" : categoryColor}>[{category}]</span> : null}
+          {backendTag ? (
+            <span fg={isDone ? "#333" : backendColor}>[{backendLabel(backendTag)}] </span>
+          ) : category ? (
+            <span> </span>
+          ) : null}
+          <span fg={isDone ? "#444" : "#888"}>{label}</span>
+          {step.agentId ? <span fg={isDone ? "#333" : "#9B30FF"}> [{step.agentId}]</span> : null}
+          {step.args ? <span fg={isDone ? "#333" : "#666"}> {step.args}</span> : null}
+          {cacheIcon ? (
+            <span fg={cacheColor}>
+              {" "}
+              {cacheIcon} {cacheLabel}
+            </span>
+          ) : null}
+        </text>
+      </box>
+    );
+  },
+  (prev, next) =>
+    prev.step.toolName === next.step.toolName &&
+    prev.step.args === next.step.args &&
+    prev.step.state === next.step.state &&
+    prev.step.cacheState === next.step.cacheState &&
+    prev.step.sourceAgentId === next.step.sourceAgentId &&
+    prev.step.backend === next.step.backend &&
+    prev.step.agentId === next.step.agentId,
+);
 
 interface AgentInfo {
   role: string;
@@ -390,294 +493,301 @@ function humanizeTokens(n: number): string {
   return String(n);
 }
 
-function useMultiAgentProgress(parentId: string | null, fallbackTotal: number) {
-  const [state, setState] = useState<MultiAgentState | null>(null);
-  const fallbackRef = useRef(fallbackTotal);
-  fallbackRef.current = fallbackTotal;
+function applyMultiAgentEvent(
+  prev: MultiAgentState | null,
+  event: MultiAgentEvent,
+  fallbackTotal: number,
+): MultiAgentState {
+  const s: MultiAgentState = prev ?? {
+    totalAgents: event.totalAgents ?? fallbackTotal,
+    agents: new Map(),
+    findingCount: 0,
+  };
+  const total = event.totalAgents ?? s.totalAgents;
 
-  useEffect(() => {
-    if (!parentId) return;
-
-    return onMultiAgentEvent((event: MultiAgentEvent) => {
-      if (event.parentToolCallId !== parentId) return;
-
-      setState((prev) => {
-        const s: MultiAgentState = prev ?? {
-          totalAgents: event.totalAgents ?? fallbackRef.current,
-          agents: new Map(),
-          findingCount: 0,
-        };
-        const total = event.totalAgents ?? s.totalAgents;
-
-        if (event.type === "dispatch-start") {
-          return { ...s, totalAgents: event.totalAgents ?? fallbackRef.current };
-        }
-        if (event.type === "agent-start" && event.agentId) {
-          const next = new Map(s.agents);
-          next.set(event.agentId, {
-            role: event.role ?? "explore",
-            task: event.task ?? "",
-            state: "running",
-          });
-          return { ...s, totalAgents: total, agents: next };
-        }
-        if (event.type === "agent-done" && event.agentId) {
-          const next = new Map(s.agents);
-          const existing = next.get(event.agentId);
-          const stats = {
-            toolUses: event.toolUses,
-            tokenUsage: event.tokenUsage,
-            cacheHits: event.cacheHits,
-          };
-          if (existing) {
-            next.set(event.agentId, { ...existing, state: "done", ...stats });
-          } else {
-            next.set(event.agentId, {
-              role: event.role ?? "explore",
-              task: event.task ?? "",
-              state: "done",
-              ...stats,
-            });
-          }
-          return {
-            ...s,
-            totalAgents: total,
-            agents: next,
-            findingCount: event.findingCount ?? s.findingCount,
-          };
-        }
-        if (event.type === "agent-error" && event.agentId) {
-          const next = new Map(s.agents);
-          const existing = next.get(event.agentId);
-          if (existing) {
-            next.set(event.agentId, { ...existing, state: "error" });
-          } else {
-            next.set(event.agentId, {
-              role: event.role ?? "explore",
-              task: event.task ?? "",
-              state: "error",
-            });
-          }
-          return { ...s, totalAgents: total, agents: next };
-        }
-        return s;
-      });
+  if (event.type === "dispatch-start") {
+    return { ...s, totalAgents: event.totalAgents ?? fallbackTotal };
+  }
+  if (event.type === "agent-start" && event.agentId) {
+    const next = new Map(s.agents);
+    next.set(event.agentId, {
+      role: event.role ?? "explore",
+      task: event.task ?? "",
+      state: "running",
     });
-  }, [parentId]);
-
-  return state;
+    return { ...s, totalAgents: total, agents: next };
+  }
+  if (event.type === "agent-done" && event.agentId) {
+    const next = new Map(s.agents);
+    const existing = next.get(event.agentId);
+    const stats = {
+      toolUses: event.toolUses,
+      tokenUsage: event.tokenUsage,
+      cacheHits: event.cacheHits,
+    };
+    if (existing) {
+      next.set(event.agentId, { ...existing, state: "done", ...stats });
+    } else {
+      next.set(event.agentId, {
+        role: event.role ?? "explore",
+        task: event.task ?? "",
+        state: "done",
+        ...stats,
+      });
+    }
+    return {
+      ...s,
+      totalAgents: total,
+      agents: next,
+      findingCount: event.findingCount ?? s.findingCount,
+    };
+  }
+  if (event.type === "agent-error" && event.agentId) {
+    const next = new Map(s.agents);
+    const existing = next.get(event.agentId);
+    if (existing) {
+      next.set(event.agentId, { ...existing, state: "error" });
+    } else {
+      next.set(event.agentId, {
+        role: event.role ?? "explore",
+        task: event.task ?? "",
+        state: "error",
+      });
+    }
+    return { ...s, totalAgents: total, agents: next };
+  }
+  return s;
 }
 
-function useAgentLiveStats(parentId: string | null) {
-  const [stats, setStats] = useState<Map<string, AgentStatsEvent>>(new Map());
-
-  useEffect(() => {
-    if (!parentId) return;
-    return onAgentStats((event) => {
-      if (event.parentToolCallId !== parentId) return;
-      setStats((prev) => {
-        const next = new Map(prev);
-        next.set(event.agentId, event);
-        return next;
-      });
-    });
-  }, [parentId]);
-
-  return stats;
-}
-
-const CACHE_ICONS = {
+const CACHE_ICONS: Record<string, string> = {
   hit: "\uF0E7",
   wait: "\uF017",
-} as const;
+  store: "\uF0C7",
+  invalidate: "\uF071",
+};
 
-const CACHE_COLORS = {
+const CACHE_COLORS: Record<string, string> = {
   hit: "#2d5",
   wait: "#FFDD57",
-} as const;
+  store: "#5af",
+  invalidate: "#f80",
+};
 
-function MultiAgentChildRow({
-  agentId,
-  info,
-  isLast,
-  childSteps,
-  liveStats,
-}: {
-  agentId: string;
-  info: AgentInfo;
-  isLast: boolean;
-  childSteps: SubagentStep[];
-  liveStats?: AgentStatsEvent;
-}) {
-  const roleIcon = info.role === "explore" ? "\uDB80\uDE29" : "\uDB80\uDD69";
-  const roleColor = info.role === "code" ? "#FF6B2B" : "#9B30FF";
-  const isDone = info.state === "done" || info.state === "error";
-  const taskStr = info.task.length > 40 ? `${info.task.slice(0, 37)}...` : info.task;
-  const connector = isLast && childSteps.length === 0 ? "└ " : "├ ";
-  const continuation = isLast ? "  " : "│ ";
+function getCacheLabel(step: SubagentStep): string {
+  switch (step.cacheState) {
+    case "hit":
+      return step.sourceAgentId ? `from ${step.sourceAgentId}` : "from cache";
+    case "wait":
+      return step.sourceAgentId ? `waiting on ${step.sourceAgentId}` : "waiting";
+    case "store":
+      return "cached";
+    case "invalidate":
+      return "updated cache";
+    default:
+      return "";
+  }
+}
 
-  const toolUses = isDone ? info.toolUses : liveStats?.toolUses;
-  const tokenUsage = isDone ? info.tokenUsage : liveStats?.tokenUsage;
-  const cacheHits = isDone ? info.cacheHits : liveStats?.cacheHits;
+const MultiAgentChildRow = memo(
+  function MultiAgentChildRow({
+    agentId,
+    info,
+    isLast,
+    childSteps,
+    liveStats,
+  }: {
+    agentId: string;
+    info: AgentInfo;
+    isLast: boolean;
+    childSteps: SubagentStep[];
+    liveStats?: AgentStatsEvent;
+  }) {
+    const roleIcon = info.role === "explore" ? "\uDB80\uDE29" : "\uDB80\uDD69";
+    const roleColor = info.role === "code" ? "#FF6B2B" : "#9B30FF";
+    const isDone = info.state === "done" || info.state === "error";
+    const taskStr = info.task.length > 40 ? `${info.task.slice(0, 37)}...` : info.task;
+    const connector = isLast && childSteps.length === 0 ? "└ " : "├ ";
+    const continuation = isLast ? "  " : "│ ";
 
-  const statParts: string[] = [];
-  if (toolUses != null && toolUses > 0) statParts.push(`${String(toolUses)} tool uses`);
-  if (tokenUsage && tokenUsage.total > 0)
-    statParts.push(`${humanizeTokens(tokenUsage.total)} tokens`);
-  if (cacheHits && cacheHits > 0) statParts.push(`${humanizeTokens(cacheHits)} cached`);
-  const statStr = statParts.length > 0 ? ` · ${statParts.join(" · ")}` : "";
+    const toolUses = isDone ? info.toolUses : liveStats?.toolUses;
+    const tokenUsage = isDone ? info.tokenUsage : liveStats?.tokenUsage;
+    const cacheHits = isDone ? info.cacheHits : liveStats?.cacheHits;
 
-  return (
-    <>
-      <box height={1} flexShrink={0} marginLeft={3}>
-        <text truncate>
-          <span fg="#333">{connector}</span>
-          {info.state === "running" ? (
-            <Spinner color={roleColor} />
-          ) : info.state === "done" ? (
-            <span fg="#2d5">✓</span>
-          ) : info.state === "error" ? (
-            <span fg="#f44">✗</span>
-          ) : (
-            <span fg="#555">○</span>
-          )}
-          <span fg={isDone ? "#444" : roleColor}> {roleIcon} </span>
-          <span
-            fg={isDone ? "#444" : "#ddd"}
-            attributes={!isDone ? TextAttributes.BOLD : undefined}
-          >
-            {agentId}
-          </span>
-          <span fg={isDone ? "#333" : roleColor}> ({info.role})</span>
-          <span fg={isDone ? "#333" : "#666"}> {taskStr}</span>
-          {statStr ? <span fg={isDone ? "#555" : "#666"}>{statStr}</span> : null}
-        </text>
-      </box>
-      {(() => {
-        const MAX_VISIBLE = 6;
-        const running = childSteps.filter((s) => s.state === "running");
-        const done = childSteps.filter((s) => s.state !== "running");
-        const doneSlots = Math.max(0, MAX_VISIBLE - running.length);
-        const visibleDone = done.slice(-doneSlots);
-        const hiddenCount = done.length - visibleDone.length;
-        const visible = [...visibleDone, ...running];
-        const agentRunning = info.state === "running";
-        const showThinking = agentRunning && running.length === 0 && done.length > 0;
+    const statParts: string[] = [];
+    if (toolUses != null && toolUses > 0) statParts.push(`${String(toolUses)} tool uses`);
+    if (tokenUsage && tokenUsage.total > 0)
+      statParts.push(`${humanizeTokens(tokenUsage.total)} tokens`);
+    if (cacheHits && cacheHits > 0) statParts.push(`${humanizeTokens(cacheHits)} cached`);
+    const statStr = statParts.length > 0 ? ` · ${statParts.join(" · ")}` : "";
 
-        return (
-          <>
-            {hiddenCount > 0 && (
-              <box height={1} flexShrink={0} marginLeft={3}>
-                <text truncate>
-                  <span fg="#333">{continuation} ├ </span>
-                  <span fg="#444">+{hiddenCount} completed</span>
-                </text>
-              </box>
+    return (
+      <>
+        <box height={1} flexShrink={0} marginLeft={3}>
+          <text truncate>
+            <span fg="#333">{connector}</span>
+            {info.state === "running" ? (
+              <Spinner color={roleColor} />
+            ) : info.state === "done" ? (
+              <span fg="#2d5">✓</span>
+            ) : info.state === "error" ? (
+              <span fg="#f44">✗</span>
+            ) : (
+              <span fg="#555">○</span>
             )}
-            {visible.map((step, i) => {
-              const stepIcon = TOOL_ICONS[step.toolName] ?? "\uF0AD";
-              const stepColor = TOOL_ICON_COLORS[step.toolName] ?? "#666";
-              const stepLabel = TOOL_LABELS[step.toolName] ?? step.toolName;
-              const stepStaticCategory = TOOL_CATEGORIES[step.toolName];
-              const stepHasSplit = !!(
-                step.backend &&
-                stepStaticCategory &&
-                step.backend !== stepStaticCategory
-              );
-              const stepCategory = stepHasSplit
-                ? stepStaticCategory
-                : (step.backend ?? stepStaticCategory);
-              const stepBackendTag = stepHasSplit ? step.backend : null;
-              const stepCatColor =
-                (stepStaticCategory ? CATEGORY_COLORS[stepStaticCategory as ToolCategory] : null) ??
-                (step.backend
-                  ? (CATEGORY_COLORS[step.backend as ToolCategory] ?? "#888")
-                  : undefined) ??
-                "#888";
-              const stepBackendColor = stepBackendTag
-                ? (CATEGORY_COLORS[stepBackendTag as ToolCategory] ?? "#888")
-                : undefined;
-              const stepDone = step.state !== "running";
-              const stepLast = i === visible.length - 1 && !showThinking;
-              const stepConnector = stepLast ? "└ " : "├ ";
-              const origIdx = childSteps.indexOf(step);
+            <span fg={isDone ? "#444" : roleColor}> {roleIcon} </span>
+            <span
+              fg={isDone ? "#444" : "#ddd"}
+              attributes={!isDone ? TextAttributes.BOLD : undefined}
+            >
+              {agentId}
+            </span>
+            <span fg={isDone ? "#333" : roleColor}> ({info.role})</span>
+            <span fg={isDone ? "#333" : "#666"}> {taskStr}</span>
+            {statStr ? <span fg={isDone ? "#555" : "#666"}>{statStr}</span> : null}
+          </text>
+        </box>
+        {(() => {
+          const MAX_VISIBLE = 6;
+          const filtered = childSteps.filter((s) => !QUIET_TOOLS.has(s.toolName));
+          const running = filtered.filter((s) => s.state === "running");
+          const done = filtered.filter((s) => s.state !== "running");
+          const doneSlots = Math.max(0, MAX_VISIBLE - running.length);
+          const visibleDone = done.slice(-doneSlots);
+          const hiddenCount = done.length - visibleDone.length;
+          const visible = [...visibleDone, ...running];
+          const agentRunning = info.state === "running";
+          const showThinking = agentRunning && running.length === 0 && done.length > 0;
 
-              const cacheIcon = step.cacheState ? CACHE_ICONS[step.cacheState] : "";
-              const cacheColor = step.cacheState ? CACHE_COLORS[step.cacheState] : "";
-              const cacheLabel =
-                step.cacheState === "hit"
-                  ? step.sourceAgentId
-                    ? `from ${step.sourceAgentId}`
-                    : "cached"
-                  : step.cacheState === "wait"
-                    ? step.sourceAgentId
-                      ? `waiting on ${step.sourceAgentId}`
-                      : "waiting"
-                    : "";
+          return (
+            <>
+              {hiddenCount > 0 && (
+                <box height={1} flexShrink={0} marginLeft={3}>
+                  <text truncate>
+                    <span fg="#333">{continuation} ├ </span>
+                    <span fg="#444">+{hiddenCount} completed</span>
+                  </text>
+                </box>
+              )}
+              {visible.map((step, i) => {
+                const stepIcon = TOOL_ICONS[step.toolName] ?? "\uF0AD";
+                const stepColor = TOOL_ICON_COLORS[step.toolName] ?? "#666";
+                const stepLabel = TOOL_LABELS[step.toolName] ?? step.toolName;
+                const stepStaticCategory = TOOL_CATEGORIES[step.toolName];
+                const stepHasSplit = !!(
+                  step.backend &&
+                  stepStaticCategory &&
+                  step.backend !== stepStaticCategory
+                );
+                const stepCategory = stepHasSplit
+                  ? stepStaticCategory
+                  : (step.backend ?? stepStaticCategory);
+                const stepBackendTag = stepHasSplit ? step.backend : null;
+                const stepCatColor =
+                  (stepStaticCategory
+                    ? CATEGORY_COLORS[stepStaticCategory as ToolCategory]
+                    : null) ??
+                  (step.backend
+                    ? (CATEGORY_COLORS[step.backend as ToolCategory] ?? "#888")
+                    : undefined) ??
+                  "#888";
+                const stepBackendColor = stepBackendTag
+                  ? (CATEGORY_COLORS[stepBackendTag as ToolCategory] ?? "#888")
+                  : undefined;
+                const stepDone = step.state !== "running";
+                const stepLast = i === visible.length - 1 && !showThinking;
+                const stepConnector = stepLast ? "└ " : "├ ";
+                const origIdx = childSteps.indexOf(step);
 
-              return (
-                <box
-                  key={`${step.toolName}-${String(origIdx)}`}
-                  height={1}
-                  flexShrink={0}
-                  marginLeft={3}
-                >
+                const cacheIcon = step.cacheState ? (CACHE_ICONS[step.cacheState] ?? "") : "";
+                const cacheColor = step.cacheState ? (CACHE_COLORS[step.cacheState] ?? "#888") : "";
+                const cacheLabel = getCacheLabel(step);
+
+                return (
+                  <box
+                    key={`${step.toolName}-${String(origIdx)}`}
+                    height={1}
+                    flexShrink={0}
+                    marginLeft={3}
+                  >
+                    <text truncate>
+                      <span fg="#333">
+                        {continuation}
+                        {"  "}
+                        {stepConnector}
+                      </span>
+                      {step.cacheState === "wait" ? (
+                        <Spinner color={CACHE_COLORS.wait} />
+                      ) : step.state === "running" ? (
+                        <Spinner color="#666" />
+                      ) : step.state === "done" ? (
+                        <span fg="#2d5">✓</span>
+                      ) : (
+                        <span fg="#f44">✗</span>
+                      )}
+                      <span fg={stepDone ? "#444" : stepColor}> {stepIcon} </span>
+                      {stepCategory ? (
+                        <span fg={stepDone ? "#333" : stepCatColor}>[{stepCategory}]</span>
+                      ) : null}
+                      {stepBackendTag ? (
+                        <span fg={stepDone ? "#333" : stepBackendColor}>
+                          [{backendLabel(stepBackendTag)}]{" "}
+                        </span>
+                      ) : stepCategory ? (
+                        <span> </span>
+                      ) : null}
+                      <span fg={stepDone ? "#444" : "#888"}>{stepLabel}</span>
+                      {step.args ? <span fg={stepDone ? "#333" : "#666"}> {step.args}</span> : null}
+                      {cacheIcon ? (
+                        <span fg={cacheColor}>
+                          {" "}
+                          {cacheIcon} {cacheLabel}
+                        </span>
+                      ) : null}
+                    </text>
+                  </box>
+                );
+              })}
+              {showThinking && (
+                <box height={1} flexShrink={0} marginLeft={3}>
                   <text truncate>
                     <span fg="#333">
                       {continuation}
-                      {"  "}
-                      {stepConnector}
+                      {"  "}└{" "}
                     </span>
-                    {step.cacheState === "wait" ? (
-                      <Spinner color={CACHE_COLORS.wait} />
-                    ) : step.state === "running" ? (
-                      <Spinner color="#666" />
-                    ) : step.state === "done" ? (
-                      <span fg="#2d5">✓</span>
-                    ) : (
-                      <span fg="#f44">✗</span>
-                    )}
-                    <span fg={stepDone ? "#444" : stepColor}> {stepIcon} </span>
-                    {stepCategory ? (
-                      <span fg={stepDone ? "#333" : stepCatColor}>[{stepCategory}]</span>
-                    ) : null}
-                    {stepBackendTag ? (
-                      <span fg={stepDone ? "#333" : stepBackendColor}>
-                        [{backendLabel(stepBackendTag)}]{" "}
-                      </span>
-                    ) : stepCategory ? (
-                      <span> </span>
-                    ) : null}
-                    <span fg={stepDone ? "#444" : "#888"}>{stepLabel}</span>
-                    {step.args ? <span fg={stepDone ? "#333" : "#666"}> {step.args}</span> : null}
-                    {cacheIcon ? (
-                      <span fg={cacheColor}>
-                        {" "}
-                        {cacheIcon} {cacheLabel}
-                      </span>
-                    ) : null}
+                    <Spinner color="#555" />
+                    <span fg="#555"> thinking...</span>
                   </text>
                 </box>
-              );
-            })}
-            {showThinking && (
-              <box height={1} flexShrink={0} marginLeft={3}>
-                <text truncate>
-                  <span fg="#333">
-                    {continuation}
-                    {"  "}└{" "}
-                  </span>
-                  <Spinner color="#555" />
-                  <span fg="#555"> thinking...</span>
-                </text>
-              </box>
-            )}
-          </>
-        );
-      })()}
-    </>
-  );
-}
+              )}
+            </>
+          );
+        })()}
+      </>
+    );
+  },
+  (prev, next) =>
+    prev.agentId === next.agentId &&
+    prev.isLast === next.isLast &&
+    prev.info.state === next.info.state &&
+    prev.info.role === next.info.role &&
+    prev.info.toolUses === next.info.toolUses &&
+    prev.info.cacheHits === next.info.cacheHits &&
+    prev.info.tokenUsage?.total === next.info.tokenUsage?.total &&
+    prev.childSteps.length === next.childSteps.length &&
+    prev.childSteps.every((s, i) => {
+      const n = next.childSteps[i];
+      return (
+        n &&
+        s.toolName === n.toolName &&
+        s.state === n.state &&
+        s.args === n.args &&
+        s.cacheState === n.cacheState
+      );
+    }) &&
+    prev.liveStats?.toolUses === next.liveStats?.toolUses &&
+    prev.liveStats?.tokenUsage?.total === next.liveStats?.tokenUsage?.total &&
+    prev.liveStats?.cacheHits === next.liveStats?.cacheHits,
+);
 
 const ToolRow = memo(
   function ToolRow({
@@ -705,12 +815,25 @@ const ToolRow = memo(
     const isMultiAgent = multiAgentInfo !== null;
 
     const dispatchId = isSubagent ? tc.id : null;
-    const allChildSteps = useSubagentSteps(dispatchId, 15);
-    const multiProgress = useMultiAgentProgress(dispatchId, multiAgentInfo?.totalAgents ?? 0);
-    const liveStats = useAgentLiveStats(dispatchId);
+    const {
+      steps: allChildSteps,
+      progress: multiProgress,
+      stats: liveStats,
+    } = useDispatchDisplay(dispatchId, 15, multiAgentInfo?.totalAgents ?? 0);
 
-    const icon = TOOL_ICONS[tc.toolName] ?? "\uF0AD";
-    const label = TOOL_LABELS[tc.toolName] ?? tc.toolName;
+    const isRepoMapHit = useMemo(() => {
+      if (!tc.result) return false;
+      try {
+        const parsed = JSON.parse(tc.result);
+        return parsed.repoMapHit === true;
+      } catch {
+        return false;
+      }
+    }, [tc.result]);
+
+    const repoMapIcon = TOOL_ICONS._repomap ?? "◈";
+    const icon = isRepoMapHit ? repoMapIcon : (TOOL_ICONS[tc.toolName] ?? "\uF0AD");
+    const label = isRepoMapHit ? "Repo Map" : (TOOL_LABELS[tc.toolName] ?? tc.toolName);
     const argStr = formatArgs(tc.toolName, tc.args);
     const isDone = tc.state !== "running";
 
@@ -781,9 +904,12 @@ const ToolRow = memo(
       return undefined;
     }, [editDiff, tc.result]);
 
-    const iconColor = TOOL_ICON_COLORS[tc.toolName] ?? "#888";
-    const staticCategory = TOOL_CATEGORIES[tc.toolName];
+    const iconColor = isRepoMapHit ? "#2dd4bf" : (TOOL_ICON_COLORS[tc.toolName] ?? "#888");
+    const staticCategory = isRepoMapHit
+      ? ("repo-map" as ToolCategory)
+      : TOOL_CATEGORIES[tc.toolName];
     const backendCategory = useMemo(() => {
+      if (isRepoMapHit) return null;
       if (tc.result) {
         try {
           const parsed = JSON.parse(tc.result);
@@ -795,7 +921,7 @@ const ToolRow = memo(
         }
       }
       return tc.backend ?? null;
-    }, [tc.result, tc.backend]);
+    }, [tc.result, tc.backend, isRepoMapHit]);
     const hasSplit = !!(backendCategory && staticCategory && backendCategory !== staticCategory);
     const category = hasSplit ? staticCategory : (backendCategory ?? staticCategory);
     const backendTag = hasSplit ? backendCategory : null;
@@ -866,9 +992,46 @@ const ToolRow = memo(
         )}
         {isSubagent && !isMultiAgent && allChildSteps.length > 0 && (
           <box flexDirection="column">
-            {allChildSteps.slice(-5).map((step, i) => (
-              <ChildStepRow key={`${step.toolName}-${String(i)}`} step={step} />
-            ))}
+            {(() => {
+              const MAX_SINGLE = 5;
+              const filtered = allChildSteps.filter((s) => !QUIET_TOOLS.has(s.toolName));
+              const running = filtered.filter((s) => s.state === "running");
+              const done = filtered.filter((s) => s.state !== "running");
+              const doneSlots = Math.max(0, MAX_SINGLE - running.length);
+              const visibleDone = done.slice(-doneSlots);
+              const hiddenCount = done.length - visibleDone.length;
+              const visible = [...visibleDone, ...running];
+              const agentRunning = tc.state === "running";
+              const showThinking = agentRunning && running.length === 0 && done.length > 0;
+
+              return (
+                <>
+                  {hiddenCount > 0 && (
+                    <box height={1} flexShrink={0} marginLeft={3}>
+                      <text truncate>
+                        <span fg="#333">├ </span>
+                        <span fg="#444">+{hiddenCount} completed</span>
+                      </text>
+                    </box>
+                  )}
+                  {visible.map((step) => {
+                    const stableIdx = allChildSteps.indexOf(step);
+                    return (
+                      <ChildStepRow key={`${step.toolName}-${String(stableIdx)}`} step={step} />
+                    );
+                  })}
+                  {showThinking && (
+                    <box height={1} flexShrink={0} marginLeft={3}>
+                      <text truncate>
+                        <span fg="#333">└ </span>
+                        <Spinner color="#555" />
+                        <span fg="#555"> thinking...</span>
+                      </text>
+                    </box>
+                  )}
+                </>
+              );
+            })()}
           </box>
         )}
       </box>
@@ -902,7 +1065,9 @@ export const ToolCallDisplay = memo(function ToolCallDisplay({
 
   if (calls.length === 0) return null;
 
-  const visible = calls.filter((tc) => verbose || !QUIET_TOOLS.has(tc.toolName));
+  const visible = calls.filter(
+    (tc) => !QUIET_TOOLS.has(tc.toolName) || (verbose && tc.toolName === "ask_user"),
+  );
 
   return (
     <box flexDirection="column">

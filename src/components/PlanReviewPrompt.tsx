@@ -139,15 +139,6 @@ export function PlanReviewPrompt({
 
       <box height={1} />
 
-      {plan.steps.map((step, i) => (
-        <box key={step.id} gap={1} flexDirection="row" paddingLeft={1}>
-          <text fg={STEP_COLOR}>{String(i + 1)}.</text>
-          <text fg="#bbb">{step.label}</text>
-        </box>
-      ))}
-
-      <box height={1} />
-
       {OPTIONS.map((opt, i) => {
         const selected = i === selectedIdx;
         const optColor = selected ? opt.color : DIM;

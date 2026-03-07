@@ -55,7 +55,6 @@ const LINES: HelpLine[] = [
   { type: "entry", label: "/mode [name]", desc: "show or switch forge mode" },
   { type: "entry", label: "/chat-style", desc: "toggle chat layout (accent/bubble)" },
   { type: "entry", label: "/plan [task]", desc: "toggle plan mode — research & plan, no edits" },
-  { type: "entry", label: "/panel", desc: "toggle side panel" },
   { type: "entry", label: "/tabs", desc: "list open tabs" },
   { type: "entry", label: "/rename <name>", desc: "rename current tab" },
   { type: "entry", label: "/new-tab", desc: "open a new tab" },

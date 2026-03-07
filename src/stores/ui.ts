@@ -130,6 +130,9 @@ export function resetUIStore(): void {
     infoPopupConfig: null,
     codeExpanded: false,
     changesExpanded: false,
+    chatStyle: "accent",
+    showReasoning: true,
+    reasoningExpanded: false,
     suspended: false,
   });
 }

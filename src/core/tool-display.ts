@@ -15,7 +15,8 @@ export type ToolCategory =
   | "agent"
   | "ui"
   | "editor"
-  | "execution";
+  | "execution"
+  | "repo-map";
 
 export const TOOL_CATEGORIES: Record<string, ToolCategory> = {
   // File tools
@@ -102,6 +103,7 @@ export const CATEGORY_COLORS: Record<string, string> = {
   ui: "#00BFFF",
   editor: "#5C9FD6",
   execution: "#FF0040",
+  "repo-map": "#2dd4bf",
   brave: "#FB542B",
   ddg: "#DE5833",
   jina: "#FFAA00",
@@ -170,6 +172,7 @@ const TOOL_ICON_MAP: Record<string, string> = {
   update_plan_step: "check",
   ask_user: "question",
   code_execution: "code",
+  _repomap: "repomap",
 };
 
 export function toolIcon(name: string): string {

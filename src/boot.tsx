@@ -188,17 +188,13 @@ if (!nvim) {
   try {
     const path = await installNeovim();
     nvim = { path, version: "0.11.1" };
-  } catch (err: unknown) {
-    clearInterval(wispTimer);
-    const msg = err instanceof Error ? err.message : String(err);
-    process.stdout.write("\x1b[?25h\x1b[2J\x1b[H");
-    process.stderr.write(
-      `\x1b[1;31mFailed to install Neovim:\x1b[0m ${msg}\nInstall manually: brew install neovim\n`,
-    );
-    process.exit(1);
+  } catch {
+    // Continue without neovim — editor panel will show install instructions
   }
 }
-config.nvimPath = nvim.path;
+if (nvim) {
+  config.nvimPath = nvim.path;
+}
 
 if (!getVendoredPath("rg")) {
   installRipgrep().catch((err) => {

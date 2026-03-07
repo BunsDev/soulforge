@@ -3,8 +3,9 @@ import type { LanguageModel } from "ai";
 import { tool } from "ai";
 import { z } from "zod";
 import { logBackgroundError } from "../../stores/errors.js";
+import type { RepoMap } from "../intelligence/repo-map.js";
 import { projectTool } from "../tools/project.js";
-import { AgentBus, type AgentTask, type SharedCache } from "./agent-bus.js";
+import { AgentBus, type AgentTask, type FileReadRecord, type SharedCache } from "./agent-bus.js";
 import { createCodeAgent } from "./code.js";
 import { createExploreAgent } from "./explore.js";
 import { emitAgentStats, emitMultiAgentEvent, emitSubagentStep } from "./subagent-events.js";
@@ -24,6 +25,7 @@ interface SubagentModels {
   onApproveWebSearch?: (query: string) => Promise<boolean>;
   readOnly?: boolean;
   repoMapContext?: string;
+  repoMap?: RepoMap;
   sharedCacheRef?: SharedCacheRef;
 }
 
@@ -142,6 +144,12 @@ interface DoneToolResult {
   keyFindings?: Array<{ file: string; detail: string; lineNumbers?: string }>;
   verified?: boolean;
   verificationOutput?: string;
+}
+
+export interface DispatchOutput {
+  reads: FileReadRecord[];
+  filesEdited: string[];
+  output: string;
 }
 
 type AgentResult = {
@@ -349,7 +357,9 @@ async function runAgentTask(
   abortSignal?: AbortSignal,
 ): Promise<void> {
   if (task.dependsOn && task.dependsOn.length > 0) {
-    await Promise.all(task.dependsOn.map((dep) => bus.waitForAgent(dep)));
+    await Promise.all(
+      task.dependsOn.map((dep) => bus.waitForAgent(dep, task.timeoutMs ?? 300_000)),
+    );
   }
 
   emitMultiAgentEvent({
@@ -413,6 +423,7 @@ async function runAgentTask(
             webSearchModel: models.webSearchModel,
             onApproveWebSearch: models.onApproveWebSearch,
             repoMapContext: models.repoMapContext,
+            repoMap: models.repoMap,
           })
         : createCodeAgent(models.codingModel ?? models.defaultModel, {
             bus,
@@ -422,6 +433,7 @@ async function runAgentTask(
             webSearchModel: models.webSearchModel,
             onApproveWebSearch: models.onApproveWebSearch,
             repoMapContext: models.repoMapContext,
+            repoMap: models.repoMap,
           });
 
       const callbacks = buildStepCallbacks(parentToolCallId, task.agentId);
@@ -515,6 +527,10 @@ export function buildSubagentTools(models: SubagentModels) {
         "BEFORE writing tasks: scan the Repo Map, find exact file paths and symbol names, put them in each task. " +
         'Task format: "Read [symbol] from [path], [symbol] from [path]. Return their implementations." ' +
         "Every task MUST name specific files and symbols — never write 'investigate' or 'explore the X system'. " +
+        "For navigate calls (references, definition, call_hierarchy, etc.), ALWAYS include the file path — " +
+        'e.g. "Find references to mergeConfigs in src/config/index.ts", not just "Find references to mergeConfigs". ' +
+        "Include line numbers from the Repo Map when available (e.g. 'read lines 181-265'). " +
+        "Web search tasks: ONE focused query per task — never compound ('search for X, Y, Z'). " +
         "Discovery fallback: if a file isn't in the Repo Map, give the agent specific symbol keywords to search via workspace_symbols — NOT open-ended exploration. " +
         "2 agents handles most tasks. Split by file ownership, not concept. " +
         "explore: read-only extraction. code: edits (assign distinct files per agent). " +
@@ -562,7 +578,7 @@ export function buildSubagentTools(models: SubagentModels) {
         bus.onCacheEvent = (agentId, type, path, sourceAgentId) => {
           emitSubagentStep({
             parentToolCallId: toolCallId,
-            toolName: "read_file",
+            toolName: type === "invalidate" ? "edit_file" : "read_file",
             args: path,
             state: type === "wait" ? "running" : "done",
             agentId,
@@ -571,16 +587,22 @@ export function buildSubagentTools(models: SubagentModels) {
           });
         };
 
-        bus.onToolCacheHit = (agentId, toolName, key) => {
-          const colonIdx = key.indexOf(":");
-          const args = colonIdx >= 0 ? key.slice(colonIdx + 1) : "";
+        bus.onToolCacheEvent = (agentId, toolName, key, type) => {
+          let displayArgs = "";
+          try {
+            const parts = JSON.parse(key) as string[];
+            displayArgs = parts.slice(1).join(" ");
+          } catch {
+            const colonIdx = key.indexOf(":");
+            displayArgs = colonIdx >= 0 ? key.slice(colonIdx + 1) : "";
+          }
           emitSubagentStep({
             parentToolCallId: toolCallId,
             toolName,
-            args,
+            args: displayArgs,
             state: "done",
             agentId,
-            cacheState: "hit",
+            cacheState: type,
           });
         };
 
@@ -615,6 +637,7 @@ export function buildSubagentTools(models: SubagentModels) {
                     webSearchModel: models.webSearchModel,
                     onApproveWebSearch: models.onApproveWebSearch,
                     repoMapContext: models.repoMapContext,
+                    repoMap: models.repoMap,
                   })
                 : createCodeAgent(models.codingModel ?? models.defaultModel, {
                     bus,
@@ -624,6 +647,7 @@ export function buildSubagentTools(models: SubagentModels) {
                     webSearchModel: models.webSearchModel,
                     onApproveWebSearch: models.onApproveWebSearch,
                     repoMapContext: models.repoMapContext,
+                    repoMap: models.repoMap,
                   });
 
               const result = await agent.generate({
@@ -634,7 +658,15 @@ export function buildSubagentTools(models: SubagentModels) {
               const doneResult = extractDoneResult(result);
               autoPostCompletionSummary(bus, task);
               cacheRef.current = bus.exportCaches();
-              return doneResult ? formatDoneResult(doneResult) : buildFallbackResult(result);
+              const output = doneResult
+                ? formatDoneResult(doneResult)
+                : buildFallbackResult(result);
+              const editedMap = bus.getEditedFiles(task.agentId);
+              return {
+                reads: bus.getFileReadRecords(task.agentId),
+                filesEdited: [...editedMap.keys()],
+                output,
+              } satisfies DispatchOutput;
             } catch (error) {
               lastErr = error;
               if (!isRetryable(error) || attempt === MAX_RETRIES) throw error;
@@ -673,12 +705,18 @@ export function buildSubagentTools(models: SubagentModels) {
         })();
         if (hasCycle) return "Error: dependency cycle detected among tasks";
 
+        // Combine parent abort (user cancel) with bus abort (peer cancel)
+        const combinedAbort = AbortSignal.any(
+          [abortSignal, bus.abortSignal].filter(Boolean) as AbortSignal[],
+        );
+
         const STAGGER_MS = 100;
         const promises = tasks.map((task, idx) => {
           const hasDeps = task.dependsOn && task.dependsOn.length > 0;
           const delay = hasDeps ? 0 : idx * STAGGER_MS;
-          const run = () => runAgentTask(task, models, bus, toolCallId, tasks.length, abortSignal);
-          return delay > 0 ? sleep(delay, abortSignal).then(run) : run();
+          const run = () =>
+            runAgentTask(task, models, bus, toolCallId, tasks.length, combinedAbort);
+          return delay > 0 ? sleep(delay, combinedAbort).then(run) : run();
         });
         await Promise.all(promises);
 
@@ -741,13 +779,25 @@ export function buildSubagentTools(models: SubagentModels) {
         const evalResult = await runEvaluator(bus, tasks, toolCallId);
         if (evalResult) sections.push(evalResult);
 
+        const m = bus.metrics;
+        const cacheStats = [m.fileHits, m.fileWaits, m.toolHits].some((v) => v > 0)
+          ? `\n### Cache\nFiles: ${String(m.fileHits)} hits, ${String(m.fileWaits)} waits, ${String(m.fileMisses)} misses | Tools: ${String(m.toolHits)} hits, ${String(m.toolMisses)} misses, ${String(m.toolEvictions)} evictions, ${String(m.toolInvalidations)} invalidations`
+          : "";
+        if (cacheStats) sections.push(cacheStats);
+
         cacheRef.current = bus.exportCaches();
-        return sections.join("\n");
+
+        return {
+          reads: bus.getFileReadRecords(),
+          filesEdited: [...bus.getEditedFiles().keys()],
+          output: sections.join("\n"),
+        } satisfies DispatchOutput;
       },
       toModelOutput({ output }: { toolCallId: string; input: unknown; output: unknown }) {
-        if (typeof output !== "string") return { type: "text" as const, value: String(output) };
+        const dispatch = output as DispatchOutput | string;
+        const rawText = typeof dispatch === "string" ? dispatch : dispatch.output;
 
-        const lines = output.split("\n");
+        const lines = rawText.split("\n");
         const compact: string[] = [];
         let blankRun = 0;
         let inCodeBlock = false;
@@ -762,6 +812,41 @@ export function buildSubagentTools(models: SubagentModels) {
           blankRun = 0;
           const limit = inCodeBlock ? 500 : 250;
           compact.push(line.length > limit ? `${line.slice(0, limit)}...` : line);
+        }
+
+        if (
+          typeof dispatch !== "string" &&
+          (dispatch.reads.length > 0 || dispatch.filesEdited.length > 0)
+        ) {
+          const header: string[] = [];
+          if (dispatch.reads.length > 0) {
+            header.push("Files already read by dispatch:");
+            const seen = new Set<string>();
+            for (const r of dispatch.reads) {
+              const range =
+                r.startLine != null
+                  ? r.endLine != null
+                    ? `:${String(r.startLine)}-${String(r.endLine)}`
+                    : `:${String(r.startLine)}`
+                  : "";
+              const symbol = r.name
+                ? ` ${r.target ?? ""} ${r.name}`
+                : r.target === "scope"
+                  ? " scope"
+                  : "";
+              const cache = r.cached ? " [cached]" : "";
+              const label = `  ${r.tool} ${r.path}${range}${symbol}${cache}`;
+              if (!seen.has(label)) {
+                seen.add(label);
+                header.push(label);
+              }
+            }
+          }
+          if (dispatch.filesEdited.length > 0) {
+            header.push(`Files edited: ${dispatch.filesEdited.join(", ")}`);
+          }
+          header.push("Do NOT re-read these — their content is already below.\n");
+          compact.unshift(...header);
         }
 
         return { type: "text" as const, value: compact.join("\n") };

@@ -65,6 +65,7 @@ const NERD: Record<string, string> = {
   powerline_left: "\uE0B6",
   powerline_right: "\uE0B4",
   help: "\uF059",
+  repomap: "󰙅",
 };
 
 const ASCII: Record<string, string> = {
@@ -131,6 +132,7 @@ const ASCII: Record<string, string> = {
   powerline_left: "│",
   powerline_right: "│",
   help: "?",
+  repomap: "◈",
 };
 
 let _nerdFont: boolean | null = null;
@@ -223,6 +225,7 @@ function inferProviderId(idOrModel: string): string {
   if (id.startsWith("mistral") || id.startsWith("codestral") || id.startsWith("pixtral"))
     return "mistral";
   if (id.startsWith("deepseek")) return "deepseek";
+  if (id.includes("/")) return "gateway";
   return idOrModel;
 }
 

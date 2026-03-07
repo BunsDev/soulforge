@@ -32,7 +32,8 @@ function buildContent(
     const label = semProgress ? ` ${frame} ${semProgress}` : ` ${frame} sem`;
     parts.push(fgStyle("#FF8C00")(label));
   } else if (semStatus === "ready") {
-    parts.push(fgStyle("#555")(" sem "), fgStyle("#2d5")("✓"));
+    const mode = semProgress.startsWith("ast") ? "ast" : "sem";
+    parts.push(fgStyle("#555")(` ${mode} `), fgStyle("#2d5")("✓"));
   }
 
   return new StyledText(parts);

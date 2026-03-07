@@ -9,20 +9,47 @@ interface Props {
   isActive: boolean;
 }
 
+const OTHER_IDX = -1;
+
 export function QuestionPrompt({ question, isActive }: Props) {
   const [selectedIdx, setSelectedIdx] = useState(0);
+  const [typing, setTyping] = useState(false);
+  const [inputValue, setInputValue] = useState("");
+
+  const totalOptions = question.options.length + 1;
 
   useKeyboard((evt) => {
     if (!isActive) return;
+
+    if (typing) {
+      if (evt.name === "escape") {
+        setTyping(false);
+      }
+      return;
+    }
+
     if (evt.name === "up") {
-      setSelectedIdx((prev) => (prev > 0 ? prev - 1 : question.options.length - 1));
+      setSelectedIdx((prev) => {
+        const cur = prev === OTHER_IDX ? totalOptions - 1 : prev;
+        const next = cur > 0 ? cur - 1 : totalOptions - 1;
+        return next === totalOptions - 1 ? OTHER_IDX : next;
+      });
       return;
     }
     if (evt.name === "down") {
-      setSelectedIdx((prev) => (prev + 1) % question.options.length);
+      setSelectedIdx((prev) => {
+        const cur = prev === OTHER_IDX ? totalOptions - 1 : prev;
+        const next = (cur + 1) % totalOptions;
+        return next === totalOptions - 1 ? OTHER_IDX : next;
+      });
       return;
     }
     if (evt.name === "return") {
+      if (selectedIdx === OTHER_IDX) {
+        setTyping(true);
+        setInputValue("");
+        return;
+      }
       const selected = question.options[selectedIdx];
       if (selected) {
         question.resolve(selected.value);
@@ -33,6 +60,13 @@ export function QuestionPrompt({ question, isActive }: Props) {
       question.resolve("__skipped__");
     }
   });
+
+  const handleInputSubmit = () => {
+    const trimmed = inputValue.trim();
+    if (trimmed) {
+      question.resolve(trimmed);
+    }
+  };
 
   return (
     <box
@@ -52,7 +86,7 @@ export function QuestionPrompt({ question, isActive }: Props) {
         <text fg="#eee">{question.question}</text>
       </box>
       {question.options.map((opt, i) => {
-        const isSelected = i === selectedIdx;
+        const isSelected = !typing && i === selectedIdx;
         return (
           <box key={opt.value} gap={1} flexDirection="row">
             <text fg={isSelected ? "#FF8C00" : "#555"}>{isSelected ? " ›" : "  "}</text>
@@ -66,9 +100,36 @@ export function QuestionPrompt({ question, isActive }: Props) {
           </box>
         );
       })}
+      {typing ? (
+        <box flexDirection="row" gap={1}>
+          <text fg="#FF8C00">{" ›"}</text>
+          <input
+            value={inputValue}
+            onInput={setInputValue}
+            onSubmit={handleInputSubmit}
+            focused={isActive}
+            flexGrow={1}
+            placeholder="type your answer..."
+          />
+        </box>
+      ) : (
+        <box gap={1} flexDirection="row">
+          <text fg={selectedIdx === OTHER_IDX ? "#FF8C00" : "#555"}>
+            {selectedIdx === OTHER_IDX ? " ›" : "  "}
+          </text>
+          <text
+            fg={selectedIdx === OTHER_IDX ? "#FF8C00" : "#888"}
+            attributes={selectedIdx === OTHER_IDX ? TextAttributes.BOLD : undefined}
+          >
+            Other (type answer)
+          </text>
+        </box>
+      )}
       <box>
         <text fg="#555">
-          ↑↓ select{"  "}⏎ confirm{question.allowSkip ? "  esc skip" : ""}
+          {typing
+            ? "⏎ submit  esc back"
+            : `↑↓ select  ⏎ confirm${question.allowSkip ? "  esc skip" : ""}`}
         </text>
       </box>
     </box>

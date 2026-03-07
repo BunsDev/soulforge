@@ -7,11 +7,20 @@ const MAX_CONTENT_LENGTH = 16_000;
 
 const pageCache = new Map<string, { content: string; ts: number; backend: string }>();
 const CACHE_TTL = 5 * 60_000;
+const MAX_CACHE_SIZE = 100;
 
+let lastSweep = 0;
 function getCached(url: string): { content: string; backend: string } | null {
+  const now = Date.now();
+  if (now - lastSweep > CACHE_TTL) {
+    lastSweep = now;
+    for (const [k, v] of pageCache) {
+      if (now - v.ts > CACHE_TTL) pageCache.delete(k);
+    }
+  }
   const entry = pageCache.get(url);
   if (!entry) return null;
-  if (Date.now() - entry.ts > CACHE_TTL) {
+  if (now - entry.ts > CACHE_TTL) {
     pageCache.delete(url);
     return null;
   }
@@ -101,6 +110,10 @@ export const fetchPageTool = {
     try {
       const jina = await jinaRead(args.url);
       if (jina) {
+        if (pageCache.size >= MAX_CACHE_SIZE) {
+          const oldest = pageCache.keys().next().value;
+          if (oldest) pageCache.delete(oldest);
+        }
         pageCache.set(args.url, { content: jina.content, ts: Date.now(), backend: jina.backend });
         return { success: true, output: truncate(jina.content), backend: jina.backend };
       }
@@ -130,6 +143,10 @@ export const fetchPageTool = {
       }
 
       const fallbackBackend = contentType.includes("application/json") ? "fetch" : "readability";
+      if (pageCache.size >= MAX_CACHE_SIZE) {
+        const oldest = pageCache.keys().next().value;
+        if (oldest) pageCache.delete(oldest);
+      }
       pageCache.set(args.url, { content, ts: Date.now(), backend: fallbackBackend });
       return { success: true, output: truncate(content), backend: fallbackBackend };
     } catch (err: unknown) {

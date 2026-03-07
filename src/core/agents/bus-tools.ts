@@ -132,5 +132,25 @@ export function buildBusTools(bus: AgentBus, agentId: string, role?: "explore" |
           }),
         }
       : {}),
+
+    cancel_dispatch: tool({
+      description:
+        "Cancel the entire dispatch — all peer agents will be aborted. " +
+        "Use ONLY when you discover the task is fundamentally impossible or the approach is wrong " +
+        "and continuing would waste resources. Always report_finding with the reason first.",
+      inputSchema: z.object({
+        reason: z.string().describe("Why the dispatch should be cancelled"),
+      }),
+      execute: async (args) => {
+        bus.postFinding({
+          agentId,
+          label: "DISPATCH CANCELLED",
+          content: args.reason,
+          timestamp: Date.now(),
+        });
+        bus.abort(args.reason);
+        return { success: true, output: `Dispatch cancelled: ${args.reason}` };
+      },
+    }),
   };
 }

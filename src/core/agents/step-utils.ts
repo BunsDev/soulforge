@@ -54,6 +54,19 @@ export function buildPrepareStep({
       messages?: ModelMessage[];
     } = {};
 
+    // Sanitize non-dict tool-call inputs to prevent Anthropic API rejections
+    for (const msg of messages) {
+      if (msg.role !== "assistant" || typeof msg.content === "string") continue;
+      if (!Array.isArray(msg.content)) continue;
+      for (let i = 0; i < msg.content.length; i++) {
+        const part = msg.content[i] as (typeof msg.content)[number];
+        if (part.type !== "tool-call") continue;
+        const input = (part as { input: unknown }).input;
+        if (typeof input === "object" && input !== null && !Array.isArray(input)) continue;
+        (msg.content as unknown[])[i] = { ...part, input: {} };
+      }
+    }
+
     if (stepNumber === 0) {
       result.toolChoice = "required";
     }

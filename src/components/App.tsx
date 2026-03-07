@@ -34,7 +34,7 @@ import { cleanupAndExit, setExitSessionId } from "../index.js";
 import { logBackgroundError } from "../stores/errors.js";
 import { startMemoryPoll } from "../stores/statusbar.js";
 import { type ModalName, selectIsAnyModalOpen, useUIStore } from "../stores/ui.js";
-import type { AppConfig, EditorIntegration } from "../types/index.js";
+import type { AppConfig, ChatMessage, EditorIntegration } from "../types/index.js";
 import { BrandTag } from "./BrandTag.js";
 import { ChangedFiles } from "./ChangedFiles.js";
 import { CommandPicker } from "./CommandPicker.js";
@@ -274,16 +274,13 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
     fetchOpenRouterMetadata();
   }, []);
 
-  // Tiered config: session > project > global
+  // Tiered config: project > global
   const [globalConfig, setGlobalConfig] = useState<AppConfig>(config);
   const [projConfig, setProjConfig] = useState<Partial<AppConfig> | null>(projectConfig ?? null);
-  const [sessionConfig, setSessionConfig] = useState<Partial<AppConfig> | null>(null);
-  const sessionConfigRef = useRef(sessionConfig);
-  sessionConfigRef.current = sessionConfig;
-  const [routerScope, setRouterScope] = useState<ConfigScope>("session");
+  const [routerScope, setRouterScope] = useState<ConfigScope>("project");
   const effectiveConfig = useMemo(
-    () => mergeConfigs(globalConfig, projConfig, sessionConfig),
-    [globalConfig, projConfig, sessionConfig],
+    () => mergeConfigs(globalConfig, projConfig),
+    [globalConfig, projConfig],
   );
 
   // Editor state
@@ -392,9 +389,7 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
 
   const saveToScope = useCallback(
     (patch: Partial<AppConfig>, toScope: ConfigScope, fromScope?: ConfigScope) => {
-      if (toScope === "session") {
-        setSessionConfig((prev) => applyConfigPatch(prev ?? {}, patch));
-      } else if (toScope === "global") {
+      if (toScope === "global") {
         saveGlobalConfig(patch);
         setGlobalConfig((prev) => applyConfigPatch(prev, patch));
       } else if (toScope === "project") {
@@ -404,9 +399,6 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
 
       if (fromScope && fromScope !== toScope) {
         const keys = Object.keys(patch);
-        if (fromScope === "session") {
-          setSessionConfig((prev) => (prev ? stripConfigKeys(prev, keys) : prev));
-        }
         if (fromScope === "global") {
           removeGlobalConfigKeys(keys);
           setGlobalConfig((prev) => stripConfigKeys(prev, keys));
@@ -422,11 +414,10 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
 
   const detectScope = useCallback(
     (key: string): ConfigScope => {
-      if (sessionConfig && key in sessionConfig) return "session";
       if (projConfig && key in projConfig) return "project";
       return "global";
     },
-    [sessionConfig, projConfig],
+    [projConfig],
   );
 
   // Initialize security guard once
@@ -438,18 +429,9 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
   const contextManager = useMemo(() => new ContextManager(cwd), [cwd]);
   const sessionManager = useMemo(() => new SessionManager(cwd), [cwd]);
 
-  const restoreSessionMemory = useCallback(
-    (sessionId: string) => {
-      const memState = sessionManager.loadSessionMemory(sessionId) as {
-        config: import("../core/memory/types.js").MemoryScopeConfig;
-        memories: import("../core/memory/types.js").MemoryRecord[];
-      } | null;
-      if (memState?.config && memState.memories) {
-        contextManager.getMemoryManager().importSessionState(memState);
-      }
-    },
-    [sessionManager, contextManager],
-  );
+  const restoreSessionMemory = useCallback((_sessionId: string) => {
+    // Session-scoped memory was removed — memories are now always persisted to project/global
+  }, []);
   const git = useGitStatus(cwd);
   const lspServers = useLspStatus();
   const {
@@ -556,7 +538,6 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
         tabStates: [],
         activeTabId: "",
       },
-    getConfigOverrides: () => sessionConfigRef.current as Record<string, unknown> | null,
   });
 
   useEffect(() => {
@@ -569,7 +550,7 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
   const nonSystemCount = useMemo(() => {
     let count = 0;
     for (const m of chat.messages) {
-      if (m.role !== "system") count++;
+      if (m.role !== "system" || m.showInChat) count++;
     }
     return count;
   }, [chat.messages]);
@@ -609,23 +590,11 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
               title: SessionManager.deriveTitle(chat.messages),
               cwd,
               snapshot,
-              currentTabMessages: chat.messages.filter((m) => m.role !== "system"),
-              configOverrides: sessionConfigRef.current as Record<string, unknown> | null,
+              currentTabMessages: chat.messages.filter((m) => m.role !== "system" || m.showInChat),
             });
             sessionManager.saveSession(meta, tabMessages);
             setExitSessionId(meta.id);
             savedSessionIdRef.current = meta.id;
-            try {
-              sessionManager.saveSessionMemory(
-                meta.id,
-                contextManager.getMemoryManager().exportSessionState(),
-              );
-            } catch (err) {
-              logBackgroundError(
-                "shutdown",
-                `memory save failed: ${err instanceof Error ? err.message : String(err)}`,
-              );
-            }
           }
         } catch (err) {
           logBackgroundError(
@@ -688,9 +657,6 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
     if (data) {
       tabMgr.restoreFromMeta(data.meta.tabs, data.meta.activeTabId, data.tabMessages);
       setForgeMode(data.meta.forgeMode);
-      if (data.meta.configOverrides) {
-        setSessionConfig(data.meta.configOverrides as Partial<AppConfig>);
-      }
       restoreSessionMemory(data.meta.id);
       setExitSessionId(data.meta.id);
     }
@@ -802,6 +768,8 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
 
   const handleInputSubmit = useCallback(
     async (input: string) => {
+      // Snap to bottom & re-enable sticky scroll when user sends anything
+      scrollRef.current?.scrollTo(Infinity);
       if (!input.startsWith("/")) {
         useUIStore.getState().setChangesExpanded(false);
       }
@@ -878,7 +846,6 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
           handleSuspend,
           openGitMenu: () => uiState.openModal("gitMenu"),
           openEditorWithFile,
-          setSessionConfig,
           effectiveNvimConfig: effectiveConfig.nvimConfig,
           vimHints: effectiveConfig.vimHints !== false,
           verbose: effectiveConfig.verbose === true,
@@ -970,6 +937,8 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
           return;
         }
       }
+      // When chat is focused, let InputBox handle Ctrl+C (clears input if non-empty)
+      if (evt.ctrl && focusMode === "chat") return;
       if (evt.ctrl) handleExit();
       return;
     }
@@ -1045,12 +1014,13 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
   const MAX_RENDERED = 60;
   const visibleMessages = useMemo(() => {
     const msgs = chat.messages;
+    const keep = (m: ChatMessage) => m.role !== "system" || m.showInChat;
     if (nonSystemCount <= MAX_RENDERED) {
-      return msgs.filter((m) => m.role !== "system");
+      return msgs.filter(keep);
     }
     const result: typeof msgs = [];
     for (let i = msgs.length - 1; i >= 0 && result.length < MAX_RENDERED; i--) {
-      if (msgs[i]?.role !== "system") result.push(msgs[i] as (typeof msgs)[0]);
+      if (keep(msgs[i] as ChatMessage)) result.push(msgs[i] as (typeof msgs)[0]);
     }
     result.reverse();
     return result;
@@ -1170,6 +1140,7 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
           cursorCol={cursorCol}
           onClosed={handleEditorClosed}
           showHints={effectiveConfig.vimHints !== false}
+          error={nvimError}
         />
 
         <box
@@ -1295,8 +1266,10 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
               <InputBox
                 onSubmit={handleInputSubmit}
                 isLoading={chat.isLoading}
+                isCompacting={chat.isCompacting}
                 isFocused={focusMode === "chat" && !anyModalOpen}
                 cwd={cwd}
+                onExit={handleExit}
                 onQueue={(msg) =>
                   chat.setMessageQueue((prev) =>
                     prev.length >= 5 ? prev : [...prev, { content: msg, queuedAt: Date.now() }],
@@ -1319,6 +1292,7 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
                 coding: null,
                 exploration: null,
                 webSearch: null,
+                compact: null,
                 semantic: null,
                 default: null,
               };
@@ -1327,14 +1301,6 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
               useUIStore.getState().setRouterSlotPicking(null);
             } else {
               chat.setActiveModel(modelId);
-              chat.setTokenUsage({
-                prompt: 0,
-                completion: 0,
-                total: 0,
-                cacheRead: 0,
-                subagentInput: 0,
-                subagentOutput: 0,
-              });
             }
           }}
           onClose={closeLlmSelector}
@@ -1387,6 +1353,7 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
         <EditorSettings
           visible={modals.editorSettings}
           settings={effectiveConfig.editorIntegration}
+          initialScope={detectScope("editorIntegration")}
           onUpdate={(settings: EditorIntegration, toScope, fromScope) => {
             saveToScope({ editorIntegration: settings }, toScope, fromScope);
           }}
@@ -1397,7 +1364,6 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
           visible={modals.providerSettings}
           globalConfig={globalConfig}
           projectConfig={projConfig}
-          sessionConfig={sessionConfig}
           onUpdate={(patch, toScope, fromScope) => saveToScope(patch, toScope, fromScope)}
           onClose={getCloser("providerSettings")}
         />
@@ -1412,8 +1378,11 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
           router={effectiveConfig.taskRouter}
           activeModel={chat.activeModel}
           scope={routerScope}
-          onScopeChange={(toScope) => {
+          onScopeChange={(toScope, fromScope) => {
             setRouterScope(toScope);
+            if (effectiveConfig.taskRouter) {
+              saveToScope({ taskRouter: effectiveConfig.taskRouter }, toScope, fromScope);
+            }
           }}
           onPickSlot={(slot) => {
             useUIStore.getState().setRouterSlotPicking(slot);
@@ -1425,6 +1394,7 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
               coding: null,
               exploration: null,
               webSearch: null,
+              compact: null,
               semantic: null,
               default: null,
             };

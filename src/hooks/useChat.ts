@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StreamSegment } from "../components/StreamSegmentList.js";
 import type { LiveToolCall } from "../components/ToolCallDisplay.js";
 import { createForgeAgent } from "../core/agents/index.js";
+import { repairToolCall, sanitizeToolInputsStep } from "../core/agents/stream-options.js";
 import { onAgentStats, onMultiAgentEvent } from "../core/agents/subagent-events.js";
 import { buildSubagentTools, type SharedCacheRef } from "../core/agents/subagent-tools.js";
 import type { ContextManager } from "../core/context/manager.js";
@@ -20,8 +21,9 @@ import {
 import { detectTaskType, resolveTaskModel } from "../core/llm/task-router.js";
 import { SessionManager } from "../core/sessions/manager.js";
 import { createThinkingParser } from "../core/thinking-parser.js";
-import { onFileEditedEvent } from "../core/tools/file-events.js";
+import { onFileEdited } from "../core/tools/file-events.js";
 import { buildInteractiveTools, buildPlanModeTools, planFileName } from "../core/tools/index.js";
+import { logBackgroundError } from "../stores/errors.js";
 import { useStatusBarStore } from "../stores/statusbar.js";
 import type {
   AppConfig,
@@ -56,7 +58,6 @@ export interface TabState {
   activeModel: string;
   activePlan: Plan | null;
   sidebarPlan: Plan | null;
-  showPlanPanel: boolean;
   tokenUsage: TokenUsage;
   coAuthorCommits: boolean;
   sessionId: string;
@@ -98,7 +99,6 @@ export interface UseChatOptions {
   onSuspend: (opts: { command: string; args?: string[]; noAltScreen?: boolean }) => void;
   initialState?: TabState;
   getWorkspaceSnapshot?: () => WorkspaceSnapshot;
-  getConfigOverrides?: () => Record<string, unknown> | null;
 }
 
 export interface ChatInstance {
@@ -108,14 +108,13 @@ export interface ChatInstance {
   coreMessages: ModelMessage[];
   setCoreMessages: React.Dispatch<React.SetStateAction<ModelMessage[]>>;
   isLoading: boolean;
+  isCompacting: boolean;
   streamSegments: StreamSegment[];
   liveToolCalls: LiveToolCall[];
   activePlan: Plan | null;
   setActivePlan: React.Dispatch<React.SetStateAction<Plan | null>>;
   sidebarPlan: Plan | null;
   setSidebarPlan: React.Dispatch<React.SetStateAction<Plan | null>>;
-  showPlanPanel: boolean;
-  setShowPlanPanel: React.Dispatch<React.SetStateAction<boolean>>;
   pendingQuestion: PendingQuestion | null;
   setPendingQuestion: React.Dispatch<React.SetStateAction<PendingQuestion | null>>;
   messageQueue: QueuedMessage[];
@@ -135,7 +134,7 @@ export interface ChatInstance {
   planRequest: string | null;
   // Actions
   handleSubmit: (input: string) => Promise<void>;
-  summarizeConversation: () => Promise<void>;
+  summarizeConversation: (opts?: { skipQueueDrain?: boolean }) => Promise<void>;
   abort: () => void;
   interactiveCallbacks: InteractiveCallbacks;
   // Plan mode
@@ -160,7 +159,6 @@ export function useChat({
   openEditor,
   initialState,
   getWorkspaceSnapshot,
-  getConfigOverrides,
 }: UseChatOptions): ChatInstance {
   const [messages, setMessages] = useState<ChatMessage[]>(initialState?.messages ?? []);
   const [coreMessages, setCoreMessages] = useState<ModelMessage[]>(
@@ -267,11 +265,13 @@ export function useChat({
   }, []);
 
   const flushMicrotaskQueued = useRef(false);
+  const lastFlushTime = useRef(0);
   const queueMicrotaskFlush = useCallback(() => {
     if (flushMicrotaskQueued.current) return;
     flushMicrotaskQueued.current = true;
     queueMicrotask(() => {
       flushMicrotaskQueued.current = false;
+      lastFlushTime.current = Date.now();
       flushStreamState();
     });
   }, [flushStreamState]);
@@ -282,9 +282,21 @@ export function useChat({
   const webSearchFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoApproveWebSearchRef = useRef(false);
   const webSearchModelLabelRef = useRef<string | null>(null);
-  const [activePlan, setActivePlan] = useState<Plan | null>(initialState?.activePlan ?? null);
+  const [activePlan, setActivePlanRaw] = useState<Plan | null>(initialState?.activePlan ?? null);
+  const activePlanRef = useRef<Plan | null>(activePlan);
+  const setActivePlan = useCallback<typeof setActivePlanRaw>((v) => {
+    if (typeof v === "function") {
+      setActivePlanRaw((prev) => {
+        const next = v(prev);
+        activePlanRef.current = next;
+        return next;
+      });
+    } else {
+      activePlanRef.current = v;
+      setActivePlanRaw(v);
+    }
+  }, []);
   const [sidebarPlan, setSidebarPlan] = useState<Plan | null>(initialState?.sidebarPlan ?? null);
-  const [showPlanPanel, setShowPlanPanel] = useState(initialState?.showPlanPanel ?? false);
   const [pendingQuestion, setPendingQuestion] = useState<PendingQuestion | null>(null);
   const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
 
@@ -322,9 +334,7 @@ export function useChat({
   );
 
   useEffect(() => {
-    return onFileEditedEvent((absPath, content) =>
-      sharedCacheRef.current.updateFile(absPath, content),
-    );
+    return onFileEdited((absPath, content) => sharedCacheRef.current.updateFile(absPath, content));
   }, []);
 
   // Streaming token estimation
@@ -361,6 +371,7 @@ export function useChat({
   const planPostActionRef = useRef<{
     action: "execute" | "clear_execute" | "cancel";
     planContent: string | null;
+    plan?: Plan;
   } | null>(null);
   const planModeRef = useRef(initialState?.planMode ?? false);
   const planRequestRef = useRef<string | null>(initialState?.planRequest ?? null);
@@ -397,136 +408,259 @@ export function useChat({
   coreMessagesRef.current = coreMessages;
   const activeModelRef = useRef(activeModel);
   activeModelRef.current = activeModel;
-  const summarizeConversation = useCallback(async () => {
-    const currentCore = coreMessagesRef.current;
-    if (currentCore.length < 4) return;
-    try {
-      const model = resolveModel(activeModelRef.current);
+  const [isCompacting, setIsCompacting] = useState(false);
+  const isCompactingRef = useRef(false);
+  const pendingCompactRef = useRef(false);
+  const handleSubmitRef = useRef<(input: string) => void>(() => {});
+  const summarizeConversationRef = useRef<(opts?: { skipQueueDrain?: boolean }) => Promise<void>>(
+    async () => {},
+  );
 
-      const KEEP_RECENT = 4;
-      const keepStart = Math.max(0, currentCore.length - KEEP_RECENT);
-      const olderMessages = currentCore.slice(0, keepStart);
-      const recentMessages = currentCore.slice(keepStart);
+  const summarizeConversation = useCallback(
+    async (opts?: { skipQueueDrain?: boolean }) => {
+      if (isCompactingRef.current) return;
 
-      if (olderMessages.length < 2) return;
+      // If a generation is in progress, defer compact until it settles
+      if (abortRef.current) {
+        pendingCompactRef.current = true;
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: "system",
+            content: "Compact queued — will run after current generation settles, then continue.",
+            timestamp: Date.now(),
+          },
+        ]);
+        return;
+      }
 
-      const formatMessage = (m: ModelMessage, charLimit: number) => {
-        const role = m.role;
-        if (typeof m.content === "string") {
-          return `${role}: ${m.content.slice(0, charLimit)}`;
+      const currentCore = coreMessagesRef.current;
+      if (currentCore.length < 4) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: "system",
+            content: "Not enough conversation to compact (need at least 4 messages).",
+            timestamp: Date.now(),
+          },
+        ]);
+        return;
+      }
+
+      isCompactingRef.current = true;
+      setIsCompacting(true);
+      try {
+        const compactModelId = resolveTaskModel(
+          "compact",
+          effectiveConfig.taskRouter,
+          activeModelRef.current,
+        );
+        const model = resolveModel(compactModelId);
+        const modelLabel = getShortModelLabel(compactModelId);
+
+        const contextWindow = getModelContextWindow(activeModelRef.current);
+        const charsPerToken = 3;
+        const systemChars = contextManager
+          .getContextBreakdown()
+          .reduce((sum, s) => sum + s.chars, 0);
+        const beforeChars =
+          systemChars +
+          currentCore.reduce((s, m) => {
+            if (typeof m.content === "string") return s + m.content.length;
+            if (Array.isArray(m.content))
+              return (
+                s + m.content.reduce((a: number, p: unknown) => a + JSON.stringify(p).length, 0)
+              );
+            return s;
+          }, 0);
+        const beforePct = Math.round((beforeChars / charsPerToken / contextWindow) * 100);
+
+        const KEEP_RECENT = 4;
+        const keepStart = Math.max(0, currentCore.length - KEEP_RECENT);
+        const olderMessages = currentCore.slice(0, keepStart);
+        const recentMessages = currentCore.slice(keepStart);
+
+        if (olderMessages.length < 2) {
+          isCompactingRef.current = false;
+          setIsCompacting(false);
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: "system",
+              content:
+                "Not enough older messages to compact (recent messages are already preserved).",
+              timestamp: Date.now(),
+            },
+          ]);
+          return;
         }
-        if (Array.isArray(m.content)) {
-          const parts = m.content
-            .map((p) => {
-              if (typeof p === "object" && p !== null) {
-                if ("text" in p) return String((p as { text: string }).text).slice(0, charLimit);
-                if ("type" in p && (p as { type: string }).type === "tool-result") {
-                  const tr = p as { toolName?: string; result?: unknown };
-                  return `[tool-result: ${tr.toolName ?? "unknown"} → ${JSON.stringify(tr.result).slice(0, 1500)}]`;
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: "system",
+            content: `Compacting ${olderMessages.length} messages with ${modelLabel}...`,
+            timestamp: Date.now(),
+          },
+        ]);
+
+        const formatMessage = (m: ModelMessage, charLimit: number) => {
+          const role = m.role;
+          if (typeof m.content === "string") {
+            return `${role}: ${m.content.slice(0, charLimit)}`;
+          }
+          if (Array.isArray(m.content)) {
+            const parts = m.content
+              .map((p) => {
+                if (typeof p === "object" && p !== null) {
+                  if ("text" in p) return String((p as { text: string }).text).slice(0, charLimit);
+                  if ("type" in p && (p as { type: string }).type === "tool-result") {
+                    const tr = p as { toolName?: string; result?: unknown };
+                    const resultStr = tr.result != null ? JSON.stringify(tr.result) : "null";
+                    return `[tool-result: ${tr.toolName ?? "unknown"} → ${resultStr.slice(0, 3000)}]`;
+                  }
                 }
+                return JSON.stringify(p).slice(0, 1500);
+              })
+              .join("\n");
+            return `${role}: ${parts}`;
+          }
+          return `${role}: [complex content]`;
+        };
+
+        const convoText = olderMessages.map((m) => formatMessage(m, 4000)).join("\n\n");
+
+        const { providerOptions, headers } = buildProviderOptions(compactModelId, effectiveConfig);
+        const { text: summary } = await generateText({
+          model,
+          maxOutputTokens: 8192,
+          ...(providerOptions && Object.keys(providerOptions).length > 0
+            ? { providerOptions }
+            : {}),
+          ...(headers ? { headers } : {}),
+          prompt: [
+            "You are compacting the OLDER portion of a coding assistant conversation.",
+            "The most recent messages will be preserved verbatim — focus on summarizing what came before.",
+            "",
+            "Create a structured summary with these sections:",
+            "",
+            "## Environment",
+            "Project type, key technologies, working directory, any config details mentioned.",
+            "",
+            "## Files Touched",
+            "Every file path that was read, edited, or created. For EDITS: include the specific old→new changes (function signatures, variable names, logic). For READS: note key content found.",
+            "",
+            "## Tool Results",
+            "Key tool results that inform future decisions: grep matches, test output, diagnostics, build errors. Include literal output where it matters — don't just say 'tests passed', say which tests and any warnings.",
+            "",
+            "## Key Decisions",
+            "Architectural choices, design patterns chosen, trade-offs discussed.",
+            "",
+            "## Work Completed",
+            "What was accomplished. Include specific function names, variable names, code patterns.",
+            "",
+            "## Errors & Resolutions",
+            "Problems encountered and how they were resolved. Include the actual error messages.",
+            "",
+            "## Current State",
+            "What was being worked on at the end of this section. What remains to be done.",
+            "",
+            "Be thorough — this summary is the only record of the older conversation.",
+            "CRITICAL: Preserve specific details from tool results (file contents, error messages, test output). Generic summaries like 'edited file X' are useless — include WHAT was changed.",
+            "",
+            "CONVERSATION TO SUMMARIZE:",
+            convoText,
+          ].join("\n"),
+        });
+
+        const summaryMsg: ModelMessage = {
+          role: "user" as const,
+          content: [
+            "[CONTEXT COMPACTION — Summary of earlier conversation]",
+            "",
+            summary,
+            "",
+            "[End of compacted context. Recent messages follow.]",
+          ].join("\n"),
+        };
+
+        const ackMsg: ModelMessage = {
+          role: "assistant" as const,
+          content:
+            "Understood. I have the context from our earlier conversation and will continue seamlessly.",
+        };
+
+        const newMessages = [summaryMsg, ackMsg, ...recentMessages];
+        setCoreMessages(newMessages);
+
+        const newCoreChars = newMessages.reduce((sum, m) => {
+          if (typeof m.content === "string") return sum + m.content.length;
+          if (Array.isArray(m.content)) {
+            return (
+              sum + m.content.reduce((s: number, p: unknown) => s + JSON.stringify(p).length, 0)
+            );
+          }
+          return sum;
+        }, 0);
+        const afterChars = systemChars + newCoreChars;
+        const afterPct = Math.round((afterChars / charsPerToken / contextWindow) * 100);
+        const estimatedTokens = Math.ceil(afterChars / charsPerToken);
+        setContextTokens(0);
+        setStreamingChars(0);
+        setTokenUsage({ ...ZERO_USAGE, prompt: estimatedTokens, total: estimatedTokens });
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: "system",
+            content: `Context compacted: ${beforePct}% → ${afterPct}%\n${currentCore.length} messages summarized into ${newMessages.length} (summary + ${recentMessages.length} recent). Messages above are no longer in context.`,
+            timestamp: Date.now(),
+            showInChat: true,
+          },
+        ]);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logBackgroundError("compact", msg);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: "system",
+            content: `Failed to compact: ${msg}`,
+            timestamp: Date.now(),
+          },
+        ]);
+      } finally {
+        isCompactingRef.current = false;
+        setIsCompacting(false);
+        if (!opts?.skipQueueDrain) {
+          setMessageQueue((queue) => {
+            if (queue.length > 0) {
+              const [next, ...rest] = queue;
+              if (next) {
+                setTimeout(() => handleSubmitRef.current(next.content), 0);
               }
-              return JSON.stringify(p).slice(0, 1000);
-            })
-            .join("\n");
-          return `${role}: ${parts}`;
+              return rest;
+            }
+            return queue;
+          });
         }
-        return `${role}: [complex content]`;
-      };
-
-      const convoText = olderMessages.map((m) => formatMessage(m, 4000)).join("\n\n");
-
-      const { text: summary } = await generateText({
-        model,
-        prompt: [
-          "You are compacting the OLDER portion of a coding assistant conversation.",
-          "The most recent messages will be preserved verbatim — focus on summarizing what came before.",
-          "",
-          "Create a structured summary with these sections:",
-          "",
-          "## Environment",
-          "Project type, key technologies, working directory, any config details mentioned.",
-          "",
-          "## Files Touched",
-          "Every file path that was read, edited, or created. Include what was done to each.",
-          "",
-          "## Key Decisions",
-          "Architectural choices, design patterns chosen, trade-offs discussed.",
-          "",
-          "## Work Completed",
-          "What was accomplished. Include specific function names, variable names, code patterns.",
-          "",
-          "## Errors & Resolutions",
-          "Problems encountered and how they were resolved.",
-          "",
-          "## Current State",
-          "What was being worked on at the end of this section. What remains to be done.",
-          "",
-          "Be thorough — this summary is the only record of the older conversation.",
-          "",
-          "CONVERSATION TO SUMMARIZE:",
-          convoText,
-        ].join("\n"),
-      });
-
-      const summaryMsg: ModelMessage = {
-        role: "user" as const,
-        content: [
-          "[CONTEXT COMPACTION — Summary of earlier conversation]",
-          "",
-          summary,
-          "",
-          "[End of compacted context. Recent messages follow.]",
-        ].join("\n"),
-      };
-
-      const ackMsg: ModelMessage = {
-        role: "assistant" as const,
-        content:
-          "Understood. I have the context from our earlier conversation and will continue seamlessly.",
-      };
-
-      const newMessages = [summaryMsg, ackMsg, ...recentMessages];
-      setCoreMessages(newMessages);
-
-      const newChars = newMessages.reduce((sum, m) => {
-        if (typeof m.content === "string") return sum + m.content.length;
-        if (Array.isArray(m.content)) {
-          return sum + m.content.reduce((s: number, p: unknown) => s + JSON.stringify(p).length, 0);
-        }
-        return sum;
-      }, 0);
-      const estimatedTokens = Math.ceil(newChars / 4);
-      setContextTokens(0);
-      setStreamingChars(0);
-      setTokenUsage({ ...ZERO_USAGE, prompt: estimatedTokens, total: estimatedTokens });
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "system",
-          content: `Context compacted (${currentCore.length} → ${newMessages.length} messages, ~${estimatedTokens} tokens). Last ${recentMessages.length} messages preserved.`,
-          timestamp: Date.now(),
-        },
-      ]);
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "system",
-          content: "Failed to compact conversation context.",
-          timestamp: Date.now(),
-        },
-      ]);
-    }
-  }, [setTokenUsage]);
+      }
+    },
+    [setTokenUsage, effectiveConfig, contextManager],
+  );
+  summarizeConversationRef.current = summarizeConversation;
 
   const autoSummarizedRef = useRef(false);
   useEffect(() => {
     const systemChars = contextManager.getContextBreakdown().reduce((sum, s) => sum + s.chars, 0);
     const totalChars = systemChars + coreChars;
-    const contextBudgetChars = getModelContextWindow(activeModelRef.current) * 4;
+    const contextBudgetChars = getModelContextWindow(activeModelRef.current) * 3;
     const pct = totalChars / contextBudgetChars;
     if (pct > 0.7 && !autoSummarizedRef.current && coreMessagesRef.current.length >= 6) {
       autoSummarizedRef.current = true;
@@ -543,7 +677,6 @@ export function useChat({
       onPlanCreate: (plan: Plan) => {
         setActivePlan(plan);
         setSidebarPlan(plan);
-        setShowPlanPanel(!!plan);
       },
       onPlanStepUpdate: (stepId: string, status: PlanStepStatus) => {
         const updater = (prev: Plan | null) => {
@@ -556,11 +689,25 @@ export function useChat({
         setActivePlan(updater);
         setSidebarPlan(updater);
       },
-      onPlanReview: (plan: Plan, planFile: string) => {
+      onPlanReview: (plan: Plan, planFile: string, planContent: string) => {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: "assistant" as const,
+            content: planContent,
+            timestamp: Date.now(),
+            segments: [
+              { type: "text" as const, content: planContent },
+              { type: "plan" as const, plan },
+            ],
+          },
+        ]);
         return new Promise<PlanReviewAction>((resolve) => {
           setPendingPlanReview({
             plan,
             planFile,
+            planContent,
             resolve: (action: PlanReviewAction) => {
               setPendingPlanReview(null);
 
@@ -577,6 +724,7 @@ export function useChat({
                 planPostActionRef.current = {
                   action: action === "clear_execute" ? "clear_execute" : "execute",
                   planContent: content,
+                  plan,
                 };
                 resolve(action);
                 abortRef.current?.abort();
@@ -588,6 +736,25 @@ export function useChat({
                 resolve(action);
                 abortRef.current?.abort();
                 return;
+              }
+
+              const isRevise =
+                action !== "execute" && action !== "clear_execute" && action !== "cancel";
+              if (isRevise) {
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    id: crypto.randomUUID(),
+                    role: "user",
+                    content: action,
+                    timestamp: Date.now(),
+                  },
+                ]);
+                setActivePlan(null);
+                setSidebarPlan(null);
+              } else if (action === "cancel") {
+                setActivePlan(null);
+                setSidebarPlan(null);
               }
 
               resolve(action);
@@ -679,7 +846,7 @@ export function useChat({
         });
       },
     }),
-    [openEditor, openEditorWithFile, cwd],
+    [openEditor, openEditorWithFile, cwd, setActivePlan],
   );
 
   const handleSubmit = useCallback(
@@ -836,6 +1003,9 @@ export function useChat({
                   repoMapContext: contextManager.isRepoMapReady()
                     ? contextManager.renderRepoMap() || undefined
                     : undefined,
+                  repoMap: contextManager.isRepoMapReady()
+                    ? contextManager.getRepoMap()
+                    : undefined,
                   sharedCacheRef: sharedCacheRef.current,
                 }).dispatch,
                 ...(interactiveCallbacks
@@ -847,6 +1017,8 @@ export function useChat({
               },
               instructions: contextManager.buildSystemPrompt(),
               stopWhen: stepCountIs(50),
+              prepareStep: sanitizeToolInputsStep,
+              experimental_repairToolCall: repairToolCall,
               ...(providerOptions && Object.keys(providerOptions).length > 0
                 ? { providerOptions }
                 : {}),
@@ -900,6 +1072,9 @@ export function useChat({
                                   repoMapContext: contextManager.isRepoMapReady()
                                     ? contextManager.renderRepoMap() || undefined
                                     : undefined,
+                                  repoMap: contextManager.isRepoMapReady()
+                                    ? contextManager.getRepoMap()
+                                    : undefined,
                                   sharedCacheRef: sharedCacheRef.current,
                                 }).dispatch,
                                 ...(interactiveCallbacks
@@ -911,6 +1086,7 @@ export function useChat({
                               },
                               instructions: contextManager.buildSystemPrompt(),
                               stopWhen: stepCountIs(50),
+                              prepareStep: sanitizeToolInputsStep,
                               ...(Object.keys(degraded.providerOptions).length > 0
                                 ? { providerOptions: degraded.providerOptions }
                                 : {}),
@@ -944,7 +1120,7 @@ export function useChat({
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
             const isTransient =
-              /overloaded|529|rate.?limit|too many requests|503|502|timeout/i.test(msg);
+              /overloaded|529|429|rate.?limit|too many requests|503|502|timeout/i.test(msg);
             if (!isTransient || retry === MAX_TRANSIENT_RETRIES || abortController.signal.aborted) {
               throw err;
             }
@@ -974,7 +1150,7 @@ export function useChat({
 
         const updateStreamingEstimate = (newChars: number) => {
           streamingCharsRef.current += newChars;
-          const estimatedNewTokens = Math.round(streamingCharsRef.current / 4);
+          const estimatedNewTokens = Math.round(streamingCharsRef.current / 3);
           const base = baseTokenUsageRef.current;
           pendingTokenUsage.current = {
             ...base,
@@ -1029,9 +1205,17 @@ export function useChat({
           }
         };
 
-        flushTimerRef.current = setInterval(flushStreamState, 200);
+        flushTimerRef.current = setInterval(() => {
+          if (Date.now() - lastFlushTime.current < 100) return;
+          lastFlushTime.current = Date.now();
+          flushStreamState();
+        }, 150);
 
+        let streamEventCount = 0;
         for await (const part of result.fullStream) {
+          if (++streamEventCount % 30 === 0) {
+            await new Promise<void>((r) => setTimeout(r, 0));
+          }
           switch (part.type) {
             case "reasoning-start": {
               hasNativeReasoning = true;
@@ -1097,7 +1281,6 @@ export function useChat({
               break;
             }
             case "tool-input-delta": {
-              toolCallsDirty.current = true;
               toolCallArgs.set(part.id, (toolCallArgs.get(part.id) ?? "") + part.delta);
               const tc = tcBuf.find((c) => c.id === part.id);
               if (tc) tc.args = toolCallArgs.get(part.id);
@@ -1212,13 +1395,11 @@ export function useChat({
             fullText.length > 0 ? [{ role: "assistant" as const, content: fullText }] : [];
         }
 
-        // Embed plan as a segment if one was created
-        setActivePlan((currentPlan) => {
-          if (currentPlan) {
-            finalSegments.push({ type: "plan", plan: currentPlan });
-          }
-          return null;
-        });
+        // Embed plan as a segment if one was created (skip when plan post-action will handle it)
+        if (activePlanRef.current && !planPostActionRef.current) {
+          finalSegments.push({ type: "plan", plan: activePlanRef.current });
+        }
+        setActivePlan(null);
 
         const assistantMsg: ChatMessage = {
           id: crypto.randomUUID(),
@@ -1251,14 +1432,9 @@ export function useChat({
               title: SessionManager.deriveTitle(allMsgs),
               cwd,
               snapshot,
-              currentTabMessages: allMsgs.filter((m) => m.role !== "system"),
-              configOverrides: getConfigOverrides?.() ?? null,
+              currentTabMessages: allMsgs.filter((m) => m.role !== "system" || m.showInChat),
             });
             sessionManager.saveSession(meta, tabMessages);
-            sessionManager.saveSessionMemory(
-              sessionIdRef.current,
-              contextManager.getMemoryManager().exportSessionState(),
-            );
           }
         });
 
@@ -1279,8 +1455,14 @@ export function useChat({
           flushTimerRef.current = null;
         }
         const isAbort = abortController.signal.aborted;
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        const errorStack = err instanceof Error ? err.stack : undefined;
+        const rawMsg = err instanceof Error ? err.message : String(err);
+        const isTransientStream = /overloaded|529|429|rate.?limit|too many requests|503|502/i.test(
+          rawMsg,
+        );
+        const errorMsg = isTransientStream
+          ? `Provider returned a transient error (${rawMsg.slice(0, 120)}). Please retry.`
+          : rawMsg;
+        const errorStack = !isTransientStream && err instanceof Error ? err.stack : undefined;
         if (fullText.trim().length > 0 || completedCalls.length > 0) {
           const partialMsg: ChatMessage = {
             id: crypto.randomUUID(),
@@ -1298,11 +1480,13 @@ export function useChat({
               assistantContent.push({ type: "text", text: fullText });
             }
             for (const call of completedCalls) {
+              const args = call.args;
               assistantContent.push({
                 type: "tool-call",
                 toolCallId: call.id,
                 toolName: call.name,
-                input: call.args,
+                input:
+                  typeof args === "object" && args !== null && !Array.isArray(args) ? args : {},
               });
             }
             const toolContent = completedCalls.map((call) => ({
@@ -1384,10 +1568,16 @@ export function useChat({
               },
             ]);
             setTokenUsage({ ...ZERO_USAGE });
+            if (postAction.plan) {
+              setActivePlan(postAction.plan);
+              setSidebarPlan(postAction.plan);
+            }
             setTimeout(
               () =>
                 handleSubmit(
-                  `Execute the following plan step by step. Create a plan checklist and update steps as you go.\n\n${pContent}`,
+                  `Execute this plan NOW. Do NOT create a new plan — the checklist is already live. ` +
+                    `Use update_plan_step to mark each step active/done as you go. ` +
+                    `All file paths and symbols are exact — go directly to each target, do NOT dispatch or explore.\n\n${pContent}`,
                 ),
               0,
             );
@@ -1404,18 +1594,33 @@ export function useChat({
             setTimeout(
               () =>
                 handleSubmit(
-                  `Execute the following plan step by step. Create a plan checklist and update steps as you go.\n\n${pContent}`,
+                  `Execute this plan NOW. Do NOT create a new plan — the checklist is already live. ` +
+                    `Use update_plan_step to mark each step active/done as you go. ` +
+                    `All file paths and symbols are exact — go directly to each target, do NOT dispatch or explore.\n\n${pContent}`,
                 ),
               0,
             );
           }
+        } else if (pendingCompactRef.current) {
+          // Compact was requested during generation — run it now that state is settled
+          pendingCompactRef.current = false;
+          summarizeConversationRef.current({ skipQueueDrain: true }).then(() => {
+            // After compact, auto-continue the conversation
+            setTimeout(
+              () =>
+                handleSubmitRef.current(
+                  "Continue from where you left off. Complete any remaining work.",
+                ),
+              0,
+            );
+          });
         } else {
           // Process message queue
           setMessageQueue((queue) => {
             if (queue.length > 0) {
               const [next, ...rest] = queue;
               if (next) {
-                setTimeout(() => handleSubmit(next.content), 0);
+                setTimeout(() => handleSubmitRef.current(next.content), 0);
               }
               return rest;
             }
@@ -1433,10 +1638,11 @@ export function useChat({
       flushStreamState,
       queueMicrotaskFlush,
       getWorkspaceSnapshot,
-      getConfigOverrides,
       setTokenUsage,
+      setActivePlan,
     ],
   );
+  handleSubmitRef.current = handleSubmit;
 
   const pendingQuestionRef = useRef(pendingQuestion);
   pendingQuestionRef.current = pendingQuestion;
@@ -1453,7 +1659,7 @@ export function useChat({
       abortRef.current = null;
       setIsLoading(false);
     }
-  }, []);
+  }, [setActivePlan]);
 
   // Snapshot current state for tab switching
   const snapshot = useCallback(
@@ -1465,23 +1671,13 @@ export function useChat({
       activeModel,
       activePlan,
       sidebarPlan,
-      showPlanPanel,
       tokenUsage,
       coAuthorCommits,
       sessionId: sessionIdRef.current,
       planMode: planModeRef.current,
       planRequest: planRequestRef.current,
     }),
-    [
-      messages,
-      coreMessages,
-      activeModel,
-      activePlan,
-      sidebarPlan,
-      showPlanPanel,
-      tokenUsage,
-      coAuthorCommits,
-    ],
+    [messages, coreMessages, activeModel, activePlan, sidebarPlan, tokenUsage, coAuthorCommits],
   );
 
   // Restore state from a tab snapshot
@@ -1492,7 +1688,6 @@ export function useChat({
       setActiveModel(state.activeModel);
       setActivePlan(state.activePlan);
       setSidebarPlan(state.sidebarPlan);
-      setShowPlanPanel(state.showPlanPanel);
       setTokenUsage(state.tokenUsage);
       setCoAuthorCommits(state.coAuthorCommits);
       sessionIdRef.current = state.sessionId;
@@ -1512,7 +1707,7 @@ export function useChat({
       autoSummarizedRef.current = false;
       contextManager.resetConversationTracking();
     },
-    [setTokenUsage, contextManager],
+    [setTokenUsage, contextManager, setActivePlan],
   );
 
   // Restore a session from disk (single-tab fallback)
@@ -1532,14 +1727,6 @@ export function useChat({
       setStreamSegments([]);
       setLiveToolCalls([]);
       setTokenUsage({ ...ZERO_USAGE });
-
-      const memState = sessionManager.loadSessionMemory(sessionId) as {
-        config: import("../core/memory/types.js").MemoryScopeConfig;
-        memories: import("../core/memory/types.js").MemoryRecord[];
-      } | null;
-      if (memState?.config && memState.memories) {
-        contextManager.getMemoryManager().importSessionState(memState);
-      }
     },
     [sessionManager, setTokenUsage, contextManager],
   );
@@ -1558,14 +1745,13 @@ export function useChat({
     coreMessages,
     setCoreMessages,
     isLoading,
+    isCompacting,
     streamSegments,
     liveToolCalls,
     activePlan,
     setActivePlan,
     sidebarPlan,
     setSidebarPlan,
-    showPlanPanel,
-    setShowPlanPanel,
     pendingQuestion,
     setPendingQuestion,
     messageQueue,

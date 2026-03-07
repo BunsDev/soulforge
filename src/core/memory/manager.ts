@@ -11,7 +11,7 @@ import type {
   MemorySummary,
 } from "./types.js";
 
-export type SettingsScope = "session" | "project" | "global";
+export type SettingsScope = "project" | "global";
 
 const CONFIG_FILE = "memory-config.json";
 const DEFAULT_CONFIG: MemoryScopeConfig = { writeScope: "global", readScope: "all" };
@@ -19,10 +19,9 @@ const DEFAULT_CONFIG: MemoryScopeConfig = { writeScope: "global", readScope: "al
 export class MemoryManager {
   private globalDb: MemoryDB;
   private projectDb: MemoryDB;
-  private sessionDb: MemoryDB;
   private cwd: string;
   private _scopeConfig: MemoryScopeConfig = { ...DEFAULT_CONFIG };
-  private _settingsScope: SettingsScope = "session";
+  private _settingsScope: SettingsScope = "project";
 
   get scopeConfig(): MemoryScopeConfig {
     return this._scopeConfig;
@@ -30,9 +29,7 @@ export class MemoryManager {
 
   set scopeConfig(config: MemoryScopeConfig) {
     this._scopeConfig = config;
-    if (this._settingsScope !== "session") {
-      this.saveConfig(this._settingsScope);
-    }
+    this.saveConfig(this._settingsScope);
   }
 
   get settingsScope(): SettingsScope {
@@ -47,7 +44,6 @@ export class MemoryManager {
 
     this.globalDb = new MemoryDB(globalPath, "global");
     this.projectDb = new MemoryDB(projectPath, "project");
-    this.sessionDb = new MemoryDB(":memory:", "session");
 
     this.loadConfig();
     this.tryMigrate();
@@ -88,22 +84,15 @@ export class MemoryManager {
     const path = this.configPath(from);
     if (existsSync(path)) rmSync(path);
     if (from === this._settingsScope) {
-      this._settingsScope = "session";
+      this._settingsScope = "project";
     }
   }
 
   setSettingsScope(scope: SettingsScope): void {
-    if (scope === "session") {
-      if (this._settingsScope !== "session") {
-        this.deleteConfig(this._settingsScope as "project" | "global");
-      }
-      this._settingsScope = "session";
-    } else {
-      if (this._settingsScope !== "session" && this._settingsScope !== scope) {
-        this.deleteConfig(this._settingsScope as "project" | "global");
-      }
-      this.saveConfig(scope);
+    if (this._settingsScope !== scope) {
+      this.deleteConfig(this._settingsScope);
     }
+    this.saveConfig(scope);
   }
 
   private tryMigrate(): void {
@@ -117,16 +106,14 @@ export class MemoryManager {
   }
 
   private getDb(scope: MemoryScope): MemoryDB {
-    if (scope === "session") return this.sessionDb;
     return scope === "global" ? this.globalDb : this.projectDb;
   }
 
   private getReadDbs(scope: MemoryScope | "both" | "all" | "none"): MemoryDB[] {
     if (scope === "none") return [];
-    if (scope === "session") return [this.sessionDb];
     if (scope === "project") return [this.projectDb];
     if (scope === "global") return [this.globalDb];
-    return [this.sessionDb, this.projectDb, this.globalDb];
+    return [this.projectDb, this.globalDb];
   }
 
   write(
@@ -173,8 +160,7 @@ export class MemoryManager {
 
   clearScope(scope: MemoryScope | "all"): number {
     let cleared = 0;
-    const dbs =
-      scope === "all" ? [this.sessionDb, this.projectDb, this.globalDb] : [this.getDb(scope)];
+    const dbs = scope === "all" ? [this.projectDb, this.globalDb] : [this.getDb(scope)];
     for (const db of dbs) {
       const items = db.list();
       for (const item of items) {
@@ -190,11 +176,10 @@ export class MemoryManager {
   }
 
   buildMemoryIndex(): string | null {
-    const sessionIdx = this.sessionDb.getIndex();
     const projectIdx = this.projectDb.getIndex();
     const globalIdx = this.globalDb.getIndex();
 
-    if (sessionIdx.total === 0 && projectIdx.total === 0 && globalIdx.total === 0) return null;
+    if (projectIdx.total === 0 && globalIdx.total === 0) return null;
 
     const parts = [
       "You have persistent memory. Use memory_search/memory_read to fetch details on demand.",
@@ -213,50 +198,13 @@ export class MemoryManager {
       }
     };
 
-    addIndex("Session", sessionIdx);
     addIndex("Project", projectIdx);
     addIndex("Global", globalIdx);
 
     return parts.join("\n");
   }
 
-  exportSessionMemories(): MemoryRecord[] {
-    const summaries = this.sessionDb.list();
-    const records: MemoryRecord[] = [];
-    for (const s of summaries) {
-      const full = this.sessionDb.read(s.id);
-      if (full) records.push(full);
-    }
-    return records;
-  }
-
-  importSessionMemories(records: MemoryRecord[]): void {
-    for (const r of records) {
-      this.sessionDb.write({
-        id: r.id,
-        title: r.title,
-        content: r.content,
-        category: r.category,
-        tags: r.tags,
-      });
-    }
-  }
-
-  exportSessionState(): { config: MemoryScopeConfig; memories: MemoryRecord[] } {
-    return {
-      config: this._scopeConfig,
-      memories: this.exportSessionMemories(),
-    };
-  }
-
-  importSessionState(state: { config: MemoryScopeConfig; memories: MemoryRecord[] }): void {
-    this._scopeConfig = state.config;
-    this.clearScope("session");
-    this.importSessionMemories(state.memories);
-  }
-
   close(): void {
-    this.sessionDb.close();
     this.globalDb.close();
     this.projectDb.close();
   }

@@ -43,7 +43,7 @@ export function CommandPicker({ visible, config, onClose }: Props) {
   const maxVisible = Math.max(4, Math.floor(containerRows * 0.7) - CHROME_ROWS);
   const [cursor, setCursor] = useState(0);
   const [scrollOffset, setScrollOffset] = useState(0);
-  const [scope, setScope] = useState<ConfigScope>("session");
+  const [scope, setScope] = useState<ConfigScope>("project");
 
   const adjustScroll = (next: number) => {
     setScrollOffset((prev) => {
@@ -59,7 +59,7 @@ export function CommandPicker({ visible, config, onClose }: Props) {
       if (idx < 0) idx = config.options.findIndex((o) => !o.disabled);
       setCursor(idx >= 0 ? idx : 0);
       setScrollOffset(0);
-      if (config.scopeEnabled) setScope(config.initialScope ?? "session");
+      if (config.scopeEnabled) setScope(config.initialScope ?? "project");
     }
   }, [visible, config]);
 

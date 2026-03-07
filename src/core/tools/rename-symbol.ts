@@ -10,6 +10,82 @@ function applyEdits(edits: FileEdit[]): void {
   }
 }
 
+/**
+ * Replace a symbol in code regions only — skips string literals and comments.
+ * Uses a state machine to track whether we're inside a string or comment.
+ */
+function replaceInCode(source: string, escapedSymbol: string, newName: string): string {
+  const symbolRe = new RegExp(`\\b${escapedSymbol}\\b`, "g");
+  const result: string[] = [];
+  let i = 0;
+
+  while (i < source.length) {
+    // Single-line comment
+    if (source[i] === "/" && source[i + 1] === "/") {
+      const end = source.indexOf("\n", i);
+      const stop = end === -1 ? source.length : end;
+      result.push(source.slice(i, stop));
+      i = stop;
+      continue;
+    }
+
+    // Multi-line comment
+    if (source[i] === "/" && source[i + 1] === "*") {
+      const end = source.indexOf("*/", i + 2);
+      const stop = end === -1 ? source.length : end + 2;
+      result.push(source.slice(i, stop));
+      i = stop;
+      continue;
+    }
+
+    // Python/bash # comment (at start of line or after whitespace)
+    if (
+      source[i] === "#" &&
+      (i === 0 || source[i - 1] === "\n" || source[i - 1] === " " || source[i - 1] === "\t")
+    ) {
+      const end = source.indexOf("\n", i);
+      const stop = end === -1 ? source.length : end;
+      result.push(source.slice(i, stop));
+      i = stop;
+      continue;
+    }
+
+    // String literal (single, double, backtick)
+    if (source[i] === '"' || source[i] === "'" || source[i] === "`") {
+      const quote = source[i] as string;
+      let j = i + 1;
+      while (j < source.length) {
+        if (source[j] === "\\") {
+          j += 2;
+          continue;
+        }
+        if (source[j] === quote) {
+          j++;
+          break;
+        }
+        j++;
+      }
+      result.push(source.slice(i, j));
+      i = j;
+      continue;
+    }
+
+    // Code region — scan to next potential string/comment start, replace symbols
+    let end = i;
+    while (end < source.length) {
+      const ch = source[end] as string;
+      if (ch === "/" || ch === '"' || ch === "'" || ch === "`" || ch === "#") break;
+      end++;
+    }
+
+    const segment = source.slice(i, end);
+    result.push(segment.replace(symbolRe, newName));
+    i = end;
+  }
+
+  return result.join("");
+}
+
 async function locateSymbol(
   router: ReturnType<typeof getIntelligenceRouter>,
   symbol: string,
@@ -166,14 +242,11 @@ export const renameSymbolTool = {
       const remaining = await findRemainingReferences(args.symbol, located.file);
       const textFixed: string[] = [];
       if (remaining.length > 0) {
-        const pattern = new RegExp(
-          `\\b${args.symbol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`,
-          "g",
-        );
+        const escaped = args.symbol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         for (const ref of remaining) {
           try {
             const content = readFileSync(ref, "utf-8");
-            const updated = content.replace(pattern, args.newName);
+            const updated = replaceInCode(content, escaped, args.newName);
             if (updated !== content) {
               writeFileSync(ref, updated, "utf-8");
               textFixed.push(ref);
@@ -199,14 +272,24 @@ export const renameSymbolTool = {
       const fileList = uniqueFiles.map((e) => `  ${e}`).join("\n");
       const method = tracked ? "lsp" : "text";
 
+      const lines = [
+        `Renamed '${args.symbol}' → '${args.newName}' across ${String(uniqueFiles.length)} file(s) [${method}]:`,
+        fileList,
+        "",
+      ];
+      if (method === "text") {
+        lines.push(
+          "⚠ LSP rename unavailable — used text-based replacement (strings/comments preserved). Verify edge cases with `project test`.",
+        );
+      } else {
+        lines.push(
+          "Verified: zero remaining references, zero type errors. Next step: `project test`. Nothing else needed.",
+        );
+      }
+
       return {
         success: true,
-        output: [
-          `Renamed '${args.symbol}' → '${args.newName}' across ${String(uniqueFiles.length)} file(s) [${method}]:`,
-          fileList,
-          "",
-          "Verified: zero remaining references, zero type errors. Next step: `project test`. Nothing else needed.",
-        ].join("\n"),
+        output: lines.join("\n"),
         backend: method,
       };
     } catch (err: unknown) {

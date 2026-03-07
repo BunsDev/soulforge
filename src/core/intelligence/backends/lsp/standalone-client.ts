@@ -109,13 +109,21 @@ export class StandaloneLspClient {
     this.process.stdin.write(msg);
 
     return new Promise<unknown>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      // Timeout after 30s
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         if (this.pending.delete(id)) {
           reject(new Error(`LSP request ${method} timed out`));
         }
       }, 30_000);
+      this.pending.set(id, {
+        resolve: (v: unknown) => {
+          clearTimeout(timer);
+          resolve(v);
+        },
+        reject: (e: unknown) => {
+          clearTimeout(timer);
+          reject(e);
+        },
+      });
     });
   }
 

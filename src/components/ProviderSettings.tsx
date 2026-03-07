@@ -1,6 +1,6 @@
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   AppConfig,
   ContextManagementConfig,
@@ -12,7 +12,7 @@ import type { ConfigScope } from "./shared.js";
 import { CONFIG_SCOPES, POPUP_BG, POPUP_HL, PopupRow } from "./shared.js";
 
 const MAX_POPUP_WIDTH = 60;
-const CHROME_ROWS = 8;
+const CHROME_ROWS = 9;
 
 export type ProviderScope = ConfigScope;
 
@@ -31,10 +31,10 @@ const ITEMS: SettingItem[] = [
   {
     key: "thinkingMode",
     label: "Mode",
-    desc: "auto/adaptive/enabled/disabled",
+    desc: "off = not sent to API",
     type: "cycle",
     section: "THINKING",
-    options: ["disabled", "auto", "adaptive", "enabled"],
+    options: ["off", "disabled", "auto", "adaptive", "enabled"],
   },
   {
     key: "budgetTokens",
@@ -46,7 +46,7 @@ const ITEMS: SettingItem[] = [
   {
     key: "effort",
     label: "Effort",
-    desc: "off/low/medium/high/max",
+    desc: "off = not sent to API",
     type: "cycle",
     section: "PERFORMANCE",
     options: ["off", "low", "medium", "high", "max"],
@@ -54,9 +54,9 @@ const ITEMS: SettingItem[] = [
   {
     key: "speed",
     label: "Speed",
-    desc: "standard/fast",
+    desc: "opus only • off = not sent",
     type: "cycle",
-    options: ["standard", "fast"],
+    options: ["off", "standard", "fast"],
   },
   {
     key: "codeExecution",
@@ -96,7 +96,7 @@ interface CurrentValues {
   thinkingMode: ThinkingMode;
   budgetTokens: number;
   effort: string;
-  speed: "standard" | "fast";
+  speed: "off" | "standard" | "fast";
   codeExecution: boolean;
   webSearch: boolean;
   compact: boolean;
@@ -105,10 +105,10 @@ interface CurrentValues {
 }
 
 const DEFAULTS: CurrentValues = {
-  thinkingMode: "disabled",
+  thinkingMode: "off",
   budgetTokens: 10000,
   effort: "off",
-  speed: "standard",
+  speed: "off",
   codeExecution: false,
   webSearch: true,
   compact: false,
@@ -133,15 +133,10 @@ function readValuesFromLayer(layer: Partial<AppConfig> | null): Partial<CurrentV
   return v;
 }
 
-function effectiveValues(
-  global: AppConfig,
-  project: Partial<AppConfig> | null,
-  session: Partial<AppConfig> | null,
-): CurrentValues {
+function effectiveValues(global: AppConfig, project: Partial<AppConfig> | null): CurrentValues {
   const g = { ...DEFAULTS, ...readValuesFromLayer(global) };
   const p = readValuesFromLayer(project);
-  const s = readValuesFromLayer(session);
-  return { ...g, ...p, ...s };
+  return { ...g, ...p };
 }
 
 function buildPatch(key: string, value: string | number | boolean): Partial<AppConfig> {
@@ -151,10 +146,9 @@ function buildPatch(key: string, value: string | number | boolean): Partial<AppC
     case "budgetTokens":
       return { thinking: { mode: "enabled", budgetTokens: value as number } };
     case "effort":
-      if (value === "off") return { performance: { effort: undefined } as PerformanceConfig };
-      return { performance: { effort: value as EffortLevel } as PerformanceConfig };
+      return { performance: { effort: value as EffortLevel | "off" } as PerformanceConfig };
     case "speed":
-      return { performance: { speed: value as "standard" | "fast" } as PerformanceConfig };
+      return { performance: { speed: value as "off" | "standard" | "fast" } as PerformanceConfig };
     case "codeExecution":
       return { codeExecution: value as boolean };
     case "webSearch":
@@ -170,11 +164,22 @@ function buildPatch(key: string, value: string | number | boolean): Partial<AppC
   }
 }
 
+function detectValueScope(key: string, project: Partial<AppConfig> | null): ConfigScope {
+  const pv = readValuesFromLayer(project);
+  if (key in pv) return "project";
+  return "global";
+}
+
+function detectInitialScope(project: Partial<AppConfig> | null): ConfigScope {
+  const pv = readValuesFromLayer(project);
+  if (Object.keys(pv).length > 0) return "project";
+  return "global";
+}
+
 interface Props {
   visible: boolean;
   globalConfig: AppConfig;
   projectConfig: Partial<AppConfig> | null;
-  sessionConfig: Partial<AppConfig> | null;
   onUpdate: (patch: Partial<AppConfig>, toScope: ProviderScope, fromScope?: ProviderScope) => void;
   onClose: () => void;
 }
@@ -183,7 +188,6 @@ export function ProviderSettings({
   visible,
   globalConfig,
   projectConfig,
-  sessionConfig,
   onUpdate,
   onClose,
 }: Props) {
@@ -194,8 +198,12 @@ export function ProviderSettings({
   const maxVisible = Math.max(4, Math.floor(containerRows * 0.7) - CHROME_ROWS);
   const [cursor, setCursor] = useState(0);
   const [scrollOffset, setScrollOffset] = useState(0);
-  const [scope, setScope] = useState<ConfigScope>("session");
-  const vals = effectiveValues(globalConfig, projectConfig, sessionConfig);
+  const [scope, setScope] = useState<ConfigScope>(() => detectInitialScope(projectConfig));
+  const vals = effectiveValues(globalConfig, projectConfig);
+
+  useEffect(() => {
+    if (visible) setScope(detectInitialScope(projectConfig));
+  }, [visible, projectConfig]);
 
   const isBudgetDisabled = vals.thinkingMode !== "enabled";
 
@@ -266,6 +274,17 @@ export function ProviderSettings({
           evt.name === "left"
             ? CONFIG_SCOPES[(idx - 1 + CONFIG_SCOPES.length) % CONFIG_SCOPES.length]
             : CONFIG_SCOPES[(idx + 1) % CONFIG_SCOPES.length];
+        if (next && next !== prev) {
+          const layer = prev === "project" ? projectConfig : globalConfig;
+          const layerVals = readValuesFromLayer(layer);
+          if (Object.keys(layerVals).length > 0) {
+            const patch: Partial<AppConfig> = {};
+            for (const [k, v] of Object.entries(layerVals)) {
+              Object.assign(patch, buildPatch(k, v as string | number | boolean));
+            }
+            onUpdate(patch, next as ProviderScope, prev);
+          }
+        }
         return next ?? prev;
       });
       return;
@@ -306,6 +325,12 @@ export function ProviderSettings({
         <PopupRow w={innerW}>
           <text bg={POPUP_BG} fg="#333">
             {"─".repeat(innerW - 2)}
+          </text>
+        </PopupRow>
+
+        <PopupRow w={innerW}>
+          <text bg={POPUP_BG} fg="#555">
+            {"  "}⚠ Claude-only — "off" = not sent to API
           </text>
         </PopupRow>
 
@@ -351,10 +376,16 @@ export function ProviderSettings({
                   ? raw
                     ? "#2d5"
                     : "#555"
-                  : "#8B5CF6";
+                  : raw === "off"
+                    ? "#555"
+                    : "#8B5CF6";
 
               const displayVal =
                 item.type === "toggle" ? (raw ? "x" : " ") : String(raw).padStart(valW - 2);
+
+              const srcScope = detectValueScope(item.key, projectConfig);
+              const srcTag = srcScope === "project" ? "p" : "g";
+              const srcColor = srcScope === "project" ? "#00BFFF" : "#666";
 
               rows.push(
                 <PopupRow key={item.key} bg={bg} w={innerW}>
@@ -367,8 +398,11 @@ export function ProviderSettings({
                   <text bg={bg} fg={valColor}>
                     [{displayVal}]
                   </text>
+                  <text bg={bg} fg={srcColor}>
+                    {` ${srcTag}`}
+                  </text>
                   <text bg={bg} fg="#555" truncate>
-                    {"  "}
+                    {" "}
                     {item.desc}
                   </text>
                 </PopupRow>,

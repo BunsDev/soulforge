@@ -4,6 +4,52 @@ import type { ToolResult } from "../../types/index.js";
 import { getIntelligenceRouter } from "../intelligence/index.js";
 import type { Language } from "../intelligence/types.js";
 
+interface PendingWrite {
+  path: string;
+  content: string;
+  original: string | null; // null = new file
+}
+
+class WriteTransaction {
+  private writes: PendingWrite[] = [];
+  private committed = false;
+
+  stage(path: string, content: string): void {
+    const original = existsSync(path) ? readFileSync(path, "utf-8") : null;
+    this.writes.push({ path, content, original });
+  }
+
+  commit(): void {
+    for (const w of this.writes) {
+      const dir = dirname(w.path);
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      writeFileSync(w.path, w.content, "utf-8");
+    }
+    this.committed = true;
+  }
+
+  rollback(): void {
+    if (!this.committed) return;
+    for (const w of [...this.writes].reverse()) {
+      try {
+        if (w.original === null) {
+          // File was newly created — remove it
+          const { unlinkSync } = require("node:fs") as typeof import("node:fs");
+          unlinkSync(w.path);
+        } else {
+          writeFileSync(w.path, w.original, "utf-8");
+        }
+      } catch {
+        // Best-effort rollback
+      }
+    }
+  }
+
+  get paths(): string[] {
+    return this.writes.map((w) => w.path);
+  }
+}
+
 interface MoveSymbolArgs {
   symbol: string;
   from: string;
@@ -601,10 +647,7 @@ export const moveSymbolTool = {
         }
       }
 
-      // ── 3. Write target file ──
-      const targetDir = dirname(to);
-      if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
-
+      // ── 3. Build target content ──
       let symbolForTarget = defText;
       if (!isExported && (language === "typescript" || language === "javascript")) {
         const tLines = symbolForTarget.split("\n");
@@ -629,12 +672,9 @@ export const moveSymbolTool = {
         targetContent = parts.join("\n");
       }
 
-      writeFileSync(to, targetContent, "utf-8");
-
-      // ── 4. Remove from source ──
+      // ── 4. Build updated source ──
       const newSourceLines = [...sourceLines.slice(0, cmtStart), ...sourceLines.slice(defEnd + 1)];
 
-      // Collapse double blank lines
       const idx = cmtStart;
       while (
         idx < newSourceLines.length &&
@@ -647,7 +687,6 @@ export const moveSymbolTool = {
 
       let newSource = newSourceLines.join("\n");
 
-      // TS/JS: remove from standalone export { } lists
       if (language === "typescript" || language === "javascript") {
         const exportListRe = new RegExp(
           `(export\\s*\\{)([^}]*?)\\b${esc(args.symbol)}\\b,?\\s*([^}]*?)(\\})`,
@@ -667,7 +706,6 @@ export const moveSymbolTool = {
         newSource = newSource.replace(/export\s*\{\s*\}\s*;?\s*\n?/g, "");
       }
 
-      // If source still references the symbol (outside imports), add import
       if (handler) {
         const stripped = newSource.replace(/^\s*(import|use|from|#include)\b.*$/gm, "");
         if (new RegExp(`\\b${esc(args.symbol)}\\b`).test(stripped)) {
@@ -681,9 +719,11 @@ export const moveSymbolTool = {
         }
       }
 
-      writeFileSync(from, newSource, "utf-8");
+      // ── 5. Stage all writes in a transaction ──
+      const tx = new WriteTransaction();
+      tx.stage(to, targetContent);
+      tx.stage(from, newSource);
 
-      // ── 5. Update importers across codebase ──
       const projectRoot = findProjectRoot(from);
       const candidates = await grepSymbol(args.symbol, projectRoot);
       const updatedFiles: string[] = [];
@@ -735,7 +775,7 @@ export const moveSymbolTool = {
             }
 
             if (changed) {
-              writeFileSync(file, modified, "utf-8");
+              tx.stage(file, modified);
               updatedFiles.push(file);
             }
           } catch {
@@ -746,7 +786,20 @@ export const moveSymbolTool = {
         }
       }
 
-      // ── 6. Report ──
+      // ── 6. Commit atomically — rollback on failure ──
+      try {
+        tx.commit();
+      } catch (commitErr: unknown) {
+        tx.rollback();
+        const msg = commitErr instanceof Error ? commitErr.message : String(commitErr);
+        return {
+          success: false,
+          output: `Move failed during write — all changes rolled back: ${msg}`,
+          error: "write failed",
+        };
+      }
+
+      // ── 7. Report ──
       const cwd = process.cwd();
       const allModified = [...new Set([to, from, ...updatedFiles])];
       const output: string[] = [

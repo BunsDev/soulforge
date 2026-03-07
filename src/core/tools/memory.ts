@@ -4,10 +4,8 @@ import type { MemoryManager } from "../memory/manager.js";
 import type { MemoryCategory, MemoryScope } from "../memory/types.js";
 import { MEMORY_CATEGORIES } from "../memory/types.js";
 
-const scopeSchema = z.enum(["global", "project", "session"]).describe("Memory scope");
-const scopeOrBothSchema = z
-  .enum(["global", "project", "session", "both", "all"])
-  .describe("Memory scope");
+const scopeSchema = z.enum(["global", "project"]).describe("Memory scope");
+const scopeOrBothSchema = z.enum(["global", "project", "both", "all"]).describe("Memory scope");
 const categorySchema = z
   .enum(MEMORY_CATEGORIES as [string, ...string[]])
   .describe("Memory category");
@@ -73,7 +71,7 @@ export function createMemoryTools(manager: MemoryManager) {
         }
         const scopes: MemoryScope[] =
           readScope === "all" || (readScope as string) === "both"
-            ? ["session", "project", "global"]
+            ? ["project", "global"]
             : [readScope as MemoryScope];
         let record = null;
         for (const s of scopes) {

@@ -1,3 +1,4 @@
+import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ToolResult } from "../../types/index.js";
 import { getIntelligenceRouter } from "../intelligence/index.js";
@@ -34,18 +35,169 @@ function formatSymbol(s: SymbolInfo): string {
   return `${s.kind} ${s.name}${container} — ${loc}`;
 }
 
+const FILE_REQUIRED_ACTIONS = new Set<NavigateAction>([
+  "definition",
+  "references",
+  "symbols",
+  "imports",
+  "exports",
+  "call_hierarchy",
+  "implementation",
+  "type_hierarchy",
+]);
+
+type RepoMapLike = {
+  isReady: boolean;
+  findSymbols(name: string): Array<{ path: string; kind: string; isExported: boolean }>;
+};
+
+type ResolveResult = { resolved: string } | { candidates: string[] } | null;
+
+// Multi-language definition pattern for rg fallback.
+// Covers: TS/JS, Python, Go, Rust, Java/Kotlin/Scala, C/C++, C#, Ruby, PHP, Swift, Elixir, Dart, Zig, Lua
+// Each alternative is a language-family keyword set + the symbol name.
+const DEFINITION_KEYWORDS = [
+  // TS/JS: function, class, interface, type, const, let, var, enum (with optional export/async/abstract/default)
+  String.raw`(?:export\s+)?(?:default\s+)?(?:abstract\s+)?(?:async\s+)?(?:function\*?|class|interface|type|const|let|var|enum)\s+`,
+  // Python: def, class (with optional async)
+  String.raw`(?:async\s+)?(?:def|class)\s+`,
+  // Go: func (with optional receiver), type ... struct/interface
+  String.raw`(?:func\s+(?:\([^)]*\)\s+)?|type\s+)`,
+  // Rust: fn, struct, trait, type, const, static, enum, mod (with optional pub/async)
+  String.raw`(?:pub(?:\([^)]*\)\s+)?)?(?:async\s+)?(?:fn|struct|trait|type|const|static|enum|mod|union)\s+`,
+  // Java/Kotlin/Scala: class, interface, enum, record + visibility/abstract
+  String.raw`(?:public\s+|private\s+|protected\s+)?(?:abstract\s+|static\s+|final\s+|sealed\s+|data\s+|open\s+|internal\s+)*(?:class|interface|enum|record|object|annotation)\s+`,
+  // C/C++: class, struct, enum, namespace, typedef, using + template
+  String.raw`(?:class|struct|enum(?:\s+class)?|namespace|typedef|using)\s+`,
+  // C#: class, struct, interface, enum, record, delegate
+  String.raw`(?:public\s+|private\s+|protected\s+|internal\s+)?(?:abstract\s+|static\s+|sealed\s+|partial\s+)*(?:class|struct|interface|enum|record|delegate)\s+`,
+  // Ruby: def, class, module
+  String.raw`(?:def\s+(?:self\.)?|class\s+|module\s+)`,
+  // PHP: function, class, interface, trait, enum
+  String.raw`(?:public\s+|private\s+|protected\s+)?(?:static\s+)?(?:function|class|interface|trait|enum)\s+`,
+  // Swift: func, class, struct, protocol, enum, typealias
+  String.raw`(?:public\s+|private\s+|internal\s+|open\s+)?(?:class|struct|protocol|enum|typealias|func)\s+`,
+  // Elixir: def, defp, defmodule, defmacro
+  String.raw`(?:def|defp|defmodule|defmacro|defstruct)\s+`,
+  // Dart: class, mixin, extension, typedef
+  String.raw`(?:abstract\s+)?(?:class|mixin|extension|typedef|enum)\s+`,
+  // Zig: fn, const (pub optional)
+  String.raw`(?:pub\s+)?(?:fn|const)\s+`,
+  // Lua: function (local optional)
+  String.raw`(?:local\s+)?function\s+(?:\w+[.:])?`,
+];
+
+const RG_FILE_TYPES =
+  "*.{ts,tsx,js,jsx,mjs,cjs,py,go,rs,java,kt,kts,scala,c,h,cpp,hpp,cc,cxx,cs,rb,php,swift,ex,exs,dart,zig,lua}";
+
+function buildDefinitionPattern(symbol: string): string {
+  const escaped = symbol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const alts = DEFINITION_KEYWORDS.map((kw) => `(?:${kw})`).join("|");
+  return `(?:${alts})${escaped}\\b`;
+}
+
+async function autoResolveFile(
+  router: ReturnType<typeof getIntelligenceRouter>,
+  symbol: string,
+  repoMap?: RepoMapLike,
+): Promise<ResolveResult> {
+  // Tier 1: Repo map (instant SQLite lookup, ~0ms)
+  if (repoMap?.isReady) {
+    const matches = repoMap.findSymbols(symbol);
+    if (matches.length === 1) return { resolved: (matches[0] as { path: string }).path };
+    if (matches.length > 1) {
+      const exported = matches.filter((m) => m.isExported);
+      if (exported.length === 1) return { resolved: (exported[0] as { path: string }).path };
+      return { candidates: matches.map((m) => m.path) };
+    }
+  }
+
+  // Tier 2: Workspace symbols via LSP/tree-sitter (~10-50ms)
+  const language = router.detectLanguage();
+  const results = await router.executeWithFallback(language, "findWorkspaceSymbols", (b) =>
+    b.findWorkspaceSymbols ? b.findWorkspaceSymbols(symbol) : Promise.resolve(null),
+  );
+
+  if (results && results.length > 0) {
+    const exact = results.filter((s) => s.name === symbol);
+    const matches = exact.length > 0 ? exact : results.slice(0, 1);
+
+    const validFiles = matches
+      .map((m) => resolve(m.location.file))
+      .filter((f) => existsSync(f) && statSync(f).isFile());
+
+    const unique = [...new Set(validFiles)];
+    if (unique.length === 1) return { resolved: unique[0] as string };
+    if (unique.length > 1) return { candidates: unique };
+  }
+
+  // Tier 3: ripgrep with multi-language definition patterns (~50-200ms)
+  try {
+    const pattern = buildDefinitionPattern(symbol);
+    const proc = Bun.spawn(["rg", "--files-with-matches", "--glob", RG_FILE_TYPES, pattern, "."], {
+      cwd: process.cwd(),
+      stdout: "pipe",
+      stderr: "ignore",
+    });
+    const text = await new Response(proc.stdout).text();
+    const grepMatches = text
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((p) => resolve(p));
+    if (grepMatches.length === 1) return { resolved: grepMatches[0] as string };
+    if (grepMatches.length > 1) return { candidates: grepMatches };
+  } catch {
+    // rg not available
+  }
+
+  return null;
+}
+
 export const navigateTool = {
   name: "navigate",
   description:
     "Find where a symbol is defined, who calls it, what it imports/exports, and its type hierarchy. " +
     "THE primary tool for understanding code structure — use BEFORE grep for code questions. " +
+    "Check Repo Map first: if the symbol/file is already listed, use read_code directly instead. " +
+    "workspace_symbols only finds exported symbols — for script-style entry points (boot.tsx, index.ts) with no exports, use analyze outline instead. " +
     "Works without neovim — uses static analysis of the codebase.",
-  execute: async (args: NavigateArgs): Promise<ToolResult> => {
+  execute: async (args: NavigateArgs, repoMap?: RepoMapLike): Promise<ToolResult> => {
     try {
       const router = getIntelligenceRouter(process.cwd());
-      const file = args.file ? resolve(args.file) : undefined;
-      const language = router.detectLanguage(file);
+      let file = args.file ? resolve(args.file) : undefined;
       const symbol = args.symbol;
+
+      if (!file && FILE_REQUIRED_ACTIONS.has(args.action) && symbol) {
+        const resolved = await autoResolveFile(router, symbol, repoMap);
+        if (resolved && "resolved" in resolved) {
+          file = resolved.resolved;
+        } else if (resolved && "candidates" in resolved) {
+          const cwd = process.cwd();
+          const display = resolved.candidates.map((c) =>
+            c.startsWith(cwd) ? c.slice(cwd.length + 1) : c,
+          );
+          return {
+            success: false,
+            output: `file is required for ${args.action} — '${symbol}' found in multiple files:\n${display.map((f) => `  ${f}`).join("\n")}\nRe-call with file set to the correct one.`,
+            error: "ambiguous symbol",
+          };
+        }
+      }
+
+      if (!file && FILE_REQUIRED_ACTIONS.has(args.action)) {
+        const hint = symbol ? ` Try workspace_symbols to locate '${symbol}' first.` : "";
+        return {
+          success: false,
+          output: `file is required for ${args.action}.${hint}`,
+          error: "missing file",
+        };
+      }
+
+      // After the guard above, file is guaranteed non-null for FILE_REQUIRED_ACTIONS.
+      // Bind to a const so TS narrows it for all case blocks below.
+      const resolvedFile = file as string;
+      const language = router.detectLanguage(file);
 
       switch (args.action) {
         case "definition": {
@@ -56,21 +208,22 @@ export const navigateTool = {
               error: "missing symbol",
             };
           }
-          if (!file) {
-            return {
-              success: false,
-              output: "file is required for definition lookup",
-              error: "missing file",
-            };
-          }
 
           const tracked = await router.executeWithFallbackTracked(
             language,
             "findDefinition",
-            (b) => (b.findDefinition ? b.findDefinition(file, symbol) : Promise.resolve(null)),
+            (b) =>
+              b.findDefinition ? b.findDefinition(resolvedFile, symbol) : Promise.resolve(null),
           );
 
-          if (!tracked || tracked.value.length === 0) {
+          if (!tracked) {
+            return {
+              success: false,
+              output: `No definition backend available for ${language} — try grep instead`,
+              error: "unsupported",
+            };
+          }
+          if (tracked.value.length === 0) {
             return {
               success: false,
               output: `No definition found for '${symbol}'`,
@@ -93,21 +246,22 @@ export const navigateTool = {
               error: "missing symbol",
             };
           }
-          if (!file) {
-            return {
-              success: false,
-              output: "file is required for references lookup",
-              error: "missing file",
-            };
-          }
 
           const tracked = await router.executeWithFallbackTracked(
             language,
             "findReferences",
-            (b) => (b.findReferences ? b.findReferences(file, symbol) : Promise.resolve(null)),
+            (b) =>
+              b.findReferences ? b.findReferences(resolvedFile, symbol) : Promise.resolve(null),
           );
 
-          if (!tracked || tracked.value.length === 0) {
+          if (!tracked) {
+            return {
+              success: false,
+              output: `No references backend available for ${language} — try grep instead`,
+              error: "unsupported",
+            };
+          }
+          if (tracked.value.length === 0) {
             return {
               success: false,
               output: `No references found for '${symbol}'`,
@@ -123,16 +277,8 @@ export const navigateTool = {
         }
 
         case "symbols": {
-          if (!file) {
-            return {
-              success: false,
-              output: "file is required for symbol listing",
-              error: "missing file",
-            };
-          }
-
           const tracked = await router.executeWithFallbackTracked(language, "findSymbols", (b) =>
-            b.findSymbols ? b.findSymbols(file, args.scope) : Promise.resolve(null),
+            b.findSymbols ? b.findSymbols(resolvedFile, args.scope) : Promise.resolve(null),
           );
 
           if (!tracked || tracked.value.length === 0) {
@@ -147,16 +293,8 @@ export const navigateTool = {
         }
 
         case "imports": {
-          if (!file) {
-            return {
-              success: false,
-              output: "file is required for import listing",
-              error: "missing file",
-            };
-          }
-
           const tracked = await router.executeWithFallbackTracked(language, "findImports", (b) =>
-            b.findImports ? b.findImports(file) : Promise.resolve(null),
+            b.findImports ? b.findImports(resolvedFile) : Promise.resolve(null),
           );
 
           if (!tracked || tracked.value.length === 0) {
@@ -175,16 +313,8 @@ export const navigateTool = {
         }
 
         case "exports": {
-          if (!file) {
-            return {
-              success: false,
-              output: "file is required for export listing",
-              error: "missing file",
-            };
-          }
-
           const tracked = await router.executeWithFallbackTracked(language, "findExports", (b) =>
-            b.findExports ? b.findExports(file) : Promise.resolve(null),
+            b.findExports ? b.findExports(resolvedFile) : Promise.resolve(null),
           );
 
           if (!tracked || tracked.value.length === 0) {
@@ -237,25 +367,19 @@ export const navigateTool = {
               error: "missing symbol",
             };
           }
-          if (!file) {
-            return {
-              success: false,
-              output: "file is required for call_hierarchy",
-              error: "missing file",
-            };
-          }
 
           const tracked = await router.executeWithFallbackTracked(
             language,
             "getCallHierarchy",
-            (b) => (b.getCallHierarchy ? b.getCallHierarchy(file, symbol) : Promise.resolve(null)),
+            (b) =>
+              b.getCallHierarchy ? b.getCallHierarchy(resolvedFile, symbol) : Promise.resolve(null),
           );
 
           if (!tracked) {
             return {
               success: false,
-              output: `No call hierarchy for '${symbol}'`,
-              error: "not found",
+              output: `No call hierarchy backend available for ${language}`,
+              error: "unsupported",
             };
           }
 
@@ -290,22 +414,24 @@ export const navigateTool = {
               error: "missing symbol",
             };
           }
-          if (!file) {
-            return {
-              success: false,
-              output: "file is required for implementation lookup",
-              error: "missing file",
-            };
-          }
 
           const tracked = await router.executeWithFallbackTracked(
             language,
             "findImplementation",
             (b) =>
-              b.findImplementation ? b.findImplementation(file, symbol) : Promise.resolve(null),
+              b.findImplementation
+                ? b.findImplementation(resolvedFile, symbol)
+                : Promise.resolve(null),
           );
 
-          if (!tracked || tracked.value.length === 0) {
+          if (!tracked) {
+            return {
+              success: false,
+              output: `No implementation backend available for ${language} — try grep instead`,
+              error: "unsupported",
+            };
+          }
+          if (tracked.value.length === 0) {
             return {
               success: false,
               output: `No implementations found for '${symbol}'`,
@@ -328,25 +454,19 @@ export const navigateTool = {
               error: "missing symbol",
             };
           }
-          if (!file) {
-            return {
-              success: false,
-              output: "file is required for type_hierarchy",
-              error: "missing file",
-            };
-          }
 
           const tracked = await router.executeWithFallbackTracked(
             language,
             "getTypeHierarchy",
-            (b) => (b.getTypeHierarchy ? b.getTypeHierarchy(file, symbol) : Promise.resolve(null)),
+            (b) =>
+              b.getTypeHierarchy ? b.getTypeHierarchy(resolvedFile, symbol) : Promise.resolve(null),
           );
 
           if (!tracked) {
             return {
               success: false,
-              output: `No type hierarchy for '${symbol}'`,
-              error: "not found",
+              output: `No type hierarchy backend available for ${language}`,
+              error: "unsupported",
             };
           }
 

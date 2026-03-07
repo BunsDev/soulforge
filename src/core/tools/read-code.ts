@@ -3,7 +3,7 @@ import type { ToolResult } from "../../types/index.js";
 import { getIntelligenceRouter } from "../intelligence/index.js";
 import type { SymbolKind } from "../intelligence/types.js";
 
-type ReadTarget = "function" | "class" | "type" | "interface" | "scope";
+type ReadTarget = "function" | "class" | "type" | "interface" | "variable" | "enum" | "scope";
 
 interface ReadCodeArgs {
   target: ReadTarget;
@@ -69,6 +69,8 @@ export const readCodeTool = {
         class: "class",
         type: "type",
         interface: "interface",
+        variable: "variable",
+        enum: "enum",
       };
 
       let tracked = await router.executeWithFallbackTracked(language, "readSymbol", (b) =>

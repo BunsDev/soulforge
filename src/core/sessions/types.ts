@@ -7,7 +7,6 @@ export interface TabMeta {
   sessionId: string;
   planMode: boolean;
   planRequest: string | null;
-  showPlanPanel: boolean;
   coAuthorCommits: boolean;
   tokenUsage: {
     prompt: number;
@@ -29,5 +28,4 @@ export interface SessionMeta {
   activeTabId: string;
   forgeMode: ForgeMode;
   tabs: TabMeta[];
-  configOverrides?: Record<string, unknown>;
 }

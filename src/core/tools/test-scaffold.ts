@@ -59,18 +59,14 @@ export const testScaffoldTool = {
         };
       }
 
-      // Get type info for each export
-      const exportDetails: Array<{ name: string; kind: string; type?: string }> = [];
-      for (const exp of exports) {
-        const typeInfo = await router.executeWithFallback(language, "getTypeInfo", (b) =>
-          b.getTypeInfo ? b.getTypeInfo(file, exp.name) : Promise.resolve(null),
-        );
-        exportDetails.push({
-          name: exp.name,
-          kind: exp.kind,
-          type: typeInfo?.type,
-        });
-      }
+      const exportDetails = await Promise.all(
+        exports.map(async (exp) => {
+          const typeInfo = await router.executeWithFallback(language, "getTypeInfo", (b) =>
+            b.getTypeInfo ? b.getTypeInfo(file, exp.name) : Promise.resolve(null),
+          );
+          return { name: exp.name, kind: exp.kind, type: typeInfo?.type };
+        }),
+      );
 
       // Generate test file
       const outputPath = args.output ?? inferTestPath(file);

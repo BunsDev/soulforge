@@ -5,6 +5,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import type { EditorIntegration } from "../../types/index.js";
 import { type AgentBus, normalizePath } from "../agents/agent-bus.js";
+import type { RepoMap } from "../intelligence/repo-map.js";
 import { MemoryManager } from "../memory/manager.js";
 import { analyzeTool } from "./analyze.js";
 import { discoverPatternTool } from "./discover-pattern.js";
@@ -42,11 +43,23 @@ import { readCodeTool } from "./read-code.js";
 import { readFileTool } from "./read-file";
 import { refactorTool } from "./refactor.js";
 import { renameSymbolTool } from "./rename-symbol.js";
+import { tryInterceptGrep, tryInterceptNavigate } from "./repo-map-intercept.js";
 import { shellTool } from "./shell";
 import { testScaffoldTool } from "./test-scaffold.js";
 import { buildWebSearchTool } from "./web-search";
 
 export { buildInteractiveTools } from "./interactive.js";
+
+/**
+ * Yield to the event loop before tool execution so the UI can render
+ * the "running" spinner before synchronous operations block the thread.
+ */
+function deferExecute<T, R>(fn: (args: T) => Promise<R>): (args: T) => Promise<R> {
+  return async (args: T) => {
+    await new Promise<void>((r) => setTimeout(r, 0));
+    return fn(args);
+  };
+}
 
 /**
  * Build Vercel AI SDK tool definitions.
@@ -63,6 +76,7 @@ export function buildTools(
     codeExecution?: boolean;
     memoryManager?: MemoryManager;
     webSearchModel?: import("ai").LanguageModel;
+    repoMap?: RepoMap;
   },
 ) {
   const effectiveCwd = cwd ?? process.cwd();
@@ -89,7 +103,7 @@ export function buildTools(
         startLine: z.number().optional().describe("Start line (1-indexed)"),
         endLine: z.number().optional().describe("End line (1-indexed)"),
       }),
-      execute: (args) => readFileTool.execute(args),
+      execute: deferExecute((args) => readFileTool.execute(args)),
     }),
 
     edit_file: tool({
@@ -99,7 +113,7 @@ export function buildTools(
         oldString: z.string().describe("Exact string to replace (empty = create new file)"),
         newString: z.string().describe("Replacement string"),
       }),
-      execute: (args) => editFileTool.execute(args),
+      execute: deferExecute((args) => editFileTool.execute(args)),
     }),
 
     shell: tool({
@@ -109,7 +123,7 @@ export function buildTools(
         cwd: z.string().optional().describe("Working directory"),
         timeout: z.number().optional().describe("Timeout in ms"),
       }),
-      execute: (args) => shellTool.execute(args),
+      execute: deferExecute((args) => shellTool.execute(args)),
     }),
 
     grep: tool({
@@ -119,7 +133,11 @@ export function buildTools(
         path: z.string().optional().describe("Directory to search"),
         glob: z.string().optional().describe("File glob filter"),
       }),
-      execute: (args) => grepTool.execute(args),
+      execute: deferExecute((args) => {
+        const hit = tryInterceptGrep(args, opts?.repoMap, effectiveCwd);
+        if (hit) return Promise.resolve(hit);
+        return grepTool.execute(args);
+      }),
     }),
 
     glob: tool({
@@ -128,7 +146,7 @@ export function buildTools(
         pattern: z.string().describe("Glob pattern"),
         path: z.string().optional().describe("Base directory"),
       }),
-      execute: (args) => globTool.execute(args),
+      execute: deferExecute((args) => globTool.execute(args)),
     }),
 
     web_search: buildWebSearchTool({
@@ -144,7 +162,7 @@ export function buildTools(
         startLine: z.number().optional().describe("Start line (1-indexed)"),
         endLine: z.number().optional().describe("End line (1-indexed)"),
       }),
-      execute: (args) => editorReadTool.execute(args),
+      execute: deferExecute((args) => editorReadTool.execute(args)),
     }),
 
     editor_edit: tool({
@@ -156,7 +174,7 @@ export function buildTools(
           .string()
           .describe("New content to replace those lines with — only the new text, not the old"),
       }),
-      execute: (args) => editorEditTool.execute(args),
+      execute: deferExecute((args) => editorEditTool.execute(args)),
     }),
 
     editor_navigate: tool({
@@ -167,7 +185,7 @@ export function buildTools(
         col: z.number().optional().describe("Column number"),
         search: z.string().optional().describe("Search pattern"),
       }),
-      execute: (args) => editorNavigateTool.execute(args),
+      execute: deferExecute((args) => editorNavigateTool.execute(args)),
     }),
 
     ...(ei.diagnostics
@@ -175,7 +193,7 @@ export function buildTools(
           editor_diagnostics: tool({
             description: editorDiagnosticsTool.description,
             inputSchema: z.object({}),
-            execute: () => editorDiagnosticsTool.execute(),
+            execute: deferExecute(() => editorDiagnosticsTool.execute()),
           }),
         }
       : {}),
@@ -185,7 +203,7 @@ export function buildTools(
           editor_symbols: tool({
             description: editorSymbolsTool.description,
             inputSchema: z.object({}),
-            execute: () => editorSymbolsTool.execute(),
+            execute: deferExecute(() => editorSymbolsTool.execute()),
           }),
         }
       : {}),
@@ -198,7 +216,7 @@ export function buildTools(
               line: z.number().optional().describe("Line number (1-indexed, defaults to cursor)"),
               col: z.number().optional().describe("Column number (1-indexed, defaults to cursor)"),
             }),
-            execute: (args) => editorHoverTool.execute(args),
+            execute: deferExecute((args) => editorHoverTool.execute(args)),
           }),
         }
       : {}),
@@ -211,7 +229,7 @@ export function buildTools(
               line: z.number().optional().describe("Line number (1-indexed, defaults to cursor)"),
               col: z.number().optional().describe("Column number (1-indexed, defaults to cursor)"),
             }),
-            execute: (args) => editorReferencesTool.execute(args),
+            execute: deferExecute((args) => editorReferencesTool.execute(args)),
           }),
         }
       : {}),
@@ -228,7 +246,7 @@ export function buildTools(
                 .optional()
                 .describe("Jump editor to first definition (default true)"),
             }),
-            execute: (args) => editorDefinitionTool.execute(args),
+            execute: deferExecute((args) => editorDefinitionTool.execute(args)),
           }),
         }
       : {}),
@@ -242,7 +260,7 @@ export function buildTools(
               col: z.number().optional().describe("Column number (1-indexed, defaults to cursor)"),
               apply: z.number().optional().describe("0-indexed action to apply"),
             }),
-            execute: (args) => editorActionsTool.execute(args),
+            execute: deferExecute((args) => editorActionsTool.execute(args)),
           }),
         }
       : {}),
@@ -256,7 +274,7 @@ export function buildTools(
               line: z.number().optional().describe("Line number (1-indexed, defaults to cursor)"),
               col: z.number().optional().describe("Column number (1-indexed, defaults to cursor)"),
             }),
-            execute: (args) => editorRenameTool.execute(args),
+            execute: deferExecute((args) => editorRenameTool.execute(args)),
           }),
         }
       : {}),
@@ -266,7 +284,7 @@ export function buildTools(
           editor_lsp_status: tool({
             description: editorLspStatusTool.description,
             inputSchema: z.object({}),
-            execute: () => editorLspStatusTool.execute(),
+            execute: deferExecute(() => editorLspStatusTool.execute()),
           }),
         }
       : {}),
@@ -282,7 +300,7 @@ export function buildTools(
                 .describe("Start line for range formatting (1-indexed)"),
               endLine: z.number().optional().describe("End line for range formatting (1-indexed)"),
             }),
-            execute: (args) => editorFormatTool.execute(args),
+            execute: deferExecute((args) => editorFormatTool.execute(args)),
           }),
         }
       : {}),
@@ -309,21 +327,25 @@ export function buildTools(
         scope: z.string().optional().describe("Filter symbols by name pattern"),
         query: z.string().optional().describe("Search query for workspace_symbols/search_symbols"),
       }),
-      execute: (args) => navigateTool.execute(args),
+      execute: deferExecute((args) => {
+        const hit = tryInterceptNavigate(args, opts?.repoMap, effectiveCwd);
+        if (hit) return Promise.resolve(hit);
+        return navigateTool.execute(args, opts?.repoMap);
+      }),
     }),
 
     read_code: tool({
       description: readCodeTool.description,
       inputSchema: z.object({
         target: z
-          .enum(["function", "class", "type", "interface", "scope"])
+          .enum(["function", "class", "type", "interface", "variable", "enum", "scope"])
           .describe("What to read"),
         name: z.string().optional().describe("Symbol name (required unless target is scope)"),
         file: z.string().describe("File path"),
         startLine: z.number().optional().describe("Start line for scope target"),
         endLine: z.number().optional().describe("End line for scope target"),
       }),
-      execute: (args) => readCodeTool.execute(args),
+      execute: deferExecute((args) => readCodeTool.execute(args)),
     }),
 
     rename_symbol: tool({
@@ -338,7 +360,7 @@ export function buildTools(
             "File where the symbol is defined (optional — auto-detected via workspace search)",
           ),
       }),
-      execute: (args) => renameSymbolTool.execute(args),
+      execute: deferExecute((args) => renameSymbolTool.execute(args)),
     }),
 
     move_symbol: tool({
@@ -348,7 +370,7 @@ export function buildTools(
         from: z.string().describe("Source file path"),
         to: z.string().describe("Target file path (created if it doesn't exist)"),
       }),
-      execute: (args) => moveSymbolTool.execute(args),
+      execute: deferExecute((args) => moveSymbolTool.execute(args)),
     }),
 
     refactor: tool({
@@ -370,7 +392,7 @@ export function buildTools(
         endLine: z.number().optional().describe("End line for extraction or range formatting"),
         apply: z.boolean().optional().describe("Apply changes to disk (default true)"),
       }),
-      execute: (args) => refactorTool.execute(args),
+      execute: deferExecute((args) => refactorTool.execute(args)),
     }),
 
     analyze: tool({
@@ -390,7 +412,7 @@ export function buildTools(
           .optional()
           .describe("Old file content for symbol_diff (or uses git HEAD)"),
       }),
-      execute: (args) => analyzeTool.execute(args),
+      execute: deferExecute((args) => analyzeTool.execute(args)),
     }),
 
     discover_pattern: tool({
@@ -399,7 +421,7 @@ export function buildTools(
         query: z.string().describe("Concept to discover (e.g. 'provider', 'router', 'auth')"),
         file: z.string().optional().describe("File to scope the search to"),
       }),
-      execute: (args) => discoverPatternTool.execute(args),
+      execute: deferExecute((args) => discoverPatternTool.execute(args)),
     }),
 
     test_scaffold: tool({
@@ -412,7 +434,7 @@ export function buildTools(
           .describe("Test framework (auto-detected from project toolchain)"),
         output: z.string().optional().describe("Output path for test file"),
       }),
-      execute: (args) => testScaffoldTool.execute(args),
+      execute: deferExecute((args) => testScaffoldTool.execute(args)),
     }),
 
     project: tool({
@@ -438,13 +460,15 @@ export function buildTools(
           .describe("Working directory relative to project root (for monorepos)"),
         timeout: z.number().optional().describe("Timeout in ms (default 120000)"),
       }),
-      execute: (args) => projectTool.execute(args as Parameters<typeof projectTool.execute>[0]),
+      execute: deferExecute((args) =>
+        projectTool.execute(args as Parameters<typeof projectTool.execute>[0]),
+      ),
     }),
 
     git_status: tool({
       description: gitStatusTool.description,
       inputSchema: z.object({}),
-      execute: () => gitStatusTool.execute(),
+      execute: deferExecute(() => gitStatusTool.execute()),
     }),
 
     git_diff: tool({
@@ -452,7 +476,7 @@ export function buildTools(
       inputSchema: z.object({
         staged: z.boolean().optional().describe("Show staged changes instead of unstaged"),
       }),
-      execute: (args) => gitDiffTool.execute(args),
+      execute: deferExecute((args) => gitDiffTool.execute(args)),
     }),
 
     git_log: tool({
@@ -460,7 +484,7 @@ export function buildTools(
       inputSchema: z.object({
         count: z.number().optional().describe("Number of commits to show (default 10)"),
       }),
-      execute: (args) => gitLogTool.execute(args),
+      execute: deferExecute((args) => gitLogTool.execute(args)),
     }),
 
     git_commit: tool({
@@ -469,19 +493,19 @@ export function buildTools(
         message: z.string().describe("Commit message"),
         files: z.array(z.string()).optional().describe("Files to stage before committing"),
       }),
-      execute: (args) => gitCommitTool.execute(args),
+      execute: deferExecute((args) => gitCommitTool.execute(args)),
     }),
 
     git_push: tool({
       description: gitPushTool.description,
       inputSchema: z.object({}),
-      execute: () => gitPushTool.execute(),
+      execute: deferExecute(() => gitPushTool.execute()),
     }),
 
     git_pull: tool({
       description: gitPullTool.description,
       inputSchema: z.object({}),
-      execute: () => gitPullTool.execute(),
+      execute: deferExecute(() => gitPullTool.execute()),
     }),
 
     git_stash: tool({
@@ -490,7 +514,7 @@ export function buildTools(
         pop: z.boolean().optional().describe("Pop the latest stash instead of stashing"),
         message: z.string().optional().describe("Stash message"),
       }),
-      execute: (args) => gitStashTool.execute(args),
+      execute: deferExecute((args) => gitStashTool.execute(args)),
     }),
 
     ...(opts?.codeExecution
@@ -505,7 +529,11 @@ export function buildTools(
 export function buildRestrictedModeTools(
   editorSettings?: EditorIntegration,
   onApproveWebSearch?: (query: string) => Promise<boolean>,
-  opts?: { memoryManager?: MemoryManager; webSearchModel?: import("ai").LanguageModel },
+  opts?: {
+    memoryManager?: MemoryManager;
+    webSearchModel?: import("ai").LanguageModel;
+    repoMap?: RepoMap;
+  },
 ) {
   const all = buildTools(undefined, editorSettings, onApproveWebSearch, opts);
   return {
@@ -634,7 +662,9 @@ function truncateBytes(output: string): string {
 export function buildSubagentExploreTools(opts?: {
   webSearchModel?: import("ai").LanguageModel;
   onApproveWebSearch?: (query: string) => Promise<boolean>;
+  repoMap?: RepoMap;
 }) {
+  const subagentCwd = process.cwd();
   return {
     read_file: tool({
       description: `${readFileTool.description} Capped at 300 lines — use startLine/endLine for large files.`,
@@ -643,11 +673,11 @@ export function buildSubagentExploreTools(opts?: {
         startLine: z.number().optional().describe("Start line (1-indexed)"),
         endLine: z.number().optional().describe("End line (1-indexed)"),
       }),
-      execute: async (args) => {
+      execute: deferExecute(async (args) => {
         const result = await readFileTool.execute(args);
         if (!result.success) return result;
         return { ...result, output: truncateLines(result.output) };
-      },
+      }),
     }),
 
     grep: tool({
@@ -657,11 +687,13 @@ export function buildSubagentExploreTools(opts?: {
         path: z.string().optional().describe("Directory to search"),
         glob: z.string().optional().describe("File glob filter"),
       }),
-      execute: async (args) => {
+      execute: deferExecute(async (args) => {
+        const hit = tryInterceptGrep(args, opts?.repoMap, subagentCwd);
+        if (hit) return hit;
         const result = await grepTool.execute({ ...args, maxCount: 10 });
         if (!result.success) return result;
         return { ...result, output: truncateBytes(result.output) };
-      },
+      }),
     }),
 
     glob: tool({
@@ -670,21 +702,21 @@ export function buildSubagentExploreTools(opts?: {
         pattern: z.string().describe("Glob pattern"),
         path: z.string().optional().describe("Base directory"),
       }),
-      execute: (args) => globTool.execute(args),
+      execute: deferExecute((args) => globTool.execute(args)),
     }),
 
     read_code: tool({
       description: readCodeTool.description,
       inputSchema: z.object({
         target: z
-          .enum(["function", "class", "type", "interface", "scope"])
+          .enum(["function", "class", "type", "interface", "variable", "enum", "scope"])
           .describe("What to read"),
         name: z.string().optional().describe("Symbol name (required unless target is scope)"),
         file: z.string().describe("File path"),
         startLine: z.number().optional().describe("Start line for scope target"),
         endLine: z.number().optional().describe("End line for scope target"),
       }),
-      execute: (args) => readCodeTool.execute(args),
+      execute: deferExecute((args) => readCodeTool.execute(args)),
     }),
 
     navigate: tool({
@@ -709,7 +741,11 @@ export function buildSubagentExploreTools(opts?: {
         scope: z.string().optional().describe("Filter symbols by name pattern"),
         query: z.string().optional().describe("Search query for workspace_symbols/search_symbols"),
       }),
-      execute: (args) => navigateTool.execute(args),
+      execute: deferExecute((args) => {
+        const hit = tryInterceptNavigate(args, opts?.repoMap, subagentCwd);
+        if (hit) return Promise.resolve(hit);
+        return navigateTool.execute(args, opts?.repoMap);
+      }),
     }),
 
     analyze: tool({
@@ -729,7 +765,7 @@ export function buildSubagentExploreTools(opts?: {
           .optional()
           .describe("Old file content for symbol_diff (or uses git HEAD)"),
       }),
-      execute: (args) => analyzeTool.execute(args),
+      execute: deferExecute((args) => analyzeTool.execute(args)),
     }),
 
     discover_pattern: tool({
@@ -738,7 +774,7 @@ export function buildSubagentExploreTools(opts?: {
         query: z.string().describe("Concept to discover (e.g. 'provider', 'router', 'auth')"),
         file: z.string().optional().describe("File to scope the search to"),
       }),
-      execute: (args) => discoverPatternTool.execute(args),
+      execute: deferExecute((args) => discoverPatternTool.execute(args)),
     }),
 
     web_search: buildWebSearchTool({
@@ -752,6 +788,7 @@ export function buildSubagentExploreTools(opts?: {
 export function buildSubagentCodeTools(opts?: {
   webSearchModel?: import("ai").LanguageModel;
   onApproveWebSearch?: (query: string) => Promise<boolean>;
+  repoMap?: RepoMap;
 }) {
   return {
     ...buildSubagentExploreTools(opts),
@@ -763,7 +800,7 @@ export function buildSubagentCodeTools(opts?: {
         oldString: z.string().describe("Exact string to replace (empty = create new file)"),
         newString: z.string().describe("Replacement string"),
       }),
-      execute: (args) => editFileTool.execute(args),
+      execute: deferExecute((args) => editFileTool.execute(args)),
     }),
 
     rename_symbol: tool({
@@ -773,7 +810,7 @@ export function buildSubagentCodeTools(opts?: {
         newName: z.string().describe("New name for the symbol"),
         file: z.string().optional().describe("File where the symbol is defined (optional)"),
       }),
-      execute: (args) => renameSymbolTool.execute(args),
+      execute: deferExecute((args) => renameSymbolTool.execute(args)),
     }),
 
     move_symbol: tool({
@@ -783,7 +820,7 @@ export function buildSubagentCodeTools(opts?: {
         from: z.string().describe("Source file path"),
         to: z.string().describe("Target file path"),
       }),
-      execute: (args) => moveSymbolTool.execute(args),
+      execute: deferExecute((args) => moveSymbolTool.execute(args)),
     }),
 
     shell: tool({
@@ -793,11 +830,11 @@ export function buildSubagentCodeTools(opts?: {
         cwd: z.string().optional().describe("Working directory"),
         timeout: z.number().optional().describe("Timeout in ms"),
       }),
-      execute: async (args) => {
+      execute: deferExecute(async (args) => {
         const result = await shellTool.execute(args);
         if (!result.success) return result;
         return { ...result, output: truncateBytes(result.output) };
-      },
+      }),
     }),
   };
 }
@@ -861,6 +898,23 @@ export function wrapWithBusCache(
 
   const CACHE_HIT_LINES_THRESHOLD = 80;
 
+  const CONFIG_EXTENSIONS = new Set([
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".xml",
+    ".md",
+    ".css",
+    ".scss",
+    ".html",
+    ".env",
+    ".conf",
+    ".ini",
+    ".cfg",
+    ".lock",
+  ]);
+
   function tagCacheHit(result: unknown, path: string): unknown {
     const text =
       typeof result === "string"
@@ -868,7 +922,10 @@ export function wrapWithBusCache(
         : String((result as Record<string, unknown>)?.output ?? "");
     const lineCount = text.split("\n").length;
     if (lineCount < CACHE_HIT_LINES_THRESHOLD) return result;
-    const hint = `[Cached — use read_code(target, name, "${path}") for specific symbols instead of re-reading.]`;
+    const ext = path.slice(path.lastIndexOf(".")).toLowerCase();
+    const hint = CONFIG_EXTENSIONS.has(ext)
+      ? `[Cached]`
+      : `[Cached — use read_code(target, name, "${path}") for specific symbols instead of re-reading.]`;
     if (typeof result === "string") return `${hint}\n${result}`;
     if (result && typeof result === "object" && "output" in result) {
       const r = result as Record<string, unknown>;
@@ -880,18 +937,23 @@ export function wrapWithBusCache(
   function makeCachedExecute(
     origExecute: (args: Record<string, unknown>, opts?: unknown) => Promise<unknown>,
     keyFn: (args: Record<string, unknown>) => string | null,
+    onExecute?: (args: Record<string, unknown>, cached: boolean) => void,
   ): WrappableTool["execute"] {
     return (async (args: Record<string, unknown>, opts: unknown) => {
       const key = keyFn(args);
       if (key) {
         const cached = bus.acquireToolResult(agentId, key);
-        if (cached) return cached;
+        if (cached) {
+          onExecute?.(args, true);
+          return cached;
+        }
       }
       const result = await origExecute(args, opts);
       if (key) {
         const content = typeof result === "string" ? result : JSON.stringify(result);
-        bus.cacheToolResult(key, content);
+        bus.cacheToolResult(agentId, key, content);
       }
+      onExecute?.(args, false);
       return result;
     }) as WrappableTool["execute"];
   }
@@ -913,7 +975,12 @@ export function wrapWithBusCache(
 
         if (args.startLine != null || args.endLine != null) {
           const result = await origExecute(args, opts);
-          bus.recordFileRead(agentId, normalized);
+          bus.recordFileRead(agentId, normalized, {
+            tool: "read_file",
+            startLine: args.startLine,
+            endLine: args.endLine,
+            cached: false,
+          });
           return result;
         }
 
@@ -921,15 +988,19 @@ export function wrapWithBusCache(
 
         if (acquired.cached === true) {
           const cached = acquired.content ?? (await origExecute(args, opts));
-          bus.recordFileRead(agentId, normalized);
+          bus.recordFileRead(agentId, normalized, { tool: "read_file", cached: true });
           return tagCacheHit(cached, normalized);
         }
 
         if (acquired.cached === "waiting") {
           const content = await acquired.content;
-          bus.recordFileRead(agentId, normalized);
-          if (content != null) return tagCacheHit(content, normalized);
-          return origExecute(args, opts);
+          if (content != null) {
+            bus.recordFileRead(agentId, normalized, { tool: "read_file", cached: true });
+            return tagCacheHit(content, normalized);
+          }
+          const result = await origExecute(args, opts);
+          bus.recordFileRead(agentId, normalized, { tool: "read_file", cached: false });
+          return result;
         }
 
         const { gen } = acquired;
@@ -937,7 +1008,7 @@ export function wrapWithBusCache(
           const result = await origExecute(args, opts);
           const content = typeof result === "string" ? result : JSON.stringify(result);
           bus.releaseFileRead(normalized, content, gen);
-          bus.recordFileRead(agentId, normalized);
+          bus.recordFileRead(agentId, normalized, { tool: "read_file", cached: false });
           return result;
         } catch (error) {
           bus.failFileRead(normalized, gen);
@@ -1013,6 +1084,7 @@ export function wrapWithBusCache(
   const cacheSpecs: Array<{
     name: string;
     keyFn: (args: Record<string, unknown>) => string | null;
+    onExecute?: (args: Record<string, unknown>, cached: boolean) => void;
   }> = [
     {
       name: "read_code",
@@ -1020,25 +1092,46 @@ export function wrapWithBusCache(
         const file = normalizePath(String(a.file ?? ""));
         const target = String(a.target ?? "");
         if (target === "scope") {
-          return `read_code:${file}:scope:${String(a.startLine ?? "")}:${String(a.endLine ?? "")}`;
+          return JSON.stringify(["read_code", file, "scope", a.startLine ?? "", a.endLine ?? ""]);
         }
-        return `read_code:${file}:${target}:${String(a.name ?? "")}`;
+        return JSON.stringify(["read_code", file, target, a.name ?? ""]);
+      },
+      onExecute: (a, cached) => {
+        bus.recordFileRead(agentId, normalizePath(String(a.file ?? "")), {
+          tool: "read_code",
+          target: String(a.target ?? ""),
+          name: a.name ? String(a.name) : undefined,
+          startLine: typeof a.startLine === "number" ? a.startLine : undefined,
+          endLine: typeof a.endLine === "number" ? a.endLine : undefined,
+          cached,
+        });
       },
     },
     {
       name: "grep",
       keyFn: (a) =>
-        `grep:${String(a.pattern ?? "")}:${normalizePath(String(a.path ?? "."))}:${String(a.glob ?? "")}`,
+        JSON.stringify([
+          "grep",
+          String(a.pattern ?? ""),
+          normalizePath(String(a.path ?? ".")),
+          String(a.glob ?? ""),
+        ]),
     },
     {
       name: "glob",
-      keyFn: (a) => `glob:${String(a.pattern ?? "")}:${normalizePath(String(a.path ?? "."))}`,
+      keyFn: (a) =>
+        JSON.stringify(["glob", String(a.pattern ?? ""), normalizePath(String(a.path ?? "."))]),
     },
     {
       name: "navigate",
       keyFn: (a) => {
         if (!NAVIGATE_CACHEABLE.has(String(a.action ?? ""))) return null;
-        return `navigate:${String(a.action)}:${normalizePath(String(a.file ?? ""))}:${String(a.symbol ?? "")}`;
+        return JSON.stringify([
+          "navigate",
+          String(a.action),
+          normalizePath(String(a.file ?? "")),
+          String(a.symbol ?? ""),
+        ]);
       },
     },
     {
@@ -1046,12 +1139,12 @@ export function wrapWithBusCache(
       keyFn: (a) => {
         const action = String(a.action ?? "");
         if (!ANALYZE_CACHEABLE.has(action) || !a.file) return null;
-        return `analyze:${action}:${normalizePath(String(a.file))}`;
+        return JSON.stringify(["analyze", action, normalizePath(String(a.file))]);
       },
     },
     {
       name: "web_search",
-      keyFn: (a) => `web_search:${String(a.query ?? "")}`,
+      keyFn: (a) => JSON.stringify(["web_search", String(a.query ?? "")]),
     },
   ];
 
@@ -1063,6 +1156,7 @@ export function wrapWithBusCache(
         execute: makeCachedExecute(
           t.execute as (args: Record<string, unknown>, opts?: unknown) => Promise<unknown>,
           spec.keyFn,
+          spec.onExecute,
         ),
       };
     }

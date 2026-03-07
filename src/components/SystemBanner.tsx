@@ -64,7 +64,7 @@ export function SystemBanner({ messages, expanded = false }: Props) {
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    const systemMsgs = messages.filter((m) => m.role === "system");
+    const systemMsgs = messages.filter((m) => m.role === "system" && !m.showInChat);
     if (systemMsgs.length === 0) return;
     const latest = systemMsgs[systemMsgs.length - 1] as ChatMessage | undefined;
     if (!latest || latest.timestamp <= lastSeenTs.current) return;
