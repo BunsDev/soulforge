@@ -1,5 +1,4 @@
 import { getProvider } from "./llm/providers/index.js";
-import { hasAnyNerdFont } from "./setup/install.js";
 
 const NERD: Record<string, string> = {
   ghost: "󰊠",
@@ -60,12 +59,22 @@ const NERD: Record<string, string> = {
   memory_alt: "\uDB80\uDDA3",
   dispatch: "󰚩",
   router: "󰓹",
-  tabs: "\uF0CB",
+  tabs: "󰓩",
   info: "󰋖",
   powerline_left: "\uE0B6",
   powerline_right: "\uE0B4",
   help: "\uF059",
   repomap: "󰙅",
+  storage: "󰋊",
+  delete_all: "󰩺",
+  chat_style: "󰍪",
+  budget: "󰊕",
+  verbose: "󰍡",
+  compact: "󰁜",
+  ban: "󰒃",
+  web_search: "󰖟",
+  check_link: "󰄬",
+  nvim: "\uDB80\uDFA9",
 };
 
 const ASCII: Record<string, string> = {
@@ -133,6 +142,16 @@ const ASCII: Record<string, string> = {
   powerline_right: "│",
   help: "?",
   repomap: "◈",
+  storage: "▪",
+  delete_all: "✕",
+  chat_style: "◇",
+  budget: "◎",
+  verbose: "◉",
+  compact: "↕",
+  ban: "⊘",
+  web_search: "⊕",
+  check_link: "✓",
+  nvim: "✎",
 };
 
 let _nerdFont: boolean | null = null;
@@ -141,13 +160,13 @@ export function initNerdFont(configValue?: boolean | null): void {
   if (configValue === true || configValue === false) {
     _nerdFont = configValue;
   } else {
-    _nerdFont = hasAnyNerdFont();
+    _nerdFont = false;
   }
 }
 
 export function hasNerdFont(): boolean {
   if (_nerdFont === null) {
-    _nerdFont = hasAnyNerdFont();
+    _nerdFont = false;
   }
   return _nerdFont;
 }

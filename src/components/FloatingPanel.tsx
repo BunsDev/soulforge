@@ -17,8 +17,8 @@ const STATUS_ICONS: Record<PlanStepStatus, string> = {
 };
 
 const STATUS_COLORS: Record<PlanStepStatus, string> = {
-  done: "#2d5",
-  active: "#FF0040",
+  done: "#4a7",
+  active: "#9B30FF",
   pending: "#555",
   skipped: "#444",
 };
@@ -153,7 +153,7 @@ export function FloatingPanel({ showPlan, plan, showChanges, messages, cwd }: Pr
             const display = name.length > INNER - 4 ? `…${name.slice(-(INNER - 5))}` : name;
             return (
               <R key={f.path}>
-                <text fg={f.created ? "#2d5" : "#FF8C00"} bg={BG}>
+                <text fg={f.created ? "#5a8" : "#999"} bg={BG}>
                   {display}
                 </text>
                 {f.editCount > 1 && (

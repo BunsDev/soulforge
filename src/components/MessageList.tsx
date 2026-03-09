@@ -1,5 +1,6 @@
 import { TextAttributes } from "@opentui/core";
 import { memo, useEffect, useMemo, useState } from "react";
+import { icon } from "../core/icons.js";
 import {
   CATEGORY_COLORS,
   TOOL_CATEGORIES,
@@ -231,7 +232,7 @@ function ToolCallRow({ tc }: { tc: ToolCall }) {
   const categoryColor = category ? (CATEGORY_COLORS[category as ToolCategory] ?? "#444") : "#444";
   const argStr = formatToolSummary(tc);
   const statusIcon = tc.result ? (tc.result.success ? "✓" : "✗") : "●";
-  const statusColor = tc.result ? (tc.result.success ? "#2d5" : "#f44") : "#666";
+  const statusColor = tc.result ? (tc.result.success ? "#4a7" : "#f44") : "#666";
   const resultText = tc.result
     ? tc.result.success
       ? "ok"
@@ -261,7 +262,7 @@ function CollapsedToolGroup({ calls }: { calls: ToolCall[] }) {
   return (
     <box height={1} flexShrink={0}>
       <text truncate>
-        <span fg={allOk ? "#2d5" : "#f44"}>{allOk ? "✓" : "✗"} </span>
+        <span fg={allOk ? "#4a7" : "#f44"}>{allOk ? "✓" : "✗"} </span>
         <span fg="#777">
           {String(count)} tool call{count > 1 ? "s" : ""} (
           {calls.map((tc) => TOOL_LABELS[tc.name] ?? tc.name).join(", ")})
@@ -408,11 +409,11 @@ function renderSegments(
           marginTop={needsGap ? 1 : 0}
           border={["left"]}
           borderStyle="heavy"
-          borderColor={allDone ? "#2d5" : "#00BFFF"}
+          borderColor={allDone ? "#4a7" : "#00BFFF"}
           paddingLeft={1}
         >
           <text truncate>
-            <span fg={allDone ? "#2d5" : "#00BFFF"}>{TOOL_ICONS.plan} </span>
+            <span fg={allDone ? "#4a7" : "#00BFFF"}>{TOOL_ICONS.plan} </span>
             <span fg="#ccc" attributes={TextAttributes.BOLD}>
               {seg.plan.title}{" "}
             </span>
@@ -424,7 +425,7 @@ function renderSegments(
             const isDone = step.status === "done";
             const isSkipped = step.status === "skipped";
             const stepIcon = isDone ? "✓" : isSkipped ? "⊘" : "○";
-            const stepColor = isDone ? "#2d5" : isSkipped ? "#444" : "#555";
+            const stepColor = isDone ? "#4a7" : isSkipped ? "#444" : "#555";
             return (
               <box key={step.id} height={1} flexShrink={0}>
                 <text truncate>
@@ -524,7 +525,7 @@ const AssistantMessage = memo(function AssistantMessage({
       paddingLeft={2}
     >
       <box flexDirection="row">
-        <text fg={ASSISTANT_COLOR}>󰚩 Forge</text>
+        <text fg={ASSISTANT_COLOR}>{icon("ai")} Forge</text>
         <text fg="#333"> · {time}</text>
       </box>
 

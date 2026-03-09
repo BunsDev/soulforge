@@ -1,6 +1,7 @@
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useEffect, useState } from "react";
+import { icon } from "../core/icons.js";
 import type {
   AppConfig,
   ContextManagementConfig,
@@ -307,7 +308,7 @@ export function ProviderSettings({
       >
         <PopupRow w={innerW}>
           <text bg={POPUP_BG} fg="#9B30FF" attributes={TextAttributes.BOLD}>
-            󰒓
+            {icon("system")}
           </text>
           <text bg={POPUP_BG} fg="white" attributes={TextAttributes.BOLD}>
             {" "}

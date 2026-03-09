@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { type ScrollBoxRenderable, type Selection, TextAttributes } from "@opentui/core";
+import { type Selection, TextAttributes } from "@opentui/core";
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -22,7 +22,7 @@ import { initForbidden } from "../core/security/forbidden.js";
 import { SessionManager } from "../core/sessions/manager.js";
 import { getMissingRequired } from "../core/setup/prerequisites.js";
 import { suspendAndRun } from "../core/terminal/suspend.js";
-import { useChat, type WorkspaceSnapshot } from "../hooks/useChat.js";
+import type { ChatInstance, WorkspaceSnapshot } from "../hooks/useChat.js";
 import { useEditorFocus } from "../hooks/useEditorFocus.js";
 import { useEditorInput } from "../hooks/useEditorInput.js";
 import { useForgeMode } from "../hooks/useForgeMode.js";
@@ -37,7 +37,6 @@ import { startMemoryPoll } from "../stores/statusbar.js";
 import { type ModalName, selectIsAnyModalOpen, useUIStore } from "../stores/ui.js";
 import type { AppConfig, ChatMessage, EditorIntegration } from "../types/index.js";
 import { BrandTag } from "./BrandTag.js";
-import { ChangedFiles } from "./ChangedFiles.js";
 import { CommandPicker } from "./CommandPicker.js";
 import { ContextBar } from "./ContextBar.js";
 import { handleCommand } from "./commands.js";
@@ -49,28 +48,20 @@ import { GitCommitModal } from "./GitCommitModal.js";
 import { GitMenu } from "./GitMenu.js";
 import { HelpPopup } from "./HelpPopup.js";
 import { InfoPopup } from "./InfoPopup.js";
-import { InputBox } from "./InputBox.js";
-import { LandingPage } from "./LandingPage.js";
 import { LlmSelector } from "./LlmSelector.js";
 import { LspStatusPopup } from "./LspStatusPopup.js";
-import { CodeExpandedProvider } from "./Markdown.js";
 import { MemoryIndicator } from "./MemoryIndicator.js";
-import { RAIL_BORDER, StaticMessage } from "./MessageList.js";
-import { PlanProgress } from "./PlanProgress.js";
-import { PlanReviewPrompt } from "./PlanReviewPrompt.js";
 import { ProviderSettings } from "./ProviderSettings.js";
-import { QuestionPrompt } from "./QuestionPrompt.js";
 import { RepoMapIndicator } from "./RepoMapIndicator.js";
 import { RepoMapStatusPopup } from "./RepoMapStatusPopup.js";
 import { RouterSettings } from "./RouterSettings.js";
 import { SessionPicker } from "./SessionPicker.js";
 import { SetupGuide } from "./SetupGuide.js";
 import { SkillSearch } from "./SkillSearch.js";
-import { StreamSegmentList } from "./StreamSegmentList.js";
-import { SystemBanner } from "./SystemBanner.js";
 import type { ConfigScope } from "./shared.js";
 import { BRAND_SEGMENTS, BRAND_TEXT, garble, WORDMARK as SHUTDOWN_WORDMARK } from "./splash.js";
 import { TabBar } from "./TabBar.js";
+import { TabInstance } from "./TabInstance.js";
 import { TokenDisplay } from "./TokenDisplay.js";
 import { WebSearchSettings } from "./WebSearchSettings.js";
 
@@ -175,7 +166,7 @@ function ShutdownSplash({
           const done = i < phase;
           return (
             <box key={label} gap={1} flexDirection="row">
-              <text fg={done ? "#2d5" : "#8B5CF6"}>{done ? "✓" : "◌"}</text>
+              <text fg={done ? "#4a7" : "#8B5CF6"}>{done ? "✓" : "◌"}</text>
               <text fg={done ? "#555" : "#aaa"}>{label}</text>
             </box>
           );
@@ -355,30 +346,16 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
     onFocusEditor: focusEditor,
   });
 
-  const {
-    modals,
-    routerSlotPicking,
-    commandPickerConfig,
-    infoPopupConfig,
-    codeExpanded,
-    changesExpanded,
-    suspended,
-  } = useUIStore(
+  const { modals, routerSlotPicking, commandPickerConfig, infoPopupConfig, suspended } = useUIStore(
     useShallow((s) => ({
       modals: s.modals,
       routerSlotPicking: s.routerSlotPicking,
       commandPickerConfig: s.commandPickerConfig,
       infoPopupConfig: s.infoPopupConfig,
-      codeExpanded: s.codeExpanded,
-      changesExpanded: s.changesExpanded,
       suspended: s.suspended,
     })),
   );
-  const chatStyle = useUIStore((s) => s.chatStyle);
-  const showReasoning = useUIStore((s) => s.showReasoning);
-  const reasoningExpanded = useUIStore((s) => s.reasoningExpanded);
   const isModalOpen = useUIStore(selectIsAnyModalOpen);
-  const scrollRef = useRef<ScrollBoxRenderable>(null);
 
   // Stable close handlers — cached in ref so memo'd children see stable refs
   const closerCache = useRef<Partial<Record<ModalName, () => void>>>({});
@@ -502,7 +479,6 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
     contextManager.refreshGitContext();
   }, []);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: chat.setMessages is a stable useState setter
   const handleSuspend = useCallback(
     async (opts: { command: string; args?: string[]; noAltScreen?: boolean }) => {
       useUIStore.getState().setSuspended(true);
@@ -510,11 +486,12 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
       const result = await suspendAndRun({ ...opts, cwd });
       useUIStore.getState().setSuspended(false);
       if (result.exitCode === null) {
-        chat.setMessages((prev) => [
+        const activeChat = tabMgrRef.current?.getActiveChat();
+        activeChat?.setMessages((prev: ChatMessage[]) => [
           ...prev,
           {
             id: crypto.randomUUID(),
-            role: "system",
+            role: "system" as const,
             content: `Failed to launch ${opts.command}. Is it installed?`,
             timestamp: Date.now(),
           },
@@ -526,46 +503,31 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
     [cwd, git, contextManager],
   );
 
-  const workspaceSnapshotRef = useRef<(() => WorkspaceSnapshot) | null>(null);
+  // ─── Tab management (no freeze/restore — each tab owns its own useChat) ───
+  const tabMgr = useTabs();
+  const tabMgrRef = useRef(tabMgr);
+  tabMgrRef.current = tabMgr;
 
-  const chat = useChat({
-    effectiveConfig,
-    contextManager,
-    sessionManager,
-    cwd,
-    openEditorWithFile,
-    openEditor,
-    onSuspend: handleSuspend,
-    getWorkspaceSnapshot: () =>
-      workspaceSnapshotRef.current?.() ?? {
-        forgeMode,
-        tabStates: [],
-        activeTabId: "",
-      },
+  const sharedResources = useMemo(() => contextManager.getSharedResources(), [contextManager]);
+
+  const workspaceSnapshotRef = useRef<(() => WorkspaceSnapshot) | null>(null);
+  workspaceSnapshotRef.current = () => ({
+    forgeMode,
+    tabStates: tabMgr.getAllTabStates(),
+    activeTabId: tabMgr.activeTabId,
   });
 
-  useEffect(() => {
-    if (effectiveConfig.coAuthorCommits !== undefined)
-      chat.setCoAuthorCommits(effectiveConfig.coAuthorCommits);
-  }, [effectiveConfig.coAuthorCommits, chat.setCoAuthorCommits]);
+  const getWorkspaceSnapshot = useCallback(
+    (): WorkspaceSnapshot =>
+      workspaceSnapshotRef.current?.() ?? { forgeMode, tabStates: [], activeTabId: "" },
+    [forgeMode],
+  );
 
-  const isStreaming = chat.streamSegments.length > 0 || chat.liveToolCalls.length > 0;
-
-  const nonSystemCount = useMemo(() => {
-    let count = 0;
-    for (const m of chat.messages) {
-      if (m.role !== "system" || m.showInChat) count++;
-    }
-    return count;
-  }, [chat.messages]);
-
-  // Stable shared callbacks — used by multiple modals
-  const setMessagesRef = useRef(chat.setMessages);
-  setMessagesRef.current = chat.setMessages;
   const addSystemMessage = useCallback((msg: string) => {
-    setMessagesRef.current((prev) => [
+    const activeChat = tabMgrRef.current?.getActiveChat();
+    activeChat?.setMessages((prev: ChatMessage[]) => [
       ...prev,
-      { id: crypto.randomUUID(), role: "system", content: msg, timestamp: Date.now() },
+      { id: crypto.randomUUID(), role: "system" as const, content: msg, timestamp: Date.now() },
     ]);
   }, []);
 
@@ -579,22 +541,28 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
     setShutdownPhase(0);
 
     setTimeout(() => {
-      chat.abort();
+      // Abort all active tabs
+      for (const tab of tabMgrRef.current.tabs) {
+        tabMgrRef.current.getChat(tab.id)?.abort();
+      }
       setShutdownPhase(1);
 
       setTimeout(() => {
         try {
-          const hasUserMessages = chat.messages.some(
-            (m) => m.role === "user" || m.role === "assistant",
+          const activeChat = tabMgrRef.current.getActiveChat();
+          const hasUserMessages = activeChat?.messages.some(
+            (m: ChatMessage) => m.role === "user" || m.role === "assistant",
           );
           const snapshot = workspaceSnapshotRef.current?.();
-          if (snapshot && hasUserMessages) {
+          if (snapshot && hasUserMessages && activeChat) {
             const { meta, tabMessages } = buildSessionMeta({
-              sessionId: chat.sessionId,
-              title: SessionManager.deriveTitle(chat.messages),
+              sessionId: activeChat.sessionId,
+              title: SessionManager.deriveTitle(activeChat.messages),
               cwd,
               snapshot,
-              currentTabMessages: chat.messages.filter((m) => m.role !== "system" || m.showInChat),
+              currentTabMessages: activeChat.messages.filter(
+                (m: ChatMessage) => m.role !== "system" || m.showInChat,
+              ),
             });
             sessionManager.saveSession(meta, tabMessages);
             setExitSessionId(meta.id);
@@ -625,16 +593,7 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
         }, 350);
       }, 300);
     }, 250);
-  }, [shutdownPhase, chat, cwd, sessionManager, contextManager, renderer]);
-
-  // ─── Tab management ───
-  const tabMgr = useTabs({ chat, defaultModel: effectiveConfig.defaultModel });
-
-  workspaceSnapshotRef.current = () => ({
-    forgeMode,
-    tabStates: tabMgr.getAllTabStates(),
-    activeTabId: tabMgr.activeTabId,
-  });
+  }, [shutdownPhase, cwd, sessionManager, contextManager, renderer]);
 
   // ─── Session restore on mount ───
   const hasRestoredRef = useRef(false);
@@ -645,15 +604,7 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
 
     const fullId = sessionManager.findByPrefix(resumeSessionId);
     if (!fullId) {
-      chat.setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "system",
-          content: `Session not found: ${resumeSessionId}`,
-          timestamp: Date.now(),
-        },
-      ]);
+      addSystemMessage(`Session not found: ${resumeSessionId}`);
       return;
     }
 
@@ -666,27 +617,21 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
     }
   }, []);
 
+  // Track exit session from active tab
+  const [activeModelForHeader, setActiveModelForHeader] = useState(effectiveConfig.defaultModel);
+  const activeChatRef = useRef<ChatInstance | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally runs every render to keep activeChatRef in sync
   useEffect(() => {
-    const hasContent = chat.messages.some((m) => m.role === "user" || m.role === "assistant");
-    setExitSessionId(hasContent ? chat.sessionId : null);
-  }, [chat.sessionId, chat.messages]);
-
-  const cleanupPlanFile = useCallback(() => {
-    try {
-      const p = join(cwd, ".soulforge", "plans", chat.planFile);
-      if (existsSync(p)) unlinkSync(p);
-    } catch {
-      /* ignore */
+    const chat = tabMgr.getActiveChat();
+    activeChatRef.current = chat;
+    if (chat) {
+      setActiveModelForHeader(chat.activeModel);
+      const hasContent = chat.messages.some(
+        (m: ChatMessage) => m.role === "user" || m.role === "assistant",
+      );
+      setExitSessionId(hasContent ? chat.sessionId : null);
     }
-  }, [cwd, chat.planFile]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: narrow trigger — only re-run when message count changes
-  useEffect(() => {
-    const firstUser = chat.messages.find((m) => m.role === "user");
-    if (firstUser) {
-      tabMgr.autoLabel(tabMgr.activeTabId, firstUser.content);
-    }
-  }, [chat.messages.length]);
+  });
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: narrow trigger — only re-run on tab count/active changes
   useEffect(() => {
@@ -694,23 +639,23 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
     try {
       const dir = join(cwd, ".soulforge");
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      const activeChat = tabMgr.getActiveChat();
       const layout = tabMgr.tabs.map((t) => ({
         id: t.id,
         label: t.label,
-        activeModel: t.id === tabMgr.activeTabId ? chat.activeModel : undefined,
+        activeModel: t.id === tabMgr.activeTabId ? activeChat?.activeModel : undefined,
       }));
       writeFileSync(join(dir, "tabs.json"), JSON.stringify(layout, null, 2));
-    } catch {
-      // Ignore write failures
-    }
+    } catch {}
   }, [tabMgr.tabCount, tabMgr.activeTabId]);
 
   const { displayProvider, displayModel, isGateway, isProxy } = useMemo(() => {
-    const isGw = chat.activeModel.startsWith("gateway/");
-    const isPrx = chat.activeModel.startsWith("proxy/");
+    const model = activeModelForHeader;
+    const isGw = model.startsWith("gateway/");
+    const isPrx = model.startsWith("proxy/");
     if (isGw || isPrx) {
       const prefix = isGw ? "gateway/" : "proxy/";
-      const rest = chat.activeModel.slice(prefix.length);
+      const rest = model.slice(prefix.length);
       const idx = rest.indexOf("/");
       return {
         displayProvider: idx >= 0 ? rest.slice(0, idx) : rest,
@@ -719,167 +664,118 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
         isProxy: isPrx,
       };
     }
-    const idx = chat.activeModel.indexOf("/");
+    const idx = model.indexOf("/");
     return {
-      displayProvider: idx >= 0 ? chat.activeModel.slice(0, idx) : "unknown",
-      displayModel: idx >= 0 ? chat.activeModel.slice(idx + 1) : chat.activeModel,
+      displayProvider: idx >= 0 ? model.slice(0, idx) : "unknown",
+      displayModel: idx >= 0 ? model.slice(idx + 1) : model,
       isGateway: false,
       isProxy: false,
     };
-  }, [chat.activeModel]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: narrow trigger — only re-run when message count changes
-  useEffect(() => {
-    const TRIM_THRESHOLD = 50;
-    const KEEP_RECENT = 30;
-    if (chat.messages.length < TRIM_THRESHOLD) return;
-    const trimCount = chat.messages.length - KEEP_RECENT;
-    let changed = false;
-    const updated = chat.messages.map((msg, i) => {
-      if (i >= trimCount || !msg.toolCalls) return msg;
-      let tcChanged = false;
-      const newToolCalls = msg.toolCalls.map((tc) => {
-        if (tc.result && tc.result.output.length > 200) {
-          tcChanged = true;
-          return {
-            ...tc,
-            result: { ...tc.result, output: `${tc.result.output.slice(0, 100)}…[trimmed]` },
-          };
-        }
-        return tc;
-      });
-      if (!tcChanged) return msg;
-      changed = true;
-      return { ...msg, toolCalls: newToolCalls };
-    });
-    if (changed) chat.setMessages(updated);
-  }, [chat.messages.length]);
+  }, [activeModelForHeader]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: narrow trigger — only re-run when nvimError changes
   useEffect(() => {
-    if (nvimError) {
-      chat.setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "system",
-          content: `Neovim error: ${nvimError}`,
-          timestamp: Date.now(),
-        },
-      ]);
-    }
+    if (nvimError) addSystemMessage(`Neovim error: ${nvimError}`);
   }, [nvimError]);
 
-  const handleInputSubmit = useCallback(
-    async (input: string) => {
-      // Snap to bottom & re-enable sticky scroll when user sends anything
-      scrollRef.current?.scrollTo(Infinity);
-      if (!input.startsWith("/")) {
-        useUIStore.getState().setChangesExpanded(false);
+  const handleTabCommand = useCallback(
+    (input: string, chat: ChatInstance) => {
+      const cmd = input.trim().toLowerCase().split(/\s+/)[0] ?? "";
+      if (chat.isLoading && ABORT_ON_LOADING.has(cmd)) {
+        chat.abort();
+        chat.setMessageQueue([]);
       }
-      if (input.startsWith("/")) {
-        const cmd = input.trim().toLowerCase().split(/\s+/)[0] ?? "";
-        if (chat.isLoading && ABORT_ON_LOADING.has(cmd)) {
-          chat.abort();
-          chat.setMessageQueue([]);
-        }
 
-        if (cmd === "/continue") {
-          handleInputSubmit("Continue from where you left off. Complete any remaining work.");
-          return;
-        }
-        if (cmd === "/plan" || input.trim().toLowerCase().startsWith("/plan ")) {
-          const desc = input.trim().slice(5).trim();
-          if (chat.planMode) {
-            chat.setPlanMode(false);
-            chat.setPlanRequest(null);
-            setForgeMode("default");
-            chat.setPendingPlanReview(null);
-            chat.setMessages((prev) => [
-              ...prev,
-              {
-                id: crypto.randomUUID(),
-                role: "system",
-                content: "Plan mode OFF",
-                timestamp: Date.now(),
-              },
-            ]);
-          } else {
-            chat.setPlanMode(true);
-            chat.setPlanRequest(desc || null);
-            setForgeMode("plan");
-            contextManager.setForgeMode("plan");
-            chat.setMessages((prev) => [
-              ...prev,
-              {
-                id: crypto.randomUUID(),
-                role: "system",
-                content: "Plan mode ON — Forge will research and plan without making changes.",
-                timestamp: Date.now(),
-              },
-            ]);
-            if (desc) {
-              setTimeout(() => chat.handleSubmit(desc), 0);
-            }
-          }
-          return;
-        }
-        const uiState = useUIStore.getState();
-        handleCommand(input, {
-          chat,
-          tabMgr,
-          toggleFocus: toggleEditor,
-          nvimOpen,
-          exit: handleExit,
-          openSkills: () => uiState.openModal("skillSearch"),
-          openGitCommit: () => uiState.openModal("gitCommit"),
-          openSessions: () => uiState.openModal("sessionPicker"),
-          openHelp: () => uiState.openModal("helpPopup"),
-          openErrorLog: () => uiState.openModal("errorLog"),
-          cwd,
-          refreshGit: () => {
-            git.refresh();
-            contextManager.refreshGitContext();
-          },
-          setForgeMode,
-          currentMode: forgeMode,
-          currentModeLabel: modeLabel,
-          contextManager,
-          chatStyle: uiState.chatStyle,
-          setChatStyle: uiState.setChatStyle,
-          handleSuspend,
-          openGitMenu: () => uiState.openModal("gitMenu"),
-          openEditorWithFile,
-          effectiveNvimConfig: effectiveConfig.nvimConfig,
-          vimHints: effectiveConfig.vimHints !== false,
-          verbose: effectiveConfig.verbose === true,
-          diffStyle: effectiveConfig.diffStyle ?? "default",
-          compactionStrategy: effectiveConfig.compaction?.strategy ?? "v1",
-          showReasoning: uiState.showReasoning,
-          setShowReasoning: uiState.setShowReasoning,
-          openSetup: () => uiState.openModal("setup"),
-          openEditorSettings: () => uiState.openModal("editorSettings"),
-          openRouterSettings: () => {
-            setRouterScope(detectScope("taskRouter"));
-            uiState.openModal("routerSettings");
-          },
-          openProviderSettings: () => uiState.openModal("providerSettings"),
-          openWebSearchSettings: () => uiState.openModal("webSearchSettings"),
-          openLspStatus: () => uiState.openModal("lspStatus"),
-          openCommandPicker: (pickerConfig) => uiState.openCommandPicker(pickerConfig),
-          openInfoPopup: (popupConfig) => uiState.openInfoPopup(popupConfig),
-          toggleChanges: () => uiState.toggleChangesExpanded(),
-          saveToScope,
-          detectScope,
-          agentFeatures: effectiveConfig.agentFeatures,
-        });
+      if (cmd === "/continue") {
+        chat.handleSubmit("Continue from where you left off. Complete any remaining work.");
         return;
       }
-
-      chat.handleSubmit(input);
+      if (cmd === "/plan" || input.trim().toLowerCase().startsWith("/plan ")) {
+        const desc = input.trim().slice(5).trim();
+        if (chat.planMode) {
+          chat.setPlanMode(false);
+          chat.setPlanRequest(null);
+          setForgeMode("default");
+          chat.setPendingPlanReview(null);
+          chat.setMessages((prev: ChatMessage[]) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: "system" as const,
+              content: "Plan mode OFF",
+              timestamp: Date.now(),
+            },
+          ]);
+        } else {
+          chat.setPlanMode(true);
+          chat.setPlanRequest(desc || null);
+          setForgeMode("plan");
+          chat.setMessages((prev: ChatMessage[]) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: "system" as const,
+              content: "Plan mode ON — Forge will research and plan without making changes.",
+              timestamp: Date.now(),
+            },
+          ]);
+          if (desc) {
+            setTimeout(() => chat.handleSubmit(desc), 0);
+          }
+        }
+        return;
+      }
+      const uiState = useUIStore.getState();
+      handleCommand(input, {
+        chat,
+        tabMgr,
+        toggleFocus: toggleEditor,
+        nvimOpen,
+        exit: handleExit,
+        openSkills: () => uiState.openModal("skillSearch"),
+        openGitCommit: () => uiState.openModal("gitCommit"),
+        openSessions: () => uiState.openModal("sessionPicker"),
+        openHelp: () => uiState.openModal("helpPopup"),
+        openErrorLog: () => uiState.openModal("errorLog"),
+        cwd,
+        refreshGit: () => {
+          git.refresh();
+          contextManager.refreshGitContext();
+        },
+        setForgeMode,
+        currentMode: forgeMode,
+        currentModeLabel: modeLabel,
+        contextManager,
+        chatStyle: uiState.chatStyle,
+        setChatStyle: uiState.setChatStyle,
+        handleSuspend,
+        openGitMenu: () => uiState.openModal("gitMenu"),
+        openEditorWithFile,
+        effectiveNvimConfig: effectiveConfig.nvimConfig,
+        vimHints: effectiveConfig.vimHints !== false,
+        verbose: effectiveConfig.verbose === true,
+        diffStyle: effectiveConfig.diffStyle ?? "default",
+        compactionStrategy: effectiveConfig.compaction?.strategy ?? "v1",
+        showReasoning: uiState.showReasoning,
+        setShowReasoning: uiState.setShowReasoning,
+        openSetup: () => uiState.openModal("setup"),
+        openEditorSettings: () => uiState.openModal("editorSettings"),
+        openRouterSettings: () => {
+          setRouterScope(detectScope("taskRouter"));
+          uiState.openModal("routerSettings");
+        },
+        openProviderSettings: () => uiState.openModal("providerSettings"),
+        openWebSearchSettings: () => uiState.openModal("webSearchSettings"),
+        openLspStatus: () => uiState.openModal("lspStatus"),
+        openCommandPicker: (pickerConfig) => uiState.openCommandPicker(pickerConfig),
+        openInfoPopup: (popupConfig) => uiState.openInfoPopup(popupConfig),
+        toggleChanges: () => uiState.toggleChangesExpanded(),
+        saveToScope,
+        detectScope,
+        agentFeatures: effectiveConfig.agentFeatures,
+      });
     },
     [
-      chat,
       tabMgr,
       toggleEditor,
       nvimOpen,
@@ -902,8 +798,6 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
       effectiveConfig.agentFeatures,
     ],
   );
-
-  const anyModalOpen = shutdownPhase >= 0 || isModalOpen;
 
   const closeLlmSelector = useCallback(() => {
     useUIStore.getState().closeModal("llmSelector");
@@ -959,7 +853,7 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
     }
 
     if (evt.ctrl && evt.name === "x") {
-      chat.abort();
+      activeChatRef.current?.abort();
       return;
     }
     if (evt.ctrl && evt.name === "l") {
@@ -996,7 +890,7 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
         tabMgr.closeTab(tabMgr.activeTabId);
       }
     }
-    if (evt.meta && evt.name >= "1" && evt.name <= "9") {
+    if ((evt.meta || evt.ctrl) && evt.name >= "1" && evt.name <= "9") {
       tabMgr.switchToIndex(Number(evt.name) - 1);
     }
     if (evt.meta && evt.name === "[") {
@@ -1005,42 +899,8 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
     if (evt.meta && evt.name === "]") {
       tabMgr.nextTab();
     }
-    if (evt.name === "pageup") {
-      scrollRef.current?.scrollBy(-(termHeight - 5));
-    }
-    if (evt.name === "pagedown") {
-      scrollRef.current?.scrollBy(termHeight - 5);
-    }
+    // PageUp/PageDown are now handled by TabInstance's own scrollRef
   });
-
-  const showPlanProgress = !!chat.activePlan;
-
-  const hasChangedFiles = useMemo(() => {
-    for (let i = chat.messages.length - 1; i >= 0; i--) {
-      const msg = chat.messages[i];
-      if (msg?.role !== "assistant" || !msg.toolCalls) continue;
-      for (const tc of msg.toolCalls) {
-        if (tc.name === "edit_file" && tc.result?.success) return true;
-      }
-    }
-    return false;
-  }, [chat.messages]);
-
-  const MAX_RENDERED = 60;
-  const visibleMessages = useMemo(() => {
-    const msgs = chat.messages;
-    const keep = (m: ChatMessage) => m.role !== "system" || m.showInChat;
-    if (nonSystemCount <= MAX_RENDERED) {
-      return msgs.filter(keep);
-    }
-    const result: typeof msgs = [];
-    for (let i = msgs.length - 1; i >= 0 && result.length < MAX_RENDERED; i--) {
-      if (keep(msgs[i] as ChatMessage)) result.push(msgs[i] as (typeof msgs)[0]);
-    }
-    result.reverse();
-    return result;
-  }, [chat.messages, nonSystemCount]);
-  const hiddenCount = nonSystemCount - visibleMessages.length;
 
   if (suspended) {
     return <box height={termHeight} />;
@@ -1057,7 +917,7 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
     );
   }
 
-  const hasContent = nonSystemCount > 0 || isStreaming;
+  const anyModalOpen = shutdownPhase >= 0 || isModalOpen;
 
   return (
     <box flexDirection="column" height={termHeight}>
@@ -1075,15 +935,18 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
           </text>
         </box>
         <box gap={1} flexShrink={1} flexDirection="row" justifyContent="center" overflow="hidden">
-          <ContextBar contextManager={contextManager} modelId={chat.activeModel} />
-          <text fg="#333">│</text>
+          {/* Context & tokens group */}
+          <ContextBar contextManager={contextManager} modelId={activeModelForHeader} />
+          <text fg="#222">·</text>
           <TokenDisplay />
           {termWidth >= 90 && (
             <>
-              <text fg="#333">│</text>
+              <text fg="#222">·</text>
               <MemoryIndicator />
             </>
           )}
+
+          {/* System info group */}
           {termWidth >= 100 && (
             <>
               <text fg="#333">│</text>
@@ -1092,9 +955,10 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
           )}
           {termWidth >= 80 && (
             <>
-              <text fg="#333">│</text>
+              {termWidth < 100 && <text fg="#333">│</text>}
+              {termWidth >= 100 && <text fg="#222">·</text>}
               {git.isRepo ? (
-                <text fg={git.isDirty ? "#FF8C00" : "#2d5"} truncate>
+                <text fg={git.isDirty ? "#b87333" : "#4a7"} truncate>
                   {UI_ICONS.git} {truncate(git.branch ?? "HEAD", termWidth >= 120 ? 30 : 15)}
                   {git.isDirty ? "*" : ""}
                 </text>
@@ -1105,8 +969,8 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
           )}
           {termWidth >= 100 && lspServers.length > 0 && (
             <>
-              <text fg="#333">│</text>
-              <text fg="#2d5" truncate>
+              <text fg="#222">·</text>
+              <text fg="#4a7" truncate>
                 {icon("brain")}{" "}
                 {LSP_SHORT_NAMES[lspServers[0]?.command.split("/").pop() ?? ""] ??
                   lspServers[0]?.language}
@@ -1114,6 +978,8 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
               </text>
             </>
           )}
+
+          {/* Model group */}
           <text fg="#333">│</text>
           <text truncate>
             {isProxy && (
@@ -1131,17 +997,9 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
           </text>
           {forgeMode !== "default" && (
             <>
-              <text fg="#333">│</text>
+              <text fg="#222">·</text>
               <text fg={modeColor} attributes={TextAttributes.BOLD}>
                 [{modeLabel}]
-              </text>
-            </>
-          )}
-          {tabMgr.tabCount > 1 && (
-            <>
-              <text fg="#333">│</text>
-              <text fg="#8B5CF6">
-                Tab {String(tabMgr.activeTabIndex + 1)}/{String(tabMgr.tabCount)}
               </text>
             </>
           )}
@@ -1149,11 +1007,18 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
         {termWidth >= 80 && <BrandTag />}
       </box>
 
-      <TabBar tabs={tabMgr.tabs} activeTabId={tabMgr.activeTabId} onSwitch={tabMgr.switchTab} />
-
-      <SystemBanner messages={chat.messages} expanded={codeExpanded} />
-
-      {!editorVisible && <box height={1} flexShrink={0} />}
+      {tabMgr.tabCount > 1 ? (
+        <box flexShrink={0} marginTop={1}>
+          <TabBar
+            tabs={tabMgr.tabs}
+            activeTabId={tabMgr.activeTabId}
+            onSwitch={tabMgr.switchTab}
+            getActivity={tabMgr.getTabActivity}
+          />
+        </box>
+      ) : !editorVisible ? (
+        <box height={1} flexShrink={0} />
+      ) : null}
 
       <box flexDirection="row" flexGrow={1} flexShrink={1} minHeight={0}>
         <EditorPanel
@@ -1170,144 +1035,35 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
           error={nvimError}
         />
 
-        <box
-          flexDirection="column"
-          width={editorVisible ? "40%" : "100%"}
-          flexGrow={editorVisible ? 0 : 1}
-          flexShrink={editorVisible ? 1 : 0}
-        >
-          {!hasContent ? (
-            <LandingPage bootProviders={bootProviders} bootPrereqs={bootPrereqs} />
-          ) : (
-            <box flexGrow={1} flexShrink={1} minHeight={0}>
-              <scrollbox
-                ref={scrollRef}
-                stickyScroll={true}
-                stickyStart="bottom"
-                flexGrow={1}
-                flexShrink={1}
-                minHeight={0}
-                style={{ contentOptions: { justifyContent: "flex-end" } }}
-              >
-                <CodeExpandedProvider value={codeExpanded}>
-                  {hiddenCount > 0 && (
-                    <box paddingX={1} marginBottom={1}>
-                      <text fg="#444">
-                        ── {String(hiddenCount)} earlier message{hiddenCount > 1 ? "s" : ""} ──
-                      </text>
-                    </box>
-                  )}
-                  {visibleMessages.map((msg) => (
-                    <StaticMessage
-                      key={msg.id}
-                      msg={msg}
-                      chatStyle={chatStyle}
-                      diffStyle={effectiveConfig.diffStyle}
-                      showReasoning={showReasoning}
-                      reasoningExpanded={reasoningExpanded}
-                      animate={false}
-                    />
-                  ))}
-                  {isStreaming && (
-                    <box paddingX={1} flexShrink={0} marginBottom={1}>
-                      <box
-                        flexDirection="column"
-                        border={["left"]}
-                        borderColor="#9B30FF"
-                        customBorderChars={RAIL_BORDER}
-                        paddingLeft={2}
-                      >
-                        <box>
-                          <text fg="#9B30FF">{icon("ai")} Forge</text>
-                        </box>
-                        <StreamSegmentList
-                          segments={chat.streamSegments}
-                          toolCalls={chat.liveToolCalls}
-                          streaming={chat.isLoading}
-                          verbose={effectiveConfig.verbose === true}
-                          diffStyle={effectiveConfig.diffStyle}
-                          showReasoning={showReasoning}
-                          reasoningExpanded={reasoningExpanded}
-                        />
-                      </box>
-                    </box>
-                  )}
-                </CodeExpandedProvider>
-              </scrollbox>
-            </box>
-          )}
-
-          {chat.pendingPlanReview ? (
-            <box flexShrink={0} paddingX={1}>
-              <PlanReviewPrompt
-                isActive={focusMode === "chat" && !anyModalOpen}
-                plan={chat.pendingPlanReview.plan}
-                planFile={chat.pendingPlanReview.planFile}
-                onAccept={() => {
-                  chat.pendingPlanReview?.resolve("execute");
-                  cleanupPlanFile();
-                }}
-                onClearAndImplement={() => {
-                  chat.pendingPlanReview?.resolve("clear_execute");
-                  cleanupPlanFile();
-                }}
-                onRevise={(feedback) => {
-                  chat.pendingPlanReview?.resolve(feedback);
-                }}
-                onCancel={() => {
-                  chat.pendingPlanReview?.resolve("cancel");
-                  cleanupPlanFile();
-                }}
-              />
-            </box>
-          ) : chat.pendingQuestion ? (
-            <>
-              <box flexShrink={0} paddingX={1}>
-                <QuestionPrompt
-                  question={chat.pendingQuestion}
-                  isActive={focusMode === "chat" && !anyModalOpen}
-                />
-              </box>
-              {showPlanProgress && chat.activePlan && (
-                <box flexShrink={0} paddingX={1}>
-                  <PlanProgress plan={chat.activePlan} />
-                </box>
-              )}
-              {hasChangedFiles && (
-                <box flexShrink={0} paddingX={1}>
-                  <ChangedFiles messages={chat.messages} cwd={cwd} expanded={changesExpanded} />
-                </box>
-              )}
-            </>
-          ) : (
-            <>
-              {showPlanProgress && chat.activePlan && (
-                <box flexShrink={0} paddingX={1}>
-                  <PlanProgress plan={chat.activePlan} />
-                </box>
-              )}
-              {hasChangedFiles && (
-                <box flexShrink={0} paddingX={1}>
-                  <ChangedFiles messages={chat.messages} cwd={cwd} expanded={changesExpanded} />
-                </box>
-              )}
-              <InputBox
-                onSubmit={handleInputSubmit}
-                isLoading={chat.isLoading}
-                isCompacting={chat.isCompacting}
-                isFocused={focusMode === "chat" && !anyModalOpen}
-                cwd={cwd}
-                onExit={handleExit}
-                onQueue={(msg) =>
-                  chat.setMessageQueue((prev) =>
-                    prev.length >= 5 ? prev : [...prev, { content: msg, queuedAt: Date.now() }],
-                  )
-                }
-                queueCount={chat.messageQueue.length}
-              />
-            </>
-          )}
-        </box>
+        {tabMgr.tabs.map((tab) => (
+          <TabInstance
+            key={tab.id}
+            tabId={tab.id}
+            visible={tab.id === tabMgr.activeTabId}
+            effectiveConfig={effectiveConfig}
+            sharedResources={sharedResources}
+            sessionManager={sessionManager}
+            cwd={cwd}
+            openEditorWithFile={openEditorWithFile}
+            openEditor={openEditor}
+            onSuspend={handleSuspend}
+            onCommand={handleTabCommand}
+            onExit={handleExit}
+            registerChat={tabMgr.registerChat}
+            unregisterChat={tabMgr.unregisterChat}
+            setTabActivity={tabMgr.setTabActivity}
+            autoLabel={tabMgr.autoLabel}
+            initialState={tabMgr.initialStates.current.get(tab.id)}
+            editorVisible={editorVisible}
+            focusMode={focusMode}
+            anyModalOpen={anyModalOpen}
+            bootProviders={bootProviders}
+            bootPrereqs={bootPrereqs}
+            getWorkspaceSnapshot={getWorkspaceSnapshot}
+            editorIntegration={effectiveConfig.editorIntegration}
+            forgeMode={forgeMode}
+          />
+        ))}
       </box>
 
       <box flexShrink={0} width="100%">
@@ -1316,7 +1072,7 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
 
       <LlmSelector
         visible={modals.llmSelector}
-        activeModel={chat.activeModel}
+        activeModel={activeModelForHeader}
         onSelect={(modelId) => {
           const slot = useUIStore.getState().routerSlotPicking;
           if (slot) {
@@ -1335,8 +1091,9 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
             saveToScope({ taskRouter: updated }, routerScope);
             useUIStore.getState().setRouterSlotPicking(null);
           } else {
-            chat.setActiveModel(modelId);
+            activeChatRef.current?.setActiveModel(modelId);
             notifyProviderSwitch(modelId);
+            setActiveModelForHeader(modelId);
           }
         }}
         onClose={closeLlmSelector}
@@ -1345,7 +1102,7 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
       <GitCommitModal
         visible={modals.gitCommit}
         cwd={cwd}
-        coAuthor={chat.coAuthorCommits}
+        coAuthor={activeChatRef.current?.coAuthorCommits ?? true}
         onClose={getCloser("gitCommit")}
         onCommitted={(msg) => addSystemMessage(`Committed: ${msg}`)}
         onRefresh={refreshGit}
@@ -1412,7 +1169,7 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
       <RouterSettings
         visible={modals.routerSettings && !routerSlotPicking}
         router={effectiveConfig.taskRouter}
-        activeModel={chat.activeModel}
+        activeModel={activeModelForHeader}
         scope={routerScope}
         onScopeChange={(toScope, fromScope) => {
           setRouterScope(toScope);
@@ -1450,7 +1207,7 @@ export function App({ config, projectConfig, resumeSessionId, bootProviders, boo
 
       <ErrorLog
         visible={modals.errorLog}
-        messages={chat.messages}
+        messages={activeChatRef.current?.messages ?? []}
         onClose={getCloser("errorLog")}
       />
 

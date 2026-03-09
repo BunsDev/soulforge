@@ -18,7 +18,7 @@ import {
 } from "../tools/index.js";
 import { readFileTool } from "../tools/read-file.js";
 import { normalizePath } from "./agent-bus.js";
-import { repairToolCall, sanitizeToolInputsStep, smoothStreamOptions } from "./stream-options.js";
+import { repairToolCall, sanitizeToolInputsStep } from "./stream-options.js";
 import { buildSubagentTools, type SharedCacheRef } from "./subagent-tools.js";
 
 const RESTRICTED_MODES = new Set<ForgeMode>(["architect", "socratic", "challenge", "plan"]);
@@ -145,7 +145,6 @@ export function createForgeAgent({
   return new ToolLoopAgent({
     id: "forge",
     model,
-    ...smoothStreamOptions,
     tools: allTools,
     callOptionsSchema: z.object({
       userMessage: z.string().optional(),

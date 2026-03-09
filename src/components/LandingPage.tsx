@@ -12,8 +12,8 @@ const RED = "#FF0040";
 const FAINT = "#222";
 const MUTED = "#555";
 const SUBTLE = "#444";
-const GREEN = "#2d5";
-const AMBER = "#FF8C00";
+const GREEN = "#4a7";
+const AMBER = "#b87333";
 
 const WORDMARK = [
   "┌─┐┌─┐┬ ┬┬  ┌─┐┌─┐┬─┐┌─┐┌─┐",

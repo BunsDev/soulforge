@@ -7,7 +7,7 @@ import { buildSubagentExploreTools, wrapWithBusCache } from "../tools/index.js";
 import type { AgentBus } from "./agent-bus.js";
 import { buildBusTools } from "./bus-tools.js";
 import { buildPrepareStep, tokenBudget } from "./step-utils.js";
-import { repairToolCall, smoothStreamOptions } from "./stream-options.js";
+import { repairToolCall } from "./stream-options.js";
 
 function exploreBase(hasRepoMap: boolean): string {
   return [
@@ -83,7 +83,6 @@ export function createExploreAgent(model: LanguageModel, options?: ExploreAgentO
   return new ToolLoopAgent({
     id: options?.agentId ?? "explore",
     model,
-    ...smoothStreamOptions,
     tools: allTools,
     instructions: {
       role: "system" as const,

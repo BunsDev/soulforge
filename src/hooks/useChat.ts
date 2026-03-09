@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StreamSegment } from "../components/StreamSegmentList.js";
 import type { LiveToolCall } from "../components/ToolCallDisplay.js";
 import { createForgeAgent } from "../core/agents/index.js";
+import { smoothStreamOptions } from "../core/agents/stream-options.js";
 import { onAgentStats, onMultiAgentEvent } from "../core/agents/subagent-events.js";
 import type { SharedCacheRef } from "../core/agents/subagent-tools.js";
 import {
@@ -19,7 +20,7 @@ import {
 import type { ContextManager } from "../core/context/manager.js";
 import { setCoAuthorEnabled } from "../core/git/status.js";
 import { getModelContextWindow, getShortModelLabel } from "../core/llm/models.js";
-import { notifyProviderSwitch, resolveModel } from "../core/llm/provider.js";
+import { resolveModel } from "../core/llm/provider.js";
 import {
   buildProviderOptions,
   degradeProviderOptions,
@@ -171,6 +172,7 @@ export interface UseChatOptions {
   onSuspend: (opts: { command: string; args?: string[]; noAltScreen?: boolean }) => void;
   initialState?: TabState;
   getWorkspaceSnapshot?: () => WorkspaceSnapshot;
+  visible?: boolean;
 }
 
 export interface ChatInstance {
@@ -214,12 +216,7 @@ export interface ChatInstance {
   setPlanRequest: (req: string | null) => void;
   pendingPlanReview: PendingPlanReview | null;
   setPendingPlanReview: React.Dispatch<React.SetStateAction<PendingPlanReview | null>>;
-  // Snapshot / restore for tab switching
   snapshot: (label: string) => TabState;
-  restore: (state: TabState) => void;
-  // Session
-  restoreSession: (sessionId: string) => void;
-  restoreFromTabState: (state: TabState) => void;
 }
 
 export function useChat({
@@ -231,6 +228,7 @@ export function useChat({
   openEditor,
   initialState,
   getWorkspaceSnapshot,
+  visible = true,
 }: UseChatOptions): ChatInstance {
   const [messages, setMessages] = useState<ChatMessage[]>(initialState?.messages ?? []);
   const [coreMessages, setCoreMessages] = useState<ModelMessage[]>(
@@ -239,6 +237,9 @@ export function useChat({
   const [isLoading, setIsLoading] = useState(false);
   const [streamSegments, setStreamSegments] = useState<StreamSegment[]>([]);
   const [liveToolCalls, setLiveToolCalls] = useState<LiveToolCall[]>([]);
+
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
 
   const streamSegmentsBuffer = useRef<StreamSegment[]>([]);
   const liveToolCallsBuffer = useRef<LiveToolCall[]>([]);
@@ -316,7 +317,7 @@ export function useChat({
     const tu = pendingTokenUsage.current;
     if (tu) {
       setTokenUsageRaw(tu);
-      useStatusBarStore.getState().setTokenUsage(tu);
+      if (visibleRef.current) useStatusBarStore.getState().setTokenUsage(tu);
       pendingTokenUsage.current = null;
     }
     const ct = pendingContextTokens.current;
@@ -341,11 +342,11 @@ export function useChat({
   const queueMicrotaskFlush = useCallback(() => {
     if (flushMicrotaskQueued.current) return;
     flushMicrotaskQueued.current = true;
-    queueMicrotask(() => {
+    setTimeout(() => {
       flushMicrotaskQueued.current = false;
       lastFlushTime.current = Date.now();
       flushStreamState();
-    });
+    }, 0);
   }, [flushStreamState]);
 
   // Interactive state
@@ -435,7 +436,7 @@ export function useChat({
           setStreamingChars(0);
         }
       }
-      useStatusBarStore.getState().setTokenUsage(next);
+      if (visibleRef.current) useStatusBarStore.getState().setTokenUsage(next);
       return next;
     });
   }, []);
@@ -477,8 +478,8 @@ export function useChat({
   const chatChars = coreChars + streamingChars;
 
   useEffect(() => {
-    useStatusBarStore.getState().setContext(contextTokens, chatChars);
-  }, [contextTokens, chatChars]);
+    if (visible) useStatusBarStore.getState().setContext(contextTokens, chatChars);
+  }, [contextTokens, chatChars, visible]);
 
   const coreMessagesRef = useRef(coreMessages);
   coreMessagesRef.current = coreMessages;
@@ -497,24 +498,24 @@ export function useChat({
   const didInitCompaction = useRef(false);
   if (!didInitCompaction.current) {
     didInitCompaction.current = true;
-    useStatusBarStore.getState().setCompactionStrategy(initialStrategy);
+    if (visible) useStatusBarStore.getState().setCompactionStrategy(initialStrategy);
   }
 
   // React to compaction strategy changes: create/destroy WSM as needed
   if (effectiveConfig.compaction?.strategy !== prevCompactionStrategy.current) {
     prevCompactionStrategy.current = effectiveConfig.compaction?.strategy;
     const strategy = effectiveConfig.compaction?.strategy ?? "v1";
-    useStatusBarStore.getState().setCompactionStrategy(strategy);
+    if (visible) useStatusBarStore.getState().setCompactionStrategy(strategy);
     if (strategy === "v2") {
       workingStateRef.current = new WorkingStateManager(effectiveConfig.compaction);
     } else {
       workingStateRef.current = null;
-      useStatusBarStore.getState().setV2Slots(0);
+      if (visible) useStatusBarStore.getState().setV2Slots(0);
     }
   }
 
   const syncV2SlotsRef = useRef(() => {
-    if (workingStateRef.current) {
+    if (workingStateRef.current && visibleRef.current) {
       useStatusBarStore.getState().setV2Slots(workingStateRef.current.slotCount());
     }
   });
@@ -560,7 +561,7 @@ export function useChat({
 
       isCompactingRef.current = true;
       setIsCompacting(true);
-      useStatusBarStore.getState().setCompacting(true);
+      if (visibleRef.current) useStatusBarStore.getState().setCompacting(true);
       try {
         const compactModelId = resolveTaskModel(
           "compact",
@@ -581,7 +582,13 @@ export function useChat({
             if (typeof m.content === "string") return s + m.content.length;
             if (Array.isArray(m.content))
               return (
-                s + m.content.reduce((a: number, p: unknown) => a + JSON.stringify(p).length, 0)
+                s +
+                m.content.reduce((a: number, p: unknown) => {
+                  if (typeof p === "object" && p !== null && "text" in p)
+                    return a + String((p as { text: string }).text).length;
+                  if (typeof p === "string") return a + p.length;
+                  return a + 100;
+                }, 0)
               );
             return s;
           }, 0);
@@ -828,7 +835,7 @@ export function useChat({
       } finally {
         isCompactingRef.current = false;
         setIsCompacting(false);
-        useStatusBarStore.getState().setCompacting(false);
+        if (visibleRef.current) useStatusBarStore.getState().setCompacting(false);
         if (!opts?.skipQueueDrain) {
           setMessageQueue((queue) => {
             if (queue.length > 0) {
@@ -1086,7 +1093,7 @@ export function useChat({
         for (const [id, stats] of subagentCumulative) {
           if (!completedResultChars.has(id)) total += stats.output * 4;
         }
-        useStatusBarStore.getState().setSubagentChars(total);
+        if (visibleRef.current) useStatusBarStore.getState().setSubagentChars(total);
       };
 
       const unsubAgentStats = onAgentStats((event) => {
@@ -1120,7 +1127,7 @@ export function useChat({
         if (event.type === "dispatch-done") {
           completedResultChars.clear();
           subagentCumulative.clear();
-          useStatusBarStore.getState().setSubagentChars(0);
+          if (visibleRef.current) useStatusBarStore.getState().setSubagentChars(0);
         }
       });
 
@@ -1226,6 +1233,7 @@ export function useChat({
                   messages: newCoreMessages,
                   abortSignal: abortController.signal,
                   options: { userMessage: input },
+                  ...smoothStreamOptions,
                 })) as unknown as StreamTextResult<ToolSet, never>;
                 break;
               } catch (err: unknown) {
@@ -1322,14 +1330,14 @@ export function useChat({
         };
 
         flushTimerRef.current = setInterval(() => {
-          if (Date.now() - lastFlushTime.current < 30) return;
+          if (Date.now() - lastFlushTime.current < 100) return;
           lastFlushTime.current = Date.now();
           flushStreamState();
-        }, 40);
+        }, 150);
 
         let streamEventCount = 0;
         for await (const part of result.fullStream) {
-          if (++streamEventCount % 30 === 0) {
+          if (++streamEventCount % 5 === 0) {
             await new Promise<void>((r) => setTimeout(r, 0));
           }
           switch (part.type) {
@@ -1714,7 +1722,7 @@ export function useChat({
       } finally {
         unsubAgentStats();
         unsubMultiAgent();
-        useStatusBarStore.getState().setSubagentChars(0);
+        if (visibleRef.current) useStatusBarStore.getState().setSubagentChars(0);
         setIsLoading(false);
         abortRef.current = null;
         planExecutionRef.current = false;
@@ -1901,60 +1909,6 @@ export function useChat({
     [messages, coreMessages, activeModel, activePlan, sidebarPlan, tokenUsage, coAuthorCommits],
   );
 
-  // Restore state from a tab snapshot
-  const restore = useCallback(
-    (state: TabState) => {
-      setMessages(state.messages);
-      setCoreMessages(state.coreMessages);
-      setActiveModel(state.activeModel);
-      notifyProviderSwitch(state.activeModel);
-      setActivePlan(state.activePlan);
-      setSidebarPlan(state.sidebarPlan);
-      setTokenUsage(state.tokenUsage);
-      setCoAuthorCommits(state.coAuthorCommits);
-      sessionIdRef.current = state.sessionId;
-      planModeRef.current = state.planMode;
-      planRequestRef.current = state.planRequest;
-      streamSegmentsBuffer.current = [];
-      liveToolCallsBuffer.current = [];
-      lastFlushedSegments.current = [];
-      lastFlushedToolCalls.current = [];
-      lastFlushedStreamingChars.current = 0;
-      setStreamSegments([]);
-      setLiveToolCalls([]);
-      setPendingQuestion(null);
-      setMessageQueue([]);
-      setPendingPlanReview(null);
-      setIsLoading(false);
-      autoSummarizedRef.current = false;
-      contextManager.resetConversationTracking();
-      reprimeContextFromMessages(contextManager, state.coreMessages);
-    },
-    [setTokenUsage, contextManager, setActivePlan],
-  );
-
-  // Restore a session from disk (single-tab fallback)
-  const restoreSession = useCallback(
-    (sessionId: string) => {
-      const data = sessionManager.loadSessionMessages(sessionId);
-      if (!data) return;
-      contextManager.resetConversationTracking();
-      reprimeContextFromMessages(contextManager, data.coreMessages);
-      sessionIdRef.current = sessionId;
-      setMessages(data.messages);
-      setCoreMessages(data.coreMessages);
-      streamSegmentsBuffer.current = [];
-      liveToolCallsBuffer.current = [];
-      lastFlushedSegments.current = [];
-      lastFlushedToolCalls.current = [];
-      lastFlushedStreamingChars.current = 0;
-      setStreamSegments([]);
-      setLiveToolCalls([]);
-      setTokenUsage({ ...ZERO_USAGE });
-    },
-    [sessionManager, setTokenUsage, contextManager],
-  );
-
   const setPlanMode = useCallback((on: boolean) => {
     planModeRef.current = on;
   }, []);
@@ -2002,8 +1956,5 @@ export function useChat({
     pendingPlanReview,
     setPendingPlanReview,
     snapshot,
-    restore,
-    restoreSession,
-    restoreFromTabState: restore,
   };
 }

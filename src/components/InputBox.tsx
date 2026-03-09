@@ -34,6 +34,7 @@ interface Props {
   onExit?: () => void;
   queueCount?: number;
   cwd?: string;
+  onDropdownChange?: (visible: boolean) => void;
 }
 
 const CMD_DEFS: Array<{ cmd: string; ic: string; desc: string }> = [
@@ -200,6 +201,7 @@ export function InputBox({
   onExit,
   queueCount,
   cwd,
+  onDropdownChange,
 }: Props) {
   const [value, setValue] = useState("");
   const valueRef = useRef(value);
@@ -330,14 +332,14 @@ export function InputBox({
     results.sort((a, b) => b.score - a.score);
     return results;
   }, [showAutocomplete, query]);
-  const hasMatches = matches.length > 0 && value !== matches[0]?.cmd;
+  const hasMatches = matches.length > 0;
 
   const ghost =
     hasMatches && matches[selectedIdx]?.cmd.startsWith(query)
       ? matches[selectedIdx].cmd.slice(value.length)
       : "";
 
-  const maxVisible = Math.max(5, Math.floor(termRows * 0.7));
+  const maxVisible = Math.min(8, Math.max(4, Math.floor(termRows * 0.25)));
   const acScrollOffset = useRef(0);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset selection when input changes
@@ -512,10 +514,10 @@ export function InputBox({
     resetInput();
   };
 
-  // Compute available width for text content (inside border + padding)
+  // Compute available width for text content (inside padding, no border)
   const measuredWidth = containerRef.current?.width ?? 0;
   const contentWidth = useMemo(
-    () => Math.max(10, (measuredWidth > 0 ? measuredWidth - 4 : termWidth - 6) - 2),
+    () => Math.max(10, (measuredWidth > 0 ? measuredWidth - 2 : termWidth - 4) - 2),
     [measuredWidth, termWidth],
   );
 
@@ -862,7 +864,13 @@ export function InputBox({
     }
   });
 
-  const fuzzyMaxVisible = Math.min(10, Math.max(3, Math.floor(termRows * 0.3)));
+  const fuzzyMaxVisible = Math.min(8, Math.max(3, Math.floor(termRows * 0.2)));
+
+  const dropdownVisible = hasMatches || (fuzzyMode && fuzzyResults.length > 0);
+  useEffect(() => {
+    onDropdownChange?.(dropdownVisible);
+    return () => onDropdownChange?.(false);
+  }, [dropdownVisible, onDropdownChange]);
 
   useEffect(() => {
     if (!fuzzyMode || fuzzyResults.length === 0) return;
@@ -879,73 +887,130 @@ export function InputBox({
 
   // ── Rendering ──
 
-  const borderColor = fuzzyMode ? "#FF8C00" : showBusy ? "#4a1a6b" : focused ? "#6A0DAD" : "#333";
   const inputWidth = termWidth >= 120 ? "60%" : termWidth >= 80 ? "80%" : "100%";
+
+  // Accent styling per state
+  const ACCENT_ICONS = ["◇", "◈", "◆", "◈"];
+  const accentIcon = fuzzyMode
+    ? "◈"
+    : showBusy
+      ? (ACCENT_ICONS[ghostTick % ACCENT_ICONS.length] ?? "◆")
+      : focused
+        ? "◆"
+        : "·";
+  const accentIconColor = fuzzyMode
+    ? "#FF8C00"
+    : showBusy
+      ? "#8B5CF6"
+      : focused
+        ? "#FF0040"
+        : "#333";
+  const lineColor = fuzzyMode ? "#3a2200" : showBusy ? "#1a0a2e" : focused ? "#2a1045" : "#1a1a1a";
+
+  // Line widths for the bottom accent
+  const innerW = Math.max(10, contentWidth + 2);
+  const iconPad = ` ${accentIcon} `;
+  const sideLen = Math.max(0, Math.floor((innerW - iconPad.length) / 2));
+  const leftLine = "─".repeat(sideLen);
+  const rightLine = "─".repeat(Math.max(0, innerW - sideLen - iconPad.length));
 
   return (
     <box flexDirection="column" width="100%" flexShrink={0} alignItems="center">
       <box flexDirection="column" width={inputWidth} flexShrink={0}>
-        {/* ── Autocomplete dropdown ── */}
+        {/* ── Autocomplete dropdown (floating overlay) ── */}
         {hasMatches && (
-          <box flexDirection="column" marginBottom={0}>
-            <box paddingX={1} height={1} flexDirection="row">
-              <text fg="#333">{"─".repeat(40)}</text>
-              {matches.length > maxVisible && <text fg="#555"> ↑↓ scroll</text>}
-            </box>
-            <scrollbox ref={acScrollRef} height={Math.min(matches.length, maxVisible)}>
-              {matches.map((match, i) => {
-                const isSelected = i === selectedIdx;
-                return (
-                  <box key={match.cmd} gap={1} paddingX={1} height={1} flexDirection="row">
-                    <text fg={isSelected ? "#FF0040" : "#333"}>{isSelected ? "›" : " "}</text>
-                    <text
-                      fg={isSelected ? "#FF0040" : "#9B30FF"}
-                      attributes={isSelected ? TextAttributes.BOLD : undefined}
-                    >
-                      {match.cmd}
+          <box position="absolute" bottom="100%" width="100%" zIndex={10}>
+            <box
+              flexDirection="column"
+              borderStyle="rounded"
+              border={true}
+              borderColor="#333"
+              width="100%"
+            >
+              <box flexDirection="column" backgroundColor="#111">
+                <scrollbox ref={acScrollRef} height={Math.min(matches.length, maxVisible)}>
+                  {matches.map((match, i) => {
+                    const isSelected = i === selectedIdx;
+                    return (
+                      <box key={match.cmd} gap={1} paddingX={1} height={1} flexDirection="row">
+                        <text fg={isSelected ? "#FF0040" : "#333"}>{isSelected ? "›" : " "}</text>
+                        <text
+                          fg={isSelected ? "#FF0040" : "#9B30FF"}
+                          attributes={isSelected ? TextAttributes.BOLD : undefined}
+                        >
+                          {match.cmd}
+                        </text>
+                        <text fg={isSelected ? "#666" : "#444"} truncate>
+                          {match.desc}
+                        </text>
+                      </box>
+                    );
+                  })}
+                </scrollbox>
+                {matches.length > maxVisible && (
+                  <box paddingX={1} height={1}>
+                    <text fg="#444">
+                      {selectedIdx + 1}/{String(matches.length)}
                     </text>
-                    <text fg={isSelected ? "#666" : "#444"}>{match.desc}</text>
                   </box>
-                );
-              })}
-            </scrollbox>
+                )}
+              </box>
+            </box>
           </box>
         )}
 
-        {/* ── Fuzzy history results ── */}
+        {/* ── Fuzzy history results (floating overlay) ── */}
         {fuzzyMode && fuzzyResults.length > 0 && (
-          <box flexDirection="column" marginBottom={0}>
-            <box paddingX={1} height={1} flexDirection="row" width="100%">
-              <text fg="#FF8C00"> history </text>
-              <text fg="#FF8C00" flexGrow={1}>
-                {"─".repeat(Math.max(0, termWidth - 12))}
-              </text>
+          <box position="absolute" bottom="100%" width="100%" zIndex={10}>
+            <box
+              flexDirection="column"
+              borderStyle="rounded"
+              border={true}
+              borderColor="#FF8C00"
+              width="100%"
+            >
+              <box flexDirection="column" backgroundColor="#111">
+                <box paddingX={1} height={1} flexDirection="row">
+                  <text fg="#FF8C00" attributes={TextAttributes.BOLD}>
+                    {icon("clock_alt")} history
+                  </text>
+                  <text fg="#555">
+                    {"  "}
+                    {String(fuzzyResults.length)} match{fuzzyResults.length === 1 ? "" : "es"}
+                  </text>
+                </box>
+                <scrollbox
+                  ref={fuzzyScrollRef}
+                  height={Math.min(fuzzyResults.length, fuzzyMaxVisible)}
+                >
+                  {fuzzyResults.map((result, i) => {
+                    const isSelected = i === fuzzyCursor;
+                    const maxChars = Math.max(20, termWidth - 8);
+                    const displayText = (result.entry.split("\n")[0] ?? "").slice(0, maxChars);
+                    const displayMatch = fuzzyQuery
+                      ? fuzzyFilter(fuzzyQuery, [displayText], 1)[0]
+                      : null;
+                    return (
+                      <box
+                        key={`${result.entry.slice(0, 40)}-${String(i)}`}
+                        paddingX={1}
+                        height={1}
+                        flexDirection="row"
+                      >
+                        <text fg={isSelected ? "#FF0040" : "#333"}>{isSelected ? "› " : "  "}</text>
+                        {displayMatch ? (
+                          <HighlightedText text={displayText} indices={displayMatch.indices} />
+                        ) : (
+                          <text fg={isSelected ? "#fff" : "#ccc"} truncate>
+                            {displayText}
+                          </text>
+                        )}
+                      </box>
+                    );
+                  })}
+                </scrollbox>
+              </box>
             </box>
-            <scrollbox ref={fuzzyScrollRef} height={Math.min(fuzzyResults.length, fuzzyMaxVisible)}>
-              {fuzzyResults.map((result, i) => {
-                const isSelected = i === fuzzyCursor;
-                const maxChars = Math.max(20, termWidth - 6);
-                const displayText = (result.entry.split("\n")[0] ?? "").slice(0, maxChars);
-                const displayMatch = fuzzyQuery
-                  ? fuzzyFilter(fuzzyQuery, [displayText], 1)[0]
-                  : null;
-                return (
-                  <box
-                    key={`${result.entry.slice(0, 40)}-${String(i)}`}
-                    paddingX={1}
-                    height={1}
-                    flexDirection="row"
-                  >
-                    <text fg={isSelected ? "#FF0040" : "#333"}>{isSelected ? "› " : "  "}</text>
-                    {displayMatch ? (
-                      <HighlightedText text={displayText} indices={displayMatch.indices} />
-                    ) : (
-                      <text fg={isSelected ? "#fff" : "#ccc"}>{displayText}</text>
-                    )}
-                  </box>
-                );
-              })}
-            </scrollbox>
           </box>
         )}
 
@@ -961,16 +1026,13 @@ export function InputBox({
           </box>
         )}
 
-        {/* ── Input border box ── */}
-        <box
-          ref={containerRef}
-          borderStyle="rounded"
-          border={true}
-          borderColor={borderColor}
-          paddingX={1}
-          flexDirection="column"
-          width="100%"
-        >
+        {/* ── Top accent line ── */}
+        <box paddingX={1} height={1}>
+          <text fg={lineColor}>{"─".repeat(Math.max(10, contentWidth + 2))}</text>
+        </box>
+
+        {/* ── Input area (no border, custom frame) ── */}
+        <box ref={containerRef} paddingX={1} flexDirection="column" width="100%">
           {showBusy && !showAutocomplete ? (
             <box
               flexDirection="row"
@@ -1020,21 +1082,28 @@ export function InputBox({
           )}
         </box>
 
+        {/* ── Bottom accent line with centered icon ── */}
+        <box paddingX={1} height={1}>
+          <text>
+            <span fg={lineColor}>{leftLine}</span>
+            <span fg={accentIconColor}>{iconPad}</span>
+            <span fg={lineColor}>{rightLine}</span>
+          </text>
+        </box>
+
         {/* ── Hints bar ── */}
         {focused && !fuzzyMode && isMultiline && (
-          <box paddingX={2} height={1} flexDirection="row" gap={1}>
-            <text fg="#444">^U</text>
-            <text fg="#333">del line</text>
-            <text fg="#444">^K</text>
-            <text fg="#333">del to end</text>
-            <text fg="#444">S-Enter</text>
-            <text fg="#333">newline</text>
-            {collapsedBlocks.length > 0 ? (
-              <>
-                <text fg="#444">BS</text>
-                <text fg="#333">del paste</text>
-              </>
-            ) : null}
+          <box paddingX={2} height={1}>
+            <text fg="#333">
+              <span fg="#444">^U</span> del <span fg="#444">^K</span> cut <span fg="#444">S-⏎</span>{" "}
+              newline
+              {collapsedBlocks.length > 0 ? (
+                <>
+                  {" "}
+                  <span fg="#444">BS</span> rm paste
+                </>
+              ) : null}
+            </text>
           </box>
         )}
       </box>

@@ -5,7 +5,7 @@ import { checkPrerequisites } from "../core/setup/prerequisites.js";
 
 function Status({ ok, label, dim }: { ok: boolean; label: string; dim?: boolean }) {
   return (
-    <text fg={ok ? "#2d5" : dim ? "#FF8C00" : "#f44"}>
+    <text fg={ok ? "#4a7" : dim ? "#b87333" : "#f44"}>
       {ok ? "✓" : dim ? "○" : "✗"} {label}
     </text>
   );
@@ -39,8 +39,8 @@ export function HealthCheck() {
             return (
               <>
                 {shown.map((p) => (
-                  <text key={p.id} fg="#2d5">
-                    ✓ {providerIcon(p.id)} <span fg="#2d5">{p.name}</span>
+                  <text key={p.id} fg="#4a7">
+                    ✓ {providerIcon(p.id)} <span fg="#4a7">{p.name}</span>
                   </text>
                 ))}
                 {extra > 0 && <text fg="#555">+{extra}</text>}

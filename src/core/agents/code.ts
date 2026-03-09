@@ -7,7 +7,7 @@ import { buildSubagentCodeTools, wrapWithBusCache } from "../tools/index.js";
 import type { AgentBus } from "./agent-bus.js";
 import { buildBusTools } from "./bus-tools.js";
 import { buildPrepareStep, tokenBudget } from "./step-utils.js";
-import { repairToolCall, smoothStreamOptions } from "./stream-options.js";
+import { repairToolCall } from "./stream-options.js";
 
 function codeBase(hasRepoMap: boolean): string {
   return [
@@ -85,7 +85,6 @@ export function createCodeAgent(model: LanguageModel, options?: CodeAgentOptions
   return new ToolLoopAgent({
     id: options?.agentId ?? "code",
     model,
-    ...smoothStreamOptions,
     tools: allTools,
     instructions: {
       role: "system" as const,

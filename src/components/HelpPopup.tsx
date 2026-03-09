@@ -1,6 +1,7 @@
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useEffect, useState } from "react";
+import { icon } from "../core/icons.js";
 import { Overlay, POPUP_BG, PopupRow } from "./shared.js";
 
 const MAX_POPUP_WIDTH = 78;
@@ -191,7 +192,7 @@ export function HelpPopup({ visible, onClose }: Props) {
       >
         <PopupRow w={innerW}>
           <text bg={POPUP_BG} fg="#9B30FF" attributes={TextAttributes.BOLD}>
-            󰋖
+            {icon("info")}
           </text>
           <text bg={POPUP_BG} fg="white" attributes={TextAttributes.BOLD}>
             {" "}

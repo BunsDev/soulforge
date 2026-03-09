@@ -3,6 +3,7 @@ import { platform } from "node:os";
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useCallback, useState } from "react";
+import { icon } from "../core/icons.js";
 import {
   detectInstalledFonts,
   installFont,
@@ -242,7 +243,7 @@ export function SetupGuide({ visible, onClose, onSystemMessage }: Props) {
       >
         <PopupRow w={innerW}>
           <text fg="#9B30FF" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
-            󰊠
+            {icon("ghost")}
           </text>
           <text fg="white" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
             {" "}

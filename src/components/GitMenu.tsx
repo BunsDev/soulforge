@@ -2,6 +2,7 @@ import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useState } from "react";
 import { getGitLog, gitPull, gitPush, gitStash, gitStashPop } from "../core/git/status.js";
+import { icon } from "../core/icons.js";
 
 import { Overlay, POPUP_BG, POPUP_HL, PopupRow } from "./shared.js";
 
@@ -188,7 +189,7 @@ export function GitMenu({
       >
         <PopupRow w={innerW}>
           <text fg="white" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
-            {"󰊢"} Git
+            {icon("git")} Git
           </text>
         </PopupRow>
 

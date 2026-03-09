@@ -2,6 +2,7 @@ import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useCallback, useEffect, useState } from "react";
 import { getGitDiff, getGitStatus, gitAdd, gitCommit } from "../core/git/status.js";
+import { icon } from "../core/icons.js";
 
 import { Overlay, POPUP_BG, POPUP_HL, PopupRow } from "./shared.js";
 
@@ -110,7 +111,7 @@ export function GitCommitModal({ visible, cwd, coAuthor, onClose, onCommitted, o
       >
         <PopupRow w={innerW}>
           <text fg="white" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
-            {"󰊢"} Git Commit
+            {icon("git")} Git Commit
           </text>
         </PopupRow>
         <PopupRow w={innerW}>

@@ -2,6 +2,7 @@ import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
 import { useEffect, useState } from "react";
 import { create } from "zustand";
+import { icon } from "../core/icons.js";
 import {
   deleteSecret,
   getStorageBackend,
@@ -245,7 +246,7 @@ export function WebSearchSettings({ visible, onClose }: Props) {
         >
           <PopupRow w={innerW}>
             <text bg={POPUP_BG} fg="#9B30FF" attributes={TextAttributes.BOLD}>
-              󰌆
+              {icon("proxy")}
             </text>
             <text bg={POPUP_BG} fg="white" attributes={TextAttributes.BOLD}>
               {" "}
@@ -301,7 +302,7 @@ export function WebSearchSettings({ visible, onClose }: Props) {
       >
         <PopupRow w={innerW}>
           <text bg={POPUP_BG} fg="#9B30FF" attributes={TextAttributes.BOLD}>
-            󰖟
+            {icon("web_search")}
           </text>
           <text bg={POPUP_BG} fg="white" attributes={TextAttributes.BOLD}>
             {" "}

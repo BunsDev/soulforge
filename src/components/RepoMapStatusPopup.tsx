@@ -1,6 +1,7 @@
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useEffect, useRef, useState } from "react";
+import { icon } from "../core/icons.js";
 import { type RepoMapStatus, useRepoMapStore } from "../stores/repomap.js";
 import { Overlay, POPUP_BG, PopupRow, SPINNER_FRAMES } from "./shared.js";
 
@@ -130,7 +131,7 @@ export function RepoMapStatusPopup({ visible, onClose }: Props) {
       >
         <PopupRow w={innerW}>
           <text bg={POPUP_BG} fg="#9B30FF">
-            {"󰙅 "}
+            {`${icon("repomap")} `}
           </text>
           <text bg={POPUP_BG} fg="white" attributes={TextAttributes.BOLD}>
             Repo Map Status

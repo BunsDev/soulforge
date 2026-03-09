@@ -13,9 +13,9 @@ function approach(current: number, target: number): number {
 }
 
 function getMemColor(mb: number): string {
-  if (mb < 2048) return "#2d5";
-  if (mb < 4096) return "#FF8C00";
-  return "#FF0040";
+  if (mb < 2048) return "#4a7";
+  if (mb < 4096) return "#b87333";
+  return "#f44";
 }
 
 function fmtMem(mb: number): string {

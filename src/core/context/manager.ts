@@ -120,9 +120,18 @@ const IGNORED_DIRS = new Set([
   "coverage",
 ]);
 
+export interface SharedContextResources {
+  repoMap: RepoMap;
+  memoryManager: MemoryManager;
+}
+
 /**
  * Context Manager — gathers relevant context from the codebase
  * to include in LLM prompts for better responses.
+ *
+ * When constructed with `shared`, uses existing RepoMap/MemoryManager
+ * instead of creating new ones. Per-tab instances use this to share
+ * expensive resources while maintaining independent conversation tracking.
  */
 export class ContextManager {
   private cwd: string;
@@ -149,18 +158,30 @@ export class ContextManager {
   private conversationTokens = 0;
   private repoMapCache: { content: string; at: number } | null = null;
   private taskRouter: TaskRouter | undefined;
+  private isChild = false;
   private static readonly REPO_MAP_TTL = 5_000; // 5s — covers getContextBreakdown + buildSystemPrompt in same prompt
 
   private static readonly FILE_TREE_TTL = 30_000; // 30s
   private static readonly PROJECT_INFO_TTL = 300_000; // 5min
 
-  constructor(cwd: string) {
+  constructor(cwd: string, shared?: SharedContextResources) {
     this.cwd = cwd;
-    this.memoryManager = new MemoryManager(cwd);
-    this.repoMap = new RepoMap(cwd);
-    this.wireRepoMapCallbacks();
-    this.wireFileEventHandlers();
-    this.startRepoMapScan();
+    if (shared) {
+      this.repoMap = shared.repoMap;
+      this.memoryManager = shared.memoryManager;
+      this.isChild = true;
+      this.wireFileEventHandlers();
+    } else {
+      this.memoryManager = new MemoryManager(cwd);
+      this.repoMap = new RepoMap(cwd);
+      this.wireRepoMapCallbacks();
+      this.wireFileEventHandlers();
+      this.startRepoMapScan();
+    }
+  }
+
+  getSharedResources(): SharedContextResources {
+    return { repoMap: this.repoMap, memoryManager: this.memoryManager };
   }
 
   private unsubEdit: (() => void) | null = null;
@@ -258,16 +279,18 @@ export class ContextManager {
 
   /** Notify repo map that a file changed (call after edits) */
   onFileChanged(absPath: string): void {
-    this.repoMap.onFileChanged(absPath);
+    if (!this.isChild) {
+      this.repoMap.onFileChanged(absPath);
+      if (this.repoMapReady) {
+        const stats = this.repoMap.getStats();
+        useRepoMapStore
+          .getState()
+          .setStats(stats.files, stats.symbols, stats.edges, this.repoMap.dbSizeBytes());
+      }
+    }
     this.editedFiles.add(absPath);
     this.repoMapCache = null;
     this.gitContextStale = true;
-    if (this.repoMapReady) {
-      const stats = this.repoMap.getStats();
-      useRepoMapStore
-        .getState()
-        .setStats(stats.files, stats.symbols, stats.edges, this.repoMap.dbSizeBytes());
-    }
   }
 
   /** Track a file mentioned in conversation (tool reads, grep hits, etc.) */
@@ -326,6 +349,7 @@ export class ContextManager {
   }
 
   isRepoMapReady(): boolean {
+    if (this.isChild) return this.repoMap.getStats().files > 0;
     return this.repoMapReady;
   }
 
@@ -476,12 +500,14 @@ export class ContextManager {
   }
 
   dispose(): void {
-    this.repoMap.close();
-    this.memoryManager.close();
     this.unsubEdit?.();
     this.unsubRead?.();
     this.unsubEdit = null;
     this.unsubRead = null;
+    if (!this.isChild) {
+      this.repoMap.close();
+      this.memoryManager.close();
+    }
   }
 
   async refreshRepoMap(): Promise<void> {

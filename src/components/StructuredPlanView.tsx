@@ -7,12 +7,12 @@ const SECTION_COLOR = "#8B5CF6";
 const FILE_PATH_COLOR = "#ccc";
 const STEP_NUM_COLOR = "#8B5CF6";
 const TEXT_COLOR = "#bbb";
-const CHECK_COLOR = "#2d5";
+const CHECK_COLOR = "#4a7";
 
 const ACTION_COLORS: Record<string, string> = {
-  create: "#2d5",
-  modify: "#FF8C00",
-  delete: "#f44",
+  create: "#4a7",
+  modify: "#c89030",
+  delete: "#a55",
 };
 const ACTION_ICONS: Record<string, string> = {
   create: "+",
@@ -20,9 +20,9 @@ const ACTION_ICONS: Record<string, string> = {
   delete: "-",
 };
 const SYMBOL_ACTION_COLORS: Record<string, string> = {
-  add: "#2d5",
-  modify: "#FF8C00",
-  remove: "#f44",
+  add: "#4a7",
+  modify: "#c89030",
+  remove: "#a55",
   rename: "#5af",
 };
 

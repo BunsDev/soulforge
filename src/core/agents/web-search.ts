@@ -3,7 +3,7 @@ import { stepCountIs, ToolLoopAgent, tool } from "ai";
 import { z } from "zod";
 import { fetchPageTool } from "../tools/fetch-page.js";
 import { webSearchScraper } from "../tools/web-search-scraper.js";
-import { repairToolCall, sanitizeToolInputsStep, smoothStreamOptions } from "./stream-options.js";
+import { repairToolCall, sanitizeToolInputsStep } from "./stream-options.js";
 
 const WEB_SEARCH_INSTRUCTIONS = `You are a web search agent. Your job is to find accurate, up-to-date information from the web.
 
@@ -23,7 +23,6 @@ export function createWebSearchAgent(model: LanguageModel) {
   return new ToolLoopAgent({
     id: "web-search",
     model,
-    ...smoothStreamOptions,
     tools: {
       web_search: tool({
         description: webSearchScraper.description,

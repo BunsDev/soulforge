@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 
+const encoder = new TextEncoder();
+
 export interface GitStatus {
   isRepo: boolean;
   branch: string | null;
@@ -88,7 +90,7 @@ export function unquoteGitPath(path: string): string {
     if (code < 0x80) {
       bytes.push(code);
     } else {
-      const encoded = new TextEncoder().encode(ch);
+      const encoded = encoder.encode(ch);
       for (const b of encoded) bytes.push(b);
     }
   }

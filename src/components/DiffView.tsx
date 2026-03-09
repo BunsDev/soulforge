@@ -9,8 +9,8 @@ const HEADER_PATH = "#ccc";
 const ERROR_COLOR = "#f44";
 const LARGE_DIFF_THRESHOLD = 50;
 
-const ADD_COLOR = "#2d5";
-const REMOVE_COLOR = "#f44";
+const ADD_COLOR = "#4a7";
+const REMOVE_COLOR = "#a55";
 const COLLAPSED_COLOR = "#555";
 
 type DiffMode = "default" | "sidebyside" | "compact";
@@ -61,16 +61,16 @@ function toUnifiedDiff(filePath: string, oldStr: string, newStr: string): string
 }
 
 const DIFF_COLORS = {
-  addedBg: "transparent",
-  removedBg: "#1a0f0f",
+  addedBg: "#0a1a0f",
+  removedBg: "#1a0a0a",
   contextBg: "transparent",
-  addedContentBg: "transparent",
-  removedContentBg: "#1a0f0f",
+  addedContentBg: "#0a1a0f",
+  removedContentBg: "#1a0a0a",
   contextContentBg: "transparent",
-  addedLineNumberBg: "transparent",
-  removedLineNumberBg: "#1a0f0f",
+  addedLineNumberBg: "#0a1a0f",
+  removedLineNumberBg: "#1a0a0a",
   addedSignColor: ADD_COLOR,
-  removedSignColor: "#633",
+  removedSignColor: "#644",
 } as const;
 
 export const DiffView = memo(function DiffView({

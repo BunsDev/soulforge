@@ -1,6 +1,7 @@
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useState } from "react";
+import { icon } from "../core/icons.js";
 import type { TaskRouter } from "../types/index.js";
 import type { ConfigScope } from "./shared.js";
 import { CONFIG_SCOPES, Overlay, POPUP_BG, POPUP_HL, PopupRow } from "./shared.js";
@@ -119,7 +120,7 @@ export function RouterSettings({
       >
         <PopupRow w={innerW}>
           <text bg={POPUP_BG} fg="#9B30FF" attributes={TextAttributes.BOLD}>
-            󰓹
+            {icon("router")}
           </text>
           <text bg={POPUP_BG} fg="white" attributes={TextAttributes.BOLD}>
             {" "}

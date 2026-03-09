@@ -147,7 +147,7 @@ function openRepoMapMenu(ctx: CommandContext): void {
 
   ctx.openCommandPicker({
     title: "Repo Map",
-    icon: "󰙅",
+    icon: icon("repomap"),
     currentValue: enabled ? "enable" : "disable",
     keepOpen: true,
     scopeEnabled: true,
@@ -362,7 +362,7 @@ function openStorageMenu(ctx: CommandContext): void {
 
     ctx.openCommandPicker({
       title: `Storage — ${formatBytes(s.projectTotal + s.globalTotal)}`,
-      icon: "󰋊",
+      icon: icon("storage"),
       maxWidth: 64,
       options: [
         {
@@ -374,12 +374,15 @@ function openStorageMenu(ctx: CommandContext): void {
         {
           value: "clear-repomap",
           label: pad("Repo Map", formatBytes(s.repoMap)),
-          description: s.repoMap > 0 ? "󰩺 clear" : undefined,
+          description: s.repoMap > 0 ? `${icon("delete_all")} clear` : undefined,
         },
         {
           value: "clear-sessions",
           label: pad("Sessions", formatBytes(s.sessions)),
-          description: sessionCount > 0 ? `${String(sessionCount)} saved · 󰩺 clear` : undefined,
+          description:
+            sessionCount > 0
+              ? `${String(sessionCount)} saved · ${icon("delete_all")} clear`
+              : undefined,
         },
         {
           value: "_pmem",
@@ -392,7 +395,7 @@ function openStorageMenu(ctx: CommandContext): void {
         {
           value: "clear-plans",
           label: pad("Plans", formatBytes(s.plans)),
-          description: s.plans > 0 ? "󰩺 clear" : undefined,
+          description: s.plans > 0 ? `${icon("delete_all")} clear` : undefined,
         },
         {
           value: "_pconfig",
@@ -408,7 +411,7 @@ function openStorageMenu(ctx: CommandContext): void {
         {
           value: "clear-history",
           label: pad("History", formatBytes(s.history)),
-          description: s.history > 0 ? "󰩺 clear" : undefined,
+          description: s.history > 0 ? `${icon("delete_all")} clear` : undefined,
         },
         {
           value: "_gmem",
@@ -505,7 +508,7 @@ function openMemoryMenu(ctx: CommandContext): void {
     const config = memMgr.scopeConfig;
     ctx.openCommandPicker({
       title: "Memory",
-      icon: "󰍽",
+      icon: icon("memory"),
       options: [
         {
           value: "write-scope",
@@ -529,7 +532,7 @@ function openMemoryMenu(ctx: CommandContext): void {
         if (value === "write-scope") {
           ctx.openCommandPicker({
             title: "Write Scope",
-            icon: "󰍽",
+            icon: icon("memory"),
             currentValue: memMgr.scopeConfig.writeScope,
             options: [
               {
@@ -564,7 +567,7 @@ function openMemoryMenu(ctx: CommandContext): void {
         } else if (value === "read-scope") {
           ctx.openCommandPicker({
             title: "Read Scope",
-            icon: "󰍽",
+            icon: icon("memory"),
             currentValue: memMgr.scopeConfig.readScope,
             options: [
               {
@@ -604,7 +607,7 @@ function openMemoryMenu(ctx: CommandContext): void {
         } else if (value === "settings-storage") {
           ctx.openCommandPicker({
             title: "Persist Settings",
-            icon: "󰍽",
+            icon: icon("memory"),
             currentValue: memMgr.settingsScope,
             options: [
               {
@@ -652,11 +655,11 @@ function openMemoryMenu(ctx: CommandContext): void {
             }
             lines.push({ type: "spacer" });
           }
-          ctx.openInfoPopup({ title: "Memories", icon: "󰍽", lines, onClose: showMain });
+          ctx.openInfoPopup({ title: "Memories", icon: icon("memory"), lines, onClose: showMain });
         } else if (value === "clear") {
           ctx.openCommandPicker({
             title: "Clear Memories",
-            icon: "󰍽",
+            icon: icon("memory"),
             options: [
               {
                 value: "project",
@@ -765,7 +768,7 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
         const currentFont = getCurrentFont();
         ctx.openCommandPicker({
           title: "Set Terminal Font",
-          icon: "\uDB80\uDDA3",
+          icon: icon("memory_alt"),
           currentValue: found.find((f) => currentFont?.includes(f.family))?.id,
           options: NERD_FONTS.map((f) => {
             const installed = found.some((i) => i.id === f.id);
@@ -845,7 +848,7 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
     } else {
       ctx.openCommandPicker({
         title: "Chat Style",
-        icon: "󰍪",
+        icon: icon("chat_style"),
         currentValue: ctx.chatStyle,
         scopeEnabled: true,
         initialScope: ctx.detectScope("chatStyle"),
@@ -934,7 +937,7 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
     } else {
       ctx.openCommandPicker({
         title: "Forge Mode",
-        icon: "󰚩",
+        icon: icon("ai"),
         currentValue: ctx.currentMode,
         scopeEnabled: true,
         initialScope: ctx.detectScope("defaultForgeMode"),
@@ -1066,7 +1069,7 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
     } else {
       ctx.openCommandPicker({
         title: "Co-Author Commits",
-        icon: "󰊢",
+        icon: icon("git"),
         currentValue: ctx.chat.coAuthorCommits ? "enable" : "disable",
         scopeEnabled: true,
         initialScope: ctx.detectScope("coAuthorCommits"),
@@ -1293,7 +1296,7 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
           for (const f of status.untracked)
             lines.push({ type: "text", label: `  ${f}`, color: "#FF0040" });
         }
-        ctx.openInfoPopup({ title: "Git Status", icon: "󰊢", lines });
+        ctx.openInfoPopup({ title: "Git Status", icon: icon("git"), lines });
       });
       break;
     case "/branch":
@@ -1436,7 +1439,7 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
       );
       ctx.openInfoPopup({
         title: "Context Budget",
-        icon: "󰊕",
+        icon: icon("budget"),
         lines: popupLines,
         labelWidth: 22,
         width: 72,
@@ -1498,7 +1501,7 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
 
       ctx.openInfoPopup({
         title: "Proxy Status",
-        icon: "󰌆",
+        icon: icon("proxy"),
         lines: [{ type: "text", label: "Loading...", color: "#888" }],
       });
 
@@ -1509,7 +1512,7 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
           if (!pollActive) break;
           ctx.openInfoPopup({
             title: "Proxy Status",
-            icon: "󰌆",
+            icon: icon("proxy"),
             lines: buildLines(status),
             onClose: () => {
               pollActive = false;
@@ -1532,7 +1535,7 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
       const updatePopup = (extraLines: Line[], closeCb?: () => void) => {
         ctx.openInfoPopup({
           title: "Proxy Login",
-          icon: "󰌆",
+          icon: icon("proxy"),
           lines: extraLines,
           onClose: closeCb,
         });
@@ -1689,7 +1692,7 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
           }));
           ctx.openInfoPopup({
             title: "Git Log",
-            icon: "󰊢",
+            icon: icon("git"),
             lines: popupLines,
             width: 78,
             labelWidth: 10,
@@ -1708,31 +1711,21 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
       break;
     }
     case "/tabs": {
-      const tabLines: import("./InfoPopup.js").InfoPopupLine[] = [];
-      for (let i = 0; i < ctx.tabMgr.tabs.length; i++) {
-        const tab = ctx.tabMgr.tabs[i];
-        if (!tab) continue;
-        const isActive = tab.id === ctx.tabMgr.activeTabId;
-        tabLines.push({
-          type: "entry",
-          label: `${isActive ? "▸" : " "} ${String(i + 1)}.`,
-          desc: tab.label,
-          color: isActive ? "#9B30FF" : "#555",
-          descColor: isActive ? "#fff" : "#666",
-        });
-      }
-      tabLines.push(
-        { type: "spacer" },
-        { type: "separator" },
-        { type: "spacer" },
-        { type: "header", label: "Shortcuts" },
-        { type: "entry", label: "Alt+T", desc: "new tab" },
-        { type: "entry", label: "Alt+W", desc: "close tab" },
-        { type: "entry", label: "Alt+1-9", desc: "switch to tab" },
-        { type: "entry", label: "Alt+[ / ]", desc: "prev / next tab" },
-        { type: "entry", label: "/rename <n>", desc: "rename current tab" },
+      const tabOptions: import("./CommandPicker.js").CommandPickerOption[] = ctx.tabMgr.tabs.map(
+        (tab, i) => ({
+          value: tab.id,
+          label: `${String(i + 1)}. ${tab.label}`,
+          icon: tab.id === ctx.tabMgr.activeTabId ? "▸" : " ",
+          color: tab.id === ctx.tabMgr.activeTabId ? "#9B30FF" : undefined,
+        }),
       );
-      ctx.openInfoPopup({ title: "Tabs", icon: "󰓩", lines: tabLines });
+      ctx.openCommandPicker({
+        title: "Switch Tab",
+        icon: icon("tabs"),
+        options: tabOptions,
+        currentValue: ctx.tabMgr.activeTabId,
+        onSelect: (tabId) => ctx.tabMgr.switchTab(tabId),
+      });
       break;
     }
     case "/new-tab":
@@ -1803,7 +1796,7 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
         } else {
           ctx.openCommandPicker({
             title: "Neovim Config",
-            icon: "\uDB80\uDFA9",
+            icon: icon("nvim"),
             currentValue: ctx.effectiveNvimConfig ?? "auto",
             scopeEnabled: true,
             initialScope: ctx.detectScope("nvimConfig"),
@@ -1841,7 +1834,7 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
         const patch = (v: string) => ({ verbose: v === "on" });
         ctx.openCommandPicker({
           title: "Verbose Mode",
-          icon: "󰍡",
+          icon: icon("verbose"),
           currentValue: ctx.verbose ? "on" : "off",
           scopeEnabled: true,
           initialScope: ctx.detectScope("verbose"),
@@ -1869,7 +1862,7 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
         const patch = (v: string) => ({ showReasoning: v === "on" });
         ctx.openCommandPicker({
           title: "Reasoning Display",
-          icon: "󰘦",
+          icon: icon("brain"),
           currentValue: ctx.showReasoning ? "on" : "off",
           scopeEnabled: true,
           initialScope: ctx.detectScope("showReasoning"),
@@ -1903,7 +1896,7 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
         });
         ctx.openCommandPicker({
           title: "Compaction Strategy",
-          icon: "󰁜",
+          icon: icon("compact"),
           currentValue: ctx.compactionStrategy,
           scopeEnabled: true,
           initialScope: ctx.detectScope("compaction"),
@@ -1957,7 +1950,7 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
           }));
         ctx.openCommandPicker({
           title: "Agent Features",
-          icon: "󰒓",
+          icon: icon("system"),
           keepOpen: true,
           currentValue: "",
           options: buildOptions(),
@@ -1988,7 +1981,7 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
         });
         ctx.openCommandPicker({
           title: "Diff Style",
-          icon: "󰊢",
+          icon: icon("git"),
           scopeEnabled: true,
           initialScope: ctx.detectScope("diffStyle"),
           options: [
@@ -2032,7 +2025,7 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
         const patch = (v: string) => ({ vimHints: v === "visible" });
         ctx.openCommandPicker({
           title: "Vim Hints",
-          icon: "\uDB80\uDFA9",
+          icon: icon("nvim"),
           currentValue: ctx.vimHints ? "visible" : "hidden",
           scopeEnabled: true,
           initialScope: ctx.detectScope("vimHints"),
@@ -2061,32 +2054,25 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
         break;
       }
       if (cmd === "/nerd-font" || cmd === "/nerdfont") {
-        const patch = (v: string) => ({ nerdFont: v === "yes" });
         ctx.openCommandPicker({
           title: "Nerd Font",
           icon: icon("ghost"),
-          scopeEnabled: true,
-          initialScope: ctx.detectScope("nerdFont"),
           options: [
             { value: "yes", label: "Yes", description: "Terminal uses a Nerd Font" },
             { value: "no", label: "No", description: "Use ASCII fallback icons" },
           ],
-          onSelect: (value, scope) => {
+          onSelect: (value) => {
             setNerdFont(value === "yes");
-            ctx.saveToScope(patch(value), scope ?? "global");
+            ctx.saveToScope({ nerdFont: value === "yes" }, "global");
             ctx.chat.setMessages((prev) => [
               ...prev,
               {
                 id: crypto.randomUUID(),
                 role: "system",
-                content: `Nerd Font ${value === "yes" ? "enabled" : "disabled"} (${scope ?? "global"}). Restart for full effect.`,
+                content: `Nerd Font ${value === "yes" ? "enabled" : "disabled"} (global). Restart for full effect.`,
                 timestamp: Date.now(),
               },
             ]);
-          },
-          onScopeMove: (value, from, to) => {
-            setNerdFont(value === "yes");
-            ctx.saveToScope(patch(value), to, from);
           },
         });
         break;
@@ -2177,7 +2163,7 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
             { type: "entry", label: "/privacy remove <pat>", desc: "remove from project config" },
             { type: "entry", label: "/privacy session <pat>", desc: "add for this session only" },
           );
-          ctx.openInfoPopup({ title: "Forbidden Patterns", icon: "󰒃", lines: popupLines });
+          ctx.openInfoPopup({ title: "Forbidden Patterns", icon: icon("ban"), lines: popupLines });
         }
         break;
       }

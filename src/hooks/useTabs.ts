@@ -4,11 +4,17 @@ import type { TabMeta } from "../core/sessions/types.js";
 import type { ChatMessage } from "../types/index.js";
 import type { ChatInstance, TabState } from "./useChat.js";
 
-const MAX_TABS = 9;
+const MAX_TABS = 5;
 
 export interface Tab {
   id: string;
   label: string;
+}
+
+export interface TabActivity {
+  isLoading: boolean;
+  hasUnread: boolean;
+  hasError: boolean;
 }
 
 export interface UseTabsReturn {
@@ -25,11 +31,15 @@ export interface UseTabsReturn {
   prevTab: () => void;
   renameTab: (id: string, label: string) => void;
   moveTab: (id: string, direction: "left" | "right") => void;
-  /** Derive tab label from first user message */
   autoLabel: (id: string, firstMessage: string) => void;
-  /** Get frozen state for all tabs (for persistence) */
+  setTabActivity: (id: string, activity: Partial<TabActivity>) => void;
+  getTabActivity: (id: string) => TabActivity;
+  registerChat: (id: string, chat: ChatInstance) => void;
+  unregisterChat: (id: string) => void;
+  getActiveChat: () => ChatInstance | null;
+  getChat: (id: string) => ChatInstance | null;
   getAllTabStates: () => TabState[];
-  /** Rebuild all tabs from saved metadata */
+  initialStates: React.MutableRefObject<Map<string, TabState>>;
   restoreFromMeta: (
     tabMetas: TabMeta[],
     activeId: string,
@@ -37,21 +47,18 @@ export interface UseTabsReturn {
   ) => void;
 }
 
-interface UseTabsOptions {
-  chat: ChatInstance;
-  defaultModel: string;
-}
+const DEFAULT_ACTIVITY: TabActivity = { isLoading: false, hasUnread: false, hasError: false };
 
-export function useTabs({ chat, defaultModel }: UseTabsOptions): UseTabsReturn {
+export function useTabs(): UseTabsReturn {
   const initialId = useRef(crypto.randomUUID()).current;
   const [tabs, setTabs] = useState<Tab[]>([{ id: initialId, label: "Tab 1" }]);
   const [activeTabId, setActiveTabId] = useState<string>(initialId);
   const tabCounter = useRef(1);
-
-  // Frozen states for inactive tabs
-  const frozenStates = useRef(new Map<string, TabState>());
-  // Track whether each tab has been auto-labeled
   const autoLabeled = useRef(new Set<string>());
+  const chatRegistry = useRef(new Map<string, ChatInstance>());
+  const activityMap = useRef(new Map<string, TabActivity>());
+  const initialStates = useRef(new Map<string, TabState>());
+  const [, forceRender] = useState(0);
 
   const activeTab = (tabs.find((t) => t.id === activeTabId) ?? tabs[0]) as (typeof tabs)[number];
   const activeTabIndex = tabs.findIndex((t) => t.id === activeTabId);
@@ -60,116 +67,50 @@ export function useTabs({ chat, defaultModel }: UseTabsOptions): UseTabsReturn {
     (targetId: string) => {
       if (targetId === activeTabId) return;
       if (!tabs.some((t) => t.id === targetId)) return;
-
-      // Freeze current tab
-      const currentLabel = tabs.find((t) => t.id === activeTabId)?.label ?? "Tab";
-      frozenStates.current.set(activeTabId, chat.snapshot(currentLabel));
-
-      // Restore target tab
-      const targetState = frozenStates.current.get(targetId);
-      if (targetState) {
-        chat.restore(targetState);
-        frozenStates.current.delete(targetId);
-      } else {
-        // New tab with no state — clear chat
-        chat.restore({
-          id: targetId,
-          label: tabs.find((t) => t.id === targetId)?.label ?? "Tab",
-          messages: [],
-          coreMessages: [],
-          activeModel: defaultModel,
-          activePlan: null,
-          sidebarPlan: null,
-          tokenUsage: {
-            prompt: 0,
-            completion: 0,
-            total: 0,
-            cacheRead: 0,
-            subagentInput: 0,
-            subagentOutput: 0,
-          },
-          coAuthorCommits: true,
-          sessionId: targetId,
-          planMode: false,
-          planRequest: null,
-        });
+      const activity = activityMap.current.get(targetId);
+      if (activity && (activity.hasUnread || activity.hasError)) {
+        activityMap.current.set(targetId, { ...activity, hasUnread: false, hasError: false });
       }
-
       setActiveTabId(targetId);
     },
-    [activeTabId, tabs, chat, defaultModel],
+    [activeTabId, tabs],
   );
 
   const createTab = useCallback(() => {
     if (tabs.length >= MAX_TABS) return;
-
     tabCounter.current += 1;
     const newId = crypto.randomUUID();
     const newLabel = `Tab ${String(tabCounter.current)}`;
-
     setTabs((prev) => [...prev, { id: newId, label: newLabel }]);
-
-    // Freeze current tab and switch to new
-    const currentLabel = tabs.find((t) => t.id === activeTabId)?.label ?? "Tab";
-    frozenStates.current.set(activeTabId, chat.snapshot(currentLabel));
-
-    // Initialize new tab with clean state
-    chat.restore({
-      id: newId,
-      label: newLabel,
-      messages: [],
-      coreMessages: [],
-      activeModel: defaultModel,
-      activePlan: null,
-      sidebarPlan: null,
-      tokenUsage: {
-        prompt: 0,
-        completion: 0,
-        total: 0,
-        cacheRead: 0,
-        subagentInput: 0,
-        subagentOutput: 0,
-      },
-      coAuthorCommits: true,
-      sessionId: newId,
-      planMode: false,
-      planRequest: null,
-    });
-
     setActiveTabId(newId);
-  }, [tabs, activeTabId, chat, defaultModel]);
+  }, [tabs.length]);
 
   const closeTab = useCallback(
     (targetId: string): boolean => {
       if (tabs.length <= 1) return false;
-
       const idx = tabs.findIndex((t) => t.id === targetId);
       if (idx === -1) return false;
 
-      // Remove frozen state
-      frozenStates.current.delete(targetId);
+      const chat = chatRegistry.current.get(targetId);
+      if (chat?.isLoading) chat.abort();
+
+      chatRegistry.current.delete(targetId);
       autoLabeled.current.delete(targetId);
+      activityMap.current.delete(targetId);
+      initialStates.current.delete(targetId);
 
       const newTabs = tabs.filter((t) => t.id !== targetId);
       setTabs(newTabs);
 
-      // If closing active tab, switch to neighbor
       if (targetId === activeTabId) {
         const newIdx = Math.min(idx, newTabs.length - 1);
         const newActiveId = newTabs[newIdx]?.id ?? newTabs[0]?.id ?? "";
-
-        const targetState = frozenStates.current.get(newActiveId);
-        if (targetState) {
-          chat.restore(targetState);
-          frozenStates.current.delete(newActiveId);
-        }
-
         setActiveTabId(newActiveId);
       }
 
       return true;
     },
-    [tabs, activeTabId, chat],
+    [tabs, activeTabId],
   );
 
   const switchToIndex = useCallback(
@@ -223,20 +164,50 @@ export function useTabs({ chat, defaultModel }: UseTabsOptions): UseTabsReturn {
     setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, label } : t)));
   }, []);
 
+  const setTabActivity = useCallback(
+    (id: string, activity: Partial<TabActivity>) => {
+      const current = activityMap.current.get(id) ?? { ...DEFAULT_ACTIVITY };
+      const updated = { ...current, ...activity };
+      if (activity.hasUnread && id === activeTabId) {
+        updated.hasUnread = false;
+      }
+      activityMap.current.set(id, updated);
+      forceRender((n) => n + 1);
+    },
+    [activeTabId],
+  );
+
+  const getTabActivity = useCallback((id: string): TabActivity => {
+    return activityMap.current.get(id) ?? { ...DEFAULT_ACTIVITY };
+  }, []);
+
+  const registerChat = useCallback((id: string, chat: ChatInstance) => {
+    chatRegistry.current.set(id, chat);
+    initialStates.current.delete(id);
+  }, []);
+
+  const unregisterChat = useCallback((id: string) => {
+    chatRegistry.current.delete(id);
+  }, []);
+
+  const getActiveChat = useCallback((): ChatInstance | null => {
+    return chatRegistry.current.get(activeTabId) ?? null;
+  }, [activeTabId]);
+
+  const getChat = useCallback((id: string): ChatInstance | null => {
+    return chatRegistry.current.get(id) ?? null;
+  }, []);
+
   const getAllTabStates = useCallback((): TabState[] => {
     const states: TabState[] = [];
     for (const tab of tabs) {
-      if (tab.id === activeTabId) {
+      const chat = chatRegistry.current.get(tab.id);
+      if (chat) {
         states.push(chat.snapshot(tab.label));
-      } else {
-        const frozen = frozenStates.current.get(tab.id);
-        if (frozen) {
-          states.push(frozen);
-        }
       }
     }
     return states;
-  }, [tabs, activeTabId, chat]);
+  }, [tabs]);
 
   const restoreFromMeta = useCallback(
     (tabMetas: TabMeta[], activeId: string, tabMessages: Map<string, ChatMessage[]>) => {
@@ -249,18 +220,15 @@ export function useTabs({ chat, defaultModel }: UseTabsOptions): UseTabsReturn {
       setTabs(restoredTabs);
       tabCounter.current = restoredTabs.length;
 
-      // Mark all tabs as auto-labeled
       for (const tm of tabMetas) {
         autoLabeled.current.add(tm.id);
       }
 
-      // Resolve active tab — fall back to first tab if activeId doesn't match
       const resolvedActiveId = tabMetas.some((tm) => tm.id === activeId)
         ? activeId
         : (tabMetas[0] as (typeof tabMetas)[number]).id;
 
-      // Build tab states and freeze inactive ones
-      frozenStates.current.clear();
+      initialStates.current.clear();
       for (const tm of tabMetas) {
         const msgs = tabMessages.get(tm.id) ?? [];
         const state: TabState = {
@@ -277,17 +245,12 @@ export function useTabs({ chat, defaultModel }: UseTabsOptions): UseTabsReturn {
           planMode: tm.planMode,
           planRequest: tm.planRequest,
         };
-
-        if (tm.id === resolvedActiveId) {
-          chat.restore(state);
-        } else {
-          frozenStates.current.set(tm.id, state);
-        }
+        initialStates.current.set(tm.id, state);
       }
 
       setActiveTabId(resolvedActiveId);
     },
-    [chat],
+    [],
   );
 
   return {
@@ -305,7 +268,14 @@ export function useTabs({ chat, defaultModel }: UseTabsOptions): UseTabsReturn {
     renameTab,
     moveTab,
     autoLabel,
+    setTabActivity,
+    getTabActivity,
+    registerChat,
+    unregisterChat,
+    getActiveChat,
+    getChat,
     getAllTabStates,
+    initialStates,
     restoreFromMeta,
   };
 }

@@ -11,8 +11,8 @@ const STATUS_ICONS: Record<PlanStepStatus, () => string> = {
 };
 
 const STATUS_COLORS: Record<PlanStepStatus, string> = {
-  done: "#2d5",
-  active: "#FF0040",
+  done: "#4a7",
+  active: "#9B30FF",
   pending: "#555",
   skipped: "#444",
 };

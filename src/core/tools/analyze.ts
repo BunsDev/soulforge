@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ToolResult } from "../../types/index.js";
@@ -251,12 +251,19 @@ export const analyzeTool = {
           let oldContent = args.oldContent;
           if (!oldContent) {
             try {
-              const gitResult = spawnSync("git", ["show", `HEAD:${file}`], {
-                encoding: "utf-8",
-                cwd: process.cwd(),
+              oldContent = await new Promise<string>((res, rej) => {
+                const proc = spawn("git", ["show", `HEAD:${file}`], {
+                  cwd: process.cwd(),
+                  stdio: ["ignore", "pipe", "pipe"],
+                });
+                const chunks: Buffer[] = [];
+                proc.stdout.on("data", (d: Buffer) => chunks.push(d));
+                proc.on("close", (code) => {
+                  if (code !== 0) rej(new Error("git show failed"));
+                  else res(Buffer.concat(chunks).toString("utf-8"));
+                });
+                proc.on("error", rej);
               });
-              if (gitResult.status !== 0) throw new Error(gitResult.stderr);
-              oldContent = gitResult.stdout;
             } catch {
               return {
                 success: false,

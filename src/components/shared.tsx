@@ -57,7 +57,7 @@ export function useSpinnerFrame(): number {
 
 export function Spinner({
   frames = SPINNER_FRAMES,
-  color = "#FF0040",
+  color = "#9B30FF",
 }: {
   frames?: string[];
   color?: string;

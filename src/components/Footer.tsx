@@ -39,10 +39,10 @@ export function Footer() {
     >
       {visible.map((s) => (
         <text key={s.k}>
-          <span fg="#FF0040">
+          <span fg="#666">
             <b>{s.k}</b>
           </span>
-          <span fg="#555">
+          <span fg="#444">
             {" "}
             {s.ic}
             {showLabels ? ` ${s.l}` : ""}

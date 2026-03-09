@@ -1,7 +1,7 @@
 import { TextAttributes } from "@opentui/core";
 import { memo, useMemo } from "react";
 import type { ChatMessage, Plan } from "../types/index.js";
-import { ChangedFiles } from "./ChangedFiles.js";
+import { ChangesPanel } from "./ChangedFiles.js";
 import { PlanView } from "./PlanView.js";
 
 export const RightSidebar = memo(function RightSidebar({
@@ -60,7 +60,7 @@ export const RightSidebar = memo(function RightSidebar({
 
         {/* Changes section */}
         {hasChanges ? (
-          <ChangedFiles messages={messages} cwd={cwd} expanded={true} />
+          <ChangesPanel messages={messages} cwd={cwd} />
         ) : (
           <box height={1} paddingLeft={2}>
             <text fg="#444">No files changed</text>

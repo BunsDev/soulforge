@@ -2,8 +2,9 @@ import type { LanguageModelV3ToolCall } from "@ai-sdk/provider";
 import type { ModelMessage } from "ai";
 import { smoothStream } from "ai";
 
-/** Shared smoothStream transform applied to all agents. */
-export const smoothStreamOptions = {
+/** Shared smoothStream transform applied to all agents via .stream() calls. */
+// biome-ignore lint/suspicious/noExplicitAny: generic tool types vary per agent
+export const smoothStreamOptions: { experimental_transform: any } = {
   experimental_transform: smoothStream({ delayInMs: 12, chunking: "word" }),
 };
 

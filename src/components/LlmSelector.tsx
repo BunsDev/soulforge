@@ -1,7 +1,7 @@
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { memo, useEffect, useState } from "react";
-import { providerIcon } from "../core/icons.js";
+import { icon, providerIcon } from "../core/icons.js";
 import { PROVIDER_CONFIGS } from "../core/llm/models.js";
 import { checkProviders, type ProviderStatus } from "../core/llm/provider.js";
 import { useGroupedModels } from "../hooks/useGroupedModels.js";
@@ -321,7 +321,8 @@ export const LlmSelector = memo(function LlmSelector({
             <>
               <PopupRow w={innerW}>
                 <text fg="#8B5CF6" bg={POPUP_BG}>
-                  {"  "}󰄬 Claude subscription
+                  {"  "}
+                  {icon("check_link")} Claude subscription
                 </text>
                 <text fg="#555" bg={POPUP_BG}>
                   {" "}

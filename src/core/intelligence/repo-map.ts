@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { execSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { stat as statAsync } from "node:fs/promises";
 import { extname, join, relative } from "node:path";
 import { isForbidden } from "../security/forbidden.js";
 import type { Language, SymbolKind } from "./types.js";
@@ -1226,13 +1227,12 @@ export class RepoMap {
     const language = INDEXABLE_EXTENSIONS[ext];
     if (!language) return;
 
-    try {
-      const stat = statSync(absPath);
-      this.ensureTreeSitter()
-        .then(() => this.indexFile(absPath, relPath, stat.mtimeMs, language))
-        .catch(() => {});
-      this.markDirty();
-    } catch {}
+    statAsync(absPath)
+      .then((st) =>
+        this.ensureTreeSitter().then(() => this.indexFile(absPath, relPath, st.mtimeMs, language)),
+      )
+      .then(() => this.markDirty())
+      .catch(() => {});
   }
 
   private markDirty(): void {

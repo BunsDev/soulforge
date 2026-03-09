@@ -17,27 +17,27 @@ function buildContent(
 
   if (status === "scanning") {
     const label = progress ? ` ${frame} ${progress}` : ` ${frame}`;
-    return new StyledText([fgStyle("#555")(icon("code")), fgStyle("#FF8C00")(label)]);
+    return new StyledText([fgStyle("#555")(icon("code")), fgStyle("#b87333")(label)]);
   }
 
   const parts: TextChunk[] = [];
   if (status === "ready") {
     parts.push(
       fgStyle("#555")(icon("code")),
-      fgStyle("#2d5")(` ${String(files)}f ${String(symbols)}s`),
+      fgStyle("#4a7")(` ${String(files)}f ${String(symbols)}s`),
     );
   } else if (status === "error") {
-    parts.push(fgStyle("#555")(icon("code")), fgStyle("#FF0040")(" err"));
+    parts.push(fgStyle("#555")(icon("code")), fgStyle("#f44")(" err"));
   } else {
     parts.push(fgStyle("#555")(icon("code")), fgStyle("#444")(" off"));
   }
 
   if (semStatus === "generating") {
     const label = semProgress ? ` ${frame} ${semProgress}` : ` ${frame} sem`;
-    parts.push(fgStyle("#FF8C00")(label));
+    parts.push(fgStyle("#b87333")(label));
   } else if (semStatus === "ready") {
     const mode = semProgress.startsWith("ast") ? "ast" : "sem";
-    parts.push(fgStyle("#555")(` ${mode} `), fgStyle("#2d5")("✓"));
+    parts.push(fgStyle("#555")(` ${mode} `), fgStyle("#4a7")("✓"));
   }
 
   return new StyledText(parts);

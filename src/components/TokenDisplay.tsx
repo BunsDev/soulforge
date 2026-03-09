@@ -50,7 +50,7 @@ function buildContent(u: TokenUsage): StyledText {
     fgStyle("#444")("↓"),
   ];
   if (u.cacheRead > 0) {
-    chunks.push(fgStyle("#2d5")(` ${fmt(u.cacheRead)} cached`));
+    chunks.push(fgStyle("#4a7")(` ${fmt(u.cacheRead)} cached`));
   }
   const sub = u.subagentInput + u.subagentOutput;
   if (sub > 0) {

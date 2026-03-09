@@ -9,8 +9,8 @@ import {
   type SubagentStep,
 } from "../core/agents/subagent-events.js";
 import {
-  BACKEND_LABELS,
   CATEGORY_COLORS,
+  getBackendLabel,
   TOOL_CATEGORIES,
   TOOL_ICON_COLORS,
   TOOL_ICONS,
@@ -36,18 +36,18 @@ export interface LiveToolCall {
 const SUBAGENT_NAMES = new Set(["dispatch", "web_search"]);
 
 const COLORS = {
-  spinnerActive: "#FF0040",
+  spinnerActive: "#9B30FF",
   toolNameActive: "#9B30FF",
   argsActive: "#aaa",
-  checkDone: "#2d5",
+  checkDone: "#4a7",
   textDone: "#555",
   error: "#f44",
 } as const;
 
-const RENDER_INTERVAL = 200;
+const RENDER_DEBOUNCE = 32;
 
 function backendLabel(tag: string): string {
-  return BACKEND_LABELS[tag] ?? tag;
+  return getBackendLabel(tag);
 }
 
 function formatArgs(toolName: string, args?: string): string {
@@ -356,6 +356,18 @@ function useDispatchDisplay(
     statsRef.current = new Map();
     dirtyRef.current = false;
 
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleTick = () => {
+      if (debounceTimer) return;
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null;
+        if (dirtyRef.current) {
+          dirtyRef.current = false;
+          setTick((n) => n + 1);
+        }
+      }, RENDER_DEBOUNCE);
+    };
+
     const unsub1 = onSubagentStep((step) => {
       if (step.parentToolCallId !== parentId) return;
       const prev = stepsRef.current;
@@ -372,12 +384,14 @@ function useDispatchDisplay(
         stepsRef.current = next.length > max ? next.slice(-max) : next;
       }
       dirtyRef.current = true;
+      scheduleTick();
     });
 
     const unsub2 = onMultiAgentEvent((event: MultiAgentEvent) => {
       if (event.parentToolCallId !== parentId) return;
       progressRef.current = applyMultiAgentEvent(progressRef.current, event, fallbackRef.current);
       dirtyRef.current = true;
+      scheduleTick();
     });
 
     const unsub3 = onAgentStats((event) => {
@@ -386,20 +400,14 @@ function useDispatchDisplay(
       next.set(event.agentId, event);
       statsRef.current = next;
       dirtyRef.current = true;
+      scheduleTick();
     });
-
-    const timer = setInterval(() => {
-      if (dirtyRef.current) {
-        dirtyRef.current = false;
-        setTick((n) => n + 1);
-      }
-    }, RENDER_INTERVAL);
 
     return () => {
       unsub1();
       unsub2();
       unsub3();
-      clearInterval(timer);
+      if (debounceTimer) clearTimeout(debounceTimer);
     };
   }, [parentId]);
 
@@ -442,7 +450,7 @@ const ChildStepRow = memo(
           ) : step.state === "running" ? (
             <Spinner color="#666" />
           ) : step.state === "done" ? (
-            <span fg="#2d5">✓</span>
+            <span fg="#4a7">✓</span>
           ) : (
             <span fg="#f44">✗</span>
           )}
@@ -588,7 +596,7 @@ const CACHE_ICONS: Record<string, string> = {
 };
 
 const CACHE_COLORS: Record<string, string> = {
-  hit: "#2d5",
+  hit: "#4a7",
   wait: "#FFDD57",
   store: "#5af",
   invalidate: "#f80",
@@ -653,7 +661,7 @@ const MultiAgentChildRow = memo(
             {info.state === "running" ? (
               <Spinner color={roleColor} />
             ) : info.state === "done" ? (
-              <span fg="#2d5">✓</span>
+              <span fg="#4a7">✓</span>
             ) : info.state === "error" ? (
               <span fg="#f44">✗</span>
             ) : (
@@ -748,7 +756,7 @@ const MultiAgentChildRow = memo(
                       ) : step.state === "running" ? (
                         <Spinner color="#666" />
                       ) : step.state === "done" ? (
-                        <span fg="#2d5">✓</span>
+                        <span fg="#4a7">✓</span>
                       ) : (
                         <span fg="#f44">✗</span>
                       )}

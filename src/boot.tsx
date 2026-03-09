@@ -1,5 +1,8 @@
 #!/usr/bin/env bun
 
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { BRAND_SEGMENTS, garble, WISP_FRAMES, WORDMARK } from "./components/splash.js";
 import { logBackgroundError } from "./stores/errors.js";
 
@@ -25,7 +28,15 @@ const RED = rgb("#FF0040");
 const cols = process.stdout.columns ?? 80;
 const rows = process.stdout.rows ?? 24;
 
-const GHOST = "󰊠";
+const GHOST = (() => {
+  try {
+    const raw = readFileSync(join(homedir(), ".soulforge", "config.json"), "utf-8");
+    const cfg = JSON.parse(raw);
+    return cfg.nerdFont === true ? "󰊠" : "◆";
+  } catch {
+    return "◆";
+  }
+})();
 
 // ─── Layout ───
 
