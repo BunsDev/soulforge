@@ -248,16 +248,33 @@ SoulForge checks for prerequisites on first launch and offers to install Neovim 
 
 ### Slash Commands
 
-| Command | Description |
-|---------|-------------|
-| `/model` | Switch model |
-| `/router` | Per-task model routing |
-| `/provider` | Thinking, effort, speed settings |
-| `/mode` | Switch forge mode |
-| `/git` | Git operations |
-| `/compact` | Trigger context compaction |
-| `/sessions` | Browse and restore sessions |
-| `/setup` | Check and install prerequisites |
+60 commands available — press `/` or `Ctrl+K` to browse. Key ones by category:
+
+**Models & Providers**
+`/model` `/router` `/provider` `/model-scope`
+
+**Agent & Modes**
+`/mode` `/plan` `/agent-features` `/reasoning`
+
+**Editor & Display**
+`/editor` `/split` `/diff-style` `/chat-style` `/vim-hints` `/open <file>`
+
+**Git**
+`/git` `/commit` `/push` `/pull` `/branch` `/log` `/diff` `/stash` `/lazygit` `/co-author-commits`
+
+**Intelligence & LSP**
+`/lsp` `/lsp-install` `/diagnose` `/repo-map` `/web-search`
+
+**Context & Memory**
+`/compact` `/context` `/memory` `/compaction`
+
+**Sessions & Tabs**
+`/sessions` `/new-tab` `/close-tab` `/rename` `/tabs`
+
+**System**
+`/setup` `/skills` `/privacy` `/storage` `/errors` `/status` `/proxy`
+
+[Full command reference →](docs/commands-reference.md)
 
 ### Forge Modes
 
@@ -481,6 +498,7 @@ bun run lint:fix      # auto-fix
 
 | Document | Description |
 |----------|-------------|
+| **[Command Reference](docs/commands-reference.md)** | All 60 slash commands by category |
 | **[Architecture](docs/architecture.md)** | System overview, data flow, component lifecycle |
 | **[Repo Map](docs/repo-map.md)** | PageRank, cochange, blast radius, clone detection |
 | **[Agent Bus](docs/agent-bus.md)** | Multi-agent coordination, shared cache, edit ownership |
@@ -491,7 +509,7 @@ bun run lint:fix      # auto-fix
 | **[Provider Options](docs/provider-options.md)** | Thinking modes, context management, degradation |
 | [Getting Started](GETTING_STARTED.md) | Installation, configuration, first steps |
 | [Contributing](CONTRIBUTING.md) | Dev setup, project structure, PR guidelines |
-| [Security](SECURITY.md) | Security policy, responsible disclosure |
+| [Security](SECURITY.md) | Security policy, forbidden file management, responsible disclosure |
 
 ---
 

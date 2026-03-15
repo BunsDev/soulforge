@@ -27,12 +27,21 @@ The following are in scope for security reports:
 
 SoulForge implements several layers of protection:
 
-- **Forbidden file enforcement** — blocks access to sensitive files (.env, credentials, private keys) across all tools (pre-execution input checks + post-execution output filtering)
+- **Forbidden file enforcement** — blocks access to sensitive files (.env, credentials, private keys) across all tools. Input checks (pre-execution) on read_file, edit_file, navigate, analyze, refactor, rename_symbol, move_symbol, editor. Output filtering (post-execution) on grep, glob, soul_grep, soul_find. Manage patterns via `/privacy` command.
 - **Outside-CWD confirmation** — write operations targeting files outside the project directory require explicit user approval
-- **Shell anti-patterns** — blocks common shell injection patterns (cat|grep|find pipes redirected to built-in tools)
+- **Shell anti-patterns** — blocks cat|grep|find pipes, redirects to built-in tools. Detects subshell expansion referencing sensitive keywords (env, pem, key, credentials, secrets, token, passwd, ssh, aws)
+- **Pre-commit checks** — auto-runs lint + typecheck before allowing `git commit` via shell tool. Catches issues the agent introduced before they're committed.
 - **Secret storage** — API keys stored in OS keychain (macOS) or 0o600-permissioned files, never in config
 - **Session file permissions** — session data written with restrictive file modes (0o600)
 - **No telemetry** — SoulForge does not phone home or collect usage data
+
+### Managing Forbidden Patterns
+
+Use `/privacy` to add or remove forbidden file patterns:
+
+- **Project scope** — patterns in `.soulforge/forbidden` apply to current project
+- **Global scope** — patterns in `~/.soulforge/forbidden` apply everywhere
+- Built-in patterns cover `.env`, `.pem`, `credentials`, `private_key`, `id_rsa`, `.npmrc`, `.netrc`, `shadow`, `passwd`, and more
 
 ## Supported Versions
 
