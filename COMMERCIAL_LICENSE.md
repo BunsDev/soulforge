@@ -17,7 +17,7 @@ SoulForge is licensed under the [Business Source License 1.1](LICENSE).
 
 ## Get a commercial license
 
-Contact **proxysoul@github.com** for pricing and terms.
+Contact **soulforge@proxysoul.com** for pricing and terms — [proxysoul.com](https://proxysoul.com)
 
 ## Change Date
 
