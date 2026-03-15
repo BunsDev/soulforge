@@ -440,31 +440,17 @@ export function TabInstance({
               <TaskProgress />
             </box>
           )}
-          {hasChangedFiles && (
-            <box flexShrink={0} paddingX={1}>
-              <ChangedFilesBar messages={chat.messages} />
-            </box>
-          )}
-          {chat.messageQueue.length > 0 && (
-            <box flexDirection="column" flexShrink={0} paddingX={1} marginBottom={1}>
-              {chat.messageQueue.map((q, i) => (
-                <box
-                  key={`q-${String(i)}-${String(q.queuedAt)}`}
-                  flexDirection="column"
-                  border={["left"]}
-                  borderColor="#444"
-                  customBorderChars={RAIL_BORDER}
-                  paddingLeft={2}
-                  paddingRight={1}
-                  paddingY={1}
-                >
-                  <box flexDirection="row">
-                    <text fg="#444">You</text>
-                    <text fg="#333"> · queued</text>
-                  </box>
-                  <text fg="#666">{q.content}</text>
-                </box>
-              ))}
+          {(hasChangedFiles || chat.messageQueue.length > 0) && (
+            <box flexShrink={0} paddingX={1} flexDirection="row" gap={1}>
+              {hasChangedFiles && <ChangedFilesBar messages={chat.messages} />}
+              {chat.messageQueue.length > 0 && (
+                <text fg="#FF8C00" truncate>
+                  │ Steering: {chat.messageQueue[chat.messageQueue.length - 1]?.content ?? ""}
+                  {chat.messageQueue.length > 1 && (
+                    <span fg="#666"> (+{String(chat.messageQueue.length - 1)})</span>
+                  )}
+                </text>
+              )}
             </box>
           )}
           <box flexShrink={0} zIndex={10}>

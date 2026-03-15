@@ -379,7 +379,7 @@ export class TreeSitterBackend implements IntelligenceBackend {
     if (!tree) return null;
 
     const language = this.detectLang(file);
-    const tsLang = this.languages.get(language);
+    const tsLang = this.languages.get(this.grammarKeyForFile(file));
     if (!tsLang) {
       tree.delete();
       return null;
@@ -447,7 +447,7 @@ export class TreeSitterBackend implements IntelligenceBackend {
       return null;
     }
 
-    const tsLang = this.languages.get(language);
+    const tsLang = this.languages.get(this.grammarKeyForFile(file));
     if (!tsLang) {
       tree.delete();
       return null;
@@ -518,7 +518,7 @@ export class TreeSitterBackend implements IntelligenceBackend {
     if (!tree) return null;
 
     const language = this.detectLang(file);
-    const tsLang = this.languages.get(language);
+    const tsLang = this.languages.get(this.grammarKeyForFile(file));
     if (!tsLang) {
       tree.delete();
       return null;
@@ -975,13 +975,13 @@ export class TreeSitterBackend implements IntelligenceBackend {
   }
 
   /** Map a file to its grammar key — handles tsx/typescript split */
-    private grammarKeyForFile(file: string): string {
-      const language = this.detectLang(file);
-      if (language === "typescript" && /\.tsx$/i.test(file)) return "tsx";
-      return language;
-    }
+  private grammarKeyForFile(file: string): string {
+    const language = this.detectLang(file);
+    if (language === "typescript" && /\.tsx$/i.test(file)) return "tsx";
+    return language;
+  }
 
-    private captureToKind(captureName: string): SymbolKind {
+  private captureToKind(captureName: string): SymbolKind {
     switch (captureName) {
       case "func":
         return "function";

@@ -1274,7 +1274,23 @@ export function useChat({
           const [next, ...rest] = queue;
           messageQueueRef.current = rest;
           setMessageQueue(rest);
-          return next?.content ?? null;
+          const content = next?.content ?? null;
+          if (content) {
+            queueMicrotask(() => {
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: crypto.randomUUID(),
+                  role: "user" as const,
+                  content,
+                  timestamp: Date.now(),
+                  showInChat: true,
+                  isSteering: true,
+                },
+              ]);
+            });
+          }
+          return content;
         };
 
         const agent = createForgeAgent({

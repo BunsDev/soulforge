@@ -390,7 +390,9 @@ export class CodeIntelligenceRouter {
             }
           }
         }
-      } catch { /* use fallback */ }
+      } catch {
+        /* use fallback */
+      }
     }
 
     // Key operations to test, grouped by what they need
@@ -404,7 +406,11 @@ export class CodeIntelligenceRouter {
       { op: "findExports", label: "findExports", fn: (b, f) => b.findExports!(f) },
       { op: "getFileOutline", label: "getFileOutline", fn: (b, f) => b.getFileOutline!(f) },
       { op: "getDiagnostics", label: "getDiagnostics", fn: (b, f) => b.getDiagnostics!(f) },
-      { op: "readSymbol", label: `readSymbol(${probeSymbolName})`, fn: (b, f) => b.readSymbol!(f, probeSymbolName) },
+      {
+        op: "readSymbol",
+        label: `readSymbol(${probeSymbolName})`,
+        fn: (b, f) => b.readSymbol!(f, probeSymbolName),
+      },
     ];
 
     for (const backend of this.backends) {

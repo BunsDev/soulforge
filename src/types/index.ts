@@ -139,6 +139,8 @@ export interface ChatMessage {
   segments?: MessageSegment[];
   /** When true, system messages render inline in chat instead of the ephemeral banner. */
   showInChat?: boolean;
+  /** Marks a user message injected via steering (sent while AI was working). */
+  isSteering?: boolean;
 }
 
 export interface ToolCall {

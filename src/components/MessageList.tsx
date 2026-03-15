@@ -470,6 +470,7 @@ const UserMessageAccent = memo(function UserMessageAccent({ msg }: { msg: ChatMe
           You
         </text>
         <text fg="#333"> · {time}</text>
+        {msg.isSteering && <text fg="#FF8C00"> · steering</text>}
       </box>
       <text>{msg.content}</text>
     </box>

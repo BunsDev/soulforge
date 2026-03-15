@@ -1958,8 +1958,8 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
         title: "Intelligence Health Check",
         icon: icon("brain"),
         lines,
-        width: 60,
-        labelWidth: 18,
+        width: 72,
+        labelWidth: 30,
       });
       break;
     }
