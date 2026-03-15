@@ -621,11 +621,11 @@ describe("RegexBackend — extension edge cases", () => {
     expect(outline?.symbols.find((s) => s.name === "build")).toBeDefined();
   });
 
-  it(".vue file is unknown to regex backend", async () => {
+  it(".vue file is detected as vue by regex backend", async () => {
     const f = writeTemp("App.vue", "<script>\nfunction setup() {}\n</script>");
     const outline = await backend.getFileOutline(f);
-    // Falls back to TS patterns, "function setup" will match
-    expect(outline?.language).toBe("unknown");
+    // Now detected via centralized EXT_TO_LANGUAGE map
+    expect(outline?.language).toBe("vue");
   });
 
   it("double extension .test.ts detected as typescript", async () => {
