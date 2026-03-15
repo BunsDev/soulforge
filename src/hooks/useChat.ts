@@ -1629,6 +1629,7 @@ export function useChat({
               streamingCharsRef.current = 0;
               if (stepIn > 0) pendingContextTokens.current = stepIn;
               pendingLastStepOutput.current = stepOut;
+              queueMicrotaskFlush();
 
               if (completedCalls.length > 0 && Date.now() - lastIncrementalSave > 10_000) {
                 lastIncrementalSave = Date.now();

@@ -365,6 +365,12 @@ export const LlmSelector = memo(function LlmSelector({
                 {SPINNER_FRAMES_FILLED[spinnerIdx]} fetching providers...
               </text>
             </PopupRow>
+          ) : subProviders.length === 0 && !groupedError ? (
+            <PopupRow w={innerW}>
+              <text fg="#888" bg={POPUP_BG}>
+                {"  "}No models found — try restarting SoulForge
+              </text>
+            </PopupRow>
           ) : (
             <box
               flexDirection="column"
@@ -474,6 +480,12 @@ export const LlmSelector = memo(function LlmSelector({
           <PopupRow w={innerW}>
             <text fg="#9B30FF" bg={POPUP_BG}>
               {SPINNER_FRAMES_FILLED[spinnerIdx]} fetching models...
+            </text>
+          </PopupRow>
+        ) : currentModels.length === 0 && !currentError ? (
+          <PopupRow w={innerW}>
+            <text fg="#888" bg={POPUP_BG}>
+              {"  "}No models found — try restarting SoulForge
             </text>
           </PopupRow>
         ) : (

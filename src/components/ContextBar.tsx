@@ -105,9 +105,7 @@ export function ContextBar({ contextManager }: Props) {
   const currentTokensRef = useRef(0);
   const compactFrameRef = useRef(0);
   const prevV2SlotsRef = useRef(0);
-  const renderedContentRef = useRef(
-    buildContent(0, "0.0", formatWindow(200_000), false, false),
-  );
+  const renderedContentRef = useRef(buildContent(0, "0.0", formatWindow(200_000), false, false));
 
   const computeTarget = useCallback(
     (state: {
@@ -194,7 +192,5 @@ export function ContextBar({ contextManager }: Props) {
     return () => clearInterval(timer);
   }, []);
 
-  return (
-    <text ref={textRef} truncate content={renderedContentRef.current} />
-  );
+  return <text ref={textRef} truncate content={renderedContentRef.current} />;
 }

@@ -1592,8 +1592,8 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
       if (tu.subagentInput > 0 || tu.subagentOutput > 0) {
         popupLines.push({
           type: "entry",
-          label: "  Subagents",
-          desc: `${fmtT(tu.subagentInput)}↑ ${fmtT(tu.subagentOutput)}↓ (included above)`,
+          label: "  Dispatch Agents",
+          desc: `${fmtT(tu.subagentInput)}↑ ${fmtT(tu.subagentOutput)}↓ (included in total)`,
           color: "#9B30FF",
           descColor: "#666",
         });

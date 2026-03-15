@@ -164,7 +164,9 @@ export async function downloadRegistry(): Promise<MasonPackage[]> {
       headers: { Accept: "application/vnd.github.v3+json", "User-Agent": "SoulForge" },
     });
     if (!releaseResp.ok) throw new Error(`GitHub API HTTP ${String(releaseResp.status)}`);
-    const release = (await releaseResp.json()) as { assets?: Array<{ name: string; browser_download_url: string }> };
+    const release = (await releaseResp.json()) as {
+      assets?: Array<{ name: string; browser_download_url: string }>;
+    };
     const asset = release.assets?.find((a) => a.name === "registry.json.zip");
     if (!asset) throw new Error("registry.json.zip not found in latest release");
 
