@@ -41,6 +41,10 @@ const BUDGET_WARNING_THRESHOLD_EXPLORE = 60_000;
 const BUDGET_WARNING_THRESHOLD_CODE = 120_000;
 const FORCE_DONE_THRESHOLD_EXPLORE = 70_000;
 const FORCE_DONE_THRESHOLD_CODE = 135_000;
+// Cache-aware pruning: only compact old tool results when context exceeds this threshold.
+// Below this, caching handles the cost better than pruning (prefix stays stable → cache hits).
+const PRUNE_THRESHOLD_EXPLORE = 35_000;
+const PRUNE_THRESHOLD_CODE = 60_000;
 
 const KEEP_RECENT_MESSAGES = 4;
 
@@ -462,14 +466,16 @@ export function buildPrepareStep({
       result.messages = msgs;
     }
 
-    // Age-based tool result summarization (runs from step 3)
-    if (stepNumber >= 3) {
-      result.messages = compactOldToolResults(result.messages ?? messages, symbolLookup, pathMap);
-    }
-
     const totalTokens = steps.reduce((sum, s) => {
       return sum + (s.usage.inputTokens ?? 0) + (s.usage.outputTokens ?? 0);
     }, 0);
+
+    // Cache-aware pruning: only compact old tool results when context is under pressure.
+    // Below the threshold, caching handles cost better than pruning (stable prefix → cache hits).
+    const pruneThreshold = role === "explore" ? PRUNE_THRESHOLD_EXPLORE : PRUNE_THRESHOLD_CODE;
+    if (stepNumber >= 3 && totalTokens > pruneThreshold) {
+      result.messages = compactOldToolResults(result.messages ?? messages, symbolLookup, pathMap);
+    }
 
     if (totalTokens > trimThreshold) {
       if (bus && agentId) {
