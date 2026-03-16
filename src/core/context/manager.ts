@@ -11,21 +11,22 @@ import { getModeInstructions } from "../modes/prompts.js";
 import { buildForbiddenContext, isForbidden } from "../security/forbidden.js";
 import { onFileEdited, onFileRead } from "../tools/file-events.js";
 
-// Static prompt sections — plain text, no markdown formatting (saves tokens, Claude Code pattern)
+// System prompt: plain text, prohibition-style enforcement, micro-fragment rules
+// Synthesized from: Claude Code (cache-stable fragments), ECC (schema > prompt), omo (prohibition + clearance)
 const TOOL_GUIDANCE_BASE = [
-  "Only call tools when necessary. If you already have the answer from the Repo Map, cache, or previous results, act without calling tools.",
-  "Trust hierarchy: Repo Map then tool results then read cache. All three are always current (auto-updated on every edit). Data from these sources is authoritative — do not re-read, re-grep, or re-verify it.",
-  "Stop as soon as you can act. Two examples confirming a pattern = confirmed. Search results converging on one area = sufficient. If you have enough to write a plan or make edits, do it. Every additional read after that point is waste.",
-  "Workflow: Repo Map then targeted search then surgical reads. 1) Check the Repo Map for file paths, symbols, line ranges, and dependencies. 2) If the Repo Map has what you need, act — no tool call required. 3) If you need code content, use the right tool. One read per file, one search per question.",
-  "Tool selection — use the most specific tool: one symbol from a file = read_code (extracts by name, fastest). Multiple symbols or full file = read_file once (do NOT chunk into sequential reads). Definition/references = navigate. File structure/diagnostics = analyze. Pattern frequency = soul_grep count mode or soul_analyze. File/symbol discovery = soul_find. Rename across files = rename_symbol. Move to another file = move_symbol. Extract function/variable = refactor. Tests/build/lint/typecheck = project (auto-detects toolchain).",
-  "Compound tools (rename_symbol, move_symbol, project) do the COMPLETE job. No extra verification steps.",
-  "LSP-powered code intelligence with multi-tier fallback (LSP, ts-morph, tree-sitter, regex). Use it as the primary way to understand code.",
+  "Only call tools when necessary. If the Repo Map, cache, or previous results already answer your question, act without calling tools.",
+  "Repo Map, tool results, and read cache are always current (auto-updated on every edit). This data is authoritative. FORBIDDEN: re-reading, re-grepping, or re-verifying data you already have.",
+  "Stop as soon as you can act. Two examples confirming a pattern = confirmed. If you have enough to plan or edit, do it now. Every additional read is token waste.",
+  "Workflow: 1) Check the Repo Map for paths, symbols, line ranges, dependencies. 2) If the Repo Map answers it, act — no tool call. 3) If you need code, one read per file, one search per question.",
+  "Tool selection: one symbol = read_code. Full file = read_file once. FORBIDDEN: chunking a file into sequential reads. Definition/references = navigate. Structure = analyze. Pattern frequency = soul_grep count or soul_analyze. File discovery = soul_find. Rename = rename_symbol. Move = move_symbol. Extract = refactor. Test/build/lint = project.",
+  "Compound tools (rename_symbol, move_symbol, project) do the COMPLETE job. FORBIDDEN: extra verification steps after compound tools.",
+  "Every response MUST end with an action: a tool call, a plan, an edit, or a direct answer. FORBIDDEN: passive endings ('let me know'), reading more after stating you have enough, summaries without next steps.",
 ];
 
 const TOOL_GUIDANCE_LOW_LEVEL_WITH_MAP = [
-  "Low-level tools — use only when intelligence can't help: read_file for config files (json/yaml/toml), markdown, raw text. grep for string literals, log messages, non-code patterns (check Repo Map dependency counts first). glob for finding files by pattern when not in Repo Map. shell only when project can't handle custom flags.",
-  "Repo Map tools (zero-token, no LLM cost): soul_grep for count-mode search with word boundary + symbol context. soul_find for fuzzy file/symbol discovery ranked by PageRank. soul_analyze for identifier frequency, unused exports, file profile. soul_impact for dependency graph queries.",
-  "Cross-cutting analysis: start broad with soul_grep count mode and soul_analyze, then narrow with grep for specific patterns. Compare sibling constructs by reading them side-by-side. Dispatch investigation tasks for parallel scanning across directories.",
+  "Low-level tools (only when intelligence tools fail): read_file for config/json/yaml/markdown. grep for string literals, non-code patterns. glob for files not in Repo Map. shell only when project tool can't handle it.",
+  "Repo Map tools (zero-token): soul_grep for count-mode + word boundary. soul_find for fuzzy file/symbol discovery (PageRank). soul_analyze for frequency, unused exports, profiles. soul_impact for dependency graphs.",
+  "Cross-cutting analysis: soul_grep count + soul_analyze for broad patterns, grep for specific multi-line patterns. Dispatch investigation agents for parallel scanning.",
 ];
 
 const TOOL_GUIDANCE_LOW_LEVEL_NO_MAP = [
@@ -33,10 +34,8 @@ const TOOL_GUIDANCE_LOW_LEVEL_NO_MAP = [
 ];
 
 const DISPATCH_GUIDANCE_BASE = [
-  "For simple, directed searches (specific file, class, function, pattern), use read_code/read_file/grep/soul_grep directly. Dispatch is slower — only use it when your task clearly requires more than 5 tool calls or parallel work across many files.",
-  "Decision tree: 1) Answer from Repo Map alone? Act, no tools needed. 2) Content from 6 or fewer known files? read_code/read_file directly, do NOT dispatch. 3) Edit 3 or fewer files? edit_file directly, do NOT dispatch. 4) Broad analysis across many directories? Dispatch investigate agents. 5) Edit 4+ files across the codebase? Dispatch code agents, each owning distinct files.",
-  "Before dispatching, check what you already have. Repo Map, previous tool results, and cached files are always current. If you already have the code, skip dispatch and act.",
-  "If you dispatch, do NOT also search yourself. Dispatched agents do the research — do not duplicate their work. Trust and act on what they return.",
+  "Dispatch decision: 1) Repo Map answers it = act, no tools. 2) 6 or fewer files = read directly. 3) 3 or fewer edits = edit directly. 4) Broad analysis = dispatch investigate. 5) 4+ file edits = dispatch code agents. Under 5 tool calls = dispatch is forbidden.",
+  "FORBIDDEN after dispatching: searching for the same information yourself, re-reading dispatched files, grepping patterns agents already found. Agents own the research — trust results, act immediately.",
   "Dispatch task rules: targetFiles must be exact file paths or specific subdirectories (src/ is rejected — narrow to src/core/llm/ or specific files). Each task must include exact file paths, symbol names, what to return. Vague tasks produce no synthesis. Split by file ownership, not concept. One dispatch per task.",
   'Task example — BAD: "Find how API keys are configured" with targetFiles ["src/"]. GOOD: "Read SecretKey type, ENV_MAP, getSecret from src/core/secrets.ts. Read WebSearchSettings from src/components/WebSearchSettings.tsx. Return full implementations." with targetFiles ["src/core/secrets.ts", "src/components/WebSearchSettings.tsx"].',
   "After dispatch: ACT. Results contain full code. Proceed immediately — do not re-read, re-grep, or re-verify dispatched files.",
@@ -45,8 +44,7 @@ const DISPATCH_GUIDANCE_BASE = [
 ];
 
 const DISPATCH_GUIDANCE_WITH_MAP = [
-  "Use exact file paths from the Repo Map for targetFiles. The system validates them. Include line numbers when the Repo Map shows them. If a symbol isn't in the Repo Map, give targeted search keywords for workspace_symbols.",
-  "You have the Repo Map — USE IT. Before writing any task, look up every file and symbol you need. It gives exact paths, symbol names, line ranges, and dependency relationships. Put ALL of them in the task and targetFiles. Agents with precise targets find what they need in 1-2 tool calls instead of wandering.",
+  "Use exact Repo Map paths for targetFiles (system validates). Include line numbers when shown. Agents with precise Repo Map targets finish in 1-2 tool calls instead of wandering.",
 ];
 
 function buildToolGuidance(hasRepoMap: boolean): string[] {
@@ -695,9 +693,7 @@ export class ContextManager {
 
     if (!isMinimal) {
       parts.push(
-        "",
-        "Context compaction is automatic and preserves your plan, tasks, and working state. Do NOT save to memory before compaction — memory is for long-term knowledge (decisions, conventions), not session checkpoints. Just keep working.",
-        "",
+        "Context compaction is automatic and preserves plan, tasks, working state. Memory is for long-term knowledge only, not session checkpoints.",
         ...buildToolGuidance(hasRepoMap),
       );
       if (this.repoMapReady && this.repoMap.getStats().symbols === 0) {
@@ -719,11 +715,11 @@ export class ContextManager {
     }
 
     parts.push(
-      "Style: direct, concise, no filler. Markdown code blocks with language hints.",
+      "Style: direct, concise, no filler. Code blocks with language hints.",
       ...(isMinimal
         ? ["On tool failure: read the error, adjust approach. Never retry the exact same call."]
         : [
-            "Compound tools (rename_symbol, move_symbol, project) do the complete job — no extra verification. The user sees only a one-line tool summary. Include file contents or results in your text when asked. On tool failure: read the error, adjust approach. Never retry the exact same call. User can abort with Ctrl+X, resume with /continue.",
+            "User sees one-line tool summaries. Include file contents in your text when asked. On tool failure: read error, adjust. FORBIDDEN: retrying the exact same call. Abort: Ctrl+X, resume: /continue.",
           ]),
     );
 
