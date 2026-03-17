@@ -490,14 +490,34 @@ async function runDesloppify(
     );
 
     const callbacks = buildStepCallbacks(parentToolCallId, "desloppify");
-    const result = await agent.generate({
-      prompt: desloppifyTask.task,
-      abortSignal,
-      ...callbacks,
-    });
+    // biome-ignore lint/suspicious/noExplicitAny: output schema may throw
+    let result: any;
+    try {
+      result = await agent.generate({
+        prompt: desloppifyTask.task,
+        abortSignal,
+        ...callbacks,
+      });
+    } catch (genErr: unknown) {
+      const errWithSteps = genErr as { steps?: unknown[]; text?: string; totalUsage?: unknown };
+      if (errWithSteps.steps && Array.isArray(errWithSteps.steps)) {
+        result = {
+          text: errWithSteps.text ?? "",
+          output: undefined,
+          steps: errWithSteps.steps,
+          totalUsage: errWithSteps.totalUsage ?? { inputTokens: 0, outputTokens: 0 },
+        };
+        const { logBackgroundError } = await import("../../stores/errors.js");
+        logBackgroundError(
+          "desloppify",
+          `Output schema failed: ${genErr instanceof Error ? genErr.message : String(genErr)}`,
+        );
+      } else {
+        throw genErr;
+      }
+    }
 
-    const doneResult = extractDoneResult(result);
-    const resultText = doneResult ? formatDoneResult(doneResult) : buildFallbackResult(result);
+    const resultText = buildFallbackResult(result);
 
     emitMultiAgentEvent({
       parentToolCallId,
@@ -509,7 +529,7 @@ async function runDesloppify(
       tier: "desloppify",
     });
 
-    if (doneResult?.filesEdited && doneResult.filesEdited.length > 0) {
+    if (resultText && resultText.length > 20) {
       return `\n\n### De-sloppify pass\n${resultText}`;
     }
     return null;
@@ -598,14 +618,34 @@ async function runVerifier(
     const { agent } = createAgent(verifyTask, { ...models, explorationModel: reviewModel }, bus);
 
     const callbacks = buildStepCallbacks(parentToolCallId, "verifier");
-    const result = await agent.generate({
-      prompt: verifyTask.task,
-      abortSignal,
-      ...callbacks,
-    });
+    // biome-ignore lint/suspicious/noExplicitAny: output schema may throw
+    let result: any;
+    try {
+      result = await agent.generate({
+        prompt: verifyTask.task,
+        abortSignal,
+        ...callbacks,
+      });
+    } catch (genErr: unknown) {
+      const errWithSteps = genErr as { steps?: unknown[]; text?: string; totalUsage?: unknown };
+      if (errWithSteps.steps && Array.isArray(errWithSteps.steps)) {
+        result = {
+          text: errWithSteps.text ?? "",
+          output: undefined,
+          steps: errWithSteps.steps,
+          totalUsage: errWithSteps.totalUsage ?? { inputTokens: 0, outputTokens: 0 },
+        };
+        const { logBackgroundError } = await import("../../stores/errors.js");
+        logBackgroundError(
+          "verifier",
+          `Output schema failed: ${genErr instanceof Error ? genErr.message : String(genErr)}`,
+        );
+      } else {
+        throw genErr;
+      }
+    }
 
-    const doneResult = extractDoneResult(result);
-    const resultText = doneResult ? formatDoneResult(doneResult) : buildFallbackResult(result);
+    const resultText = buildFallbackResult(result);
 
     emitMultiAgentEvent({
       parentToolCallId,

@@ -1,6 +1,6 @@
 import type { ProviderOptions } from "@ai-sdk/provider-utils";
 import type { LanguageModel } from "ai";
-import { hasToolCall, Output, stepCountIs, ToolLoopAgent, tool } from "ai";
+import { Output, stepCountIs, ToolLoopAgent } from "ai";
 import { z } from "zod";
 import { EPHEMERAL_CACHE } from "../llm/provider-options.js";
 import { buildSubagentCodeTools, wrapWithBusCache } from "../tools/index.js";
@@ -15,32 +15,9 @@ function codeBase(): string {
     "Tool results are authoritative. FORBIDDEN: re-reading to verify, re-reading to confirm changes, chunking files, commentary between tool calls.",
     "Task paths are pre-resolved — read target, edit it, move on. On edit failure: re-read with read_file, retry with exact text.",
     "Pick the RIGHT tool: read one symbol = read_code. Find where something is defined = navigate definition. Check for errors after edit = analyze diagnostics (not project typecheck). Rename = rename_symbol (not grep + edit_file). FORBIDDEN: using grep when navigate or read_code answers it.",
-    "OUTPUT CONTRACT: Parent sees ONLY your done call. Report: exact file paths, what changed, final signatures. Parent re-reading = done call failed. Stay in scope — out-of-scope issues get one sentence, no fix.",
+    "Stay in scope — out-of-scope issues get one sentence, no fix. No commentary between tool calls.",
   ].join("\n");
 }
-
-const codeDoneTool = tool({
-  description:
-    "Call when your coding task is complete. The parent agent ONLY sees what you put here — include enough detail that it can proceed without re-reading your files.",
-  inputSchema: z.object({
-    summary: z.string().describe("What was accomplished and any decisions made"),
-    filesEdited: z
-      .array(
-        z.object({
-          file: z.string(),
-          changes: z
-            .string()
-            .min(20, "Changes must include actual code, not just a label")
-            .describe(
-              "Specific changes: new function signatures, modified types, added exports. Include the final code of key additions.",
-            ),
-        }),
-      )
-      .describe("Files modified with concrete change descriptions"),
-    verified: z.boolean().describe("Whether changes were verified (lint/typecheck/test)"),
-    verificationOutput: z.string().optional().describe("Output from verification commands"),
-  }),
-});
 
 const codeOutputSchema = z.object({
   summary: z.string().describe("What was accomplished and any decisions made"),
@@ -93,7 +70,6 @@ export function createCodeAgent(model: LanguageModel, options?: CodeAgentOptions
   const allTools = {
     ...tools,
     ...busTools,
-    done: codeDoneTool,
   };
 
   return new ToolLoopAgent({
@@ -111,7 +87,7 @@ export function createCodeAgent(model: LanguageModel, options?: CodeAgentOptions
       providerOptions: EPHEMERAL_CACHE,
     },
     output: codeOutput,
-    stopWhen: [stepCountIs(25), tokenBudget(150_000), hasToolCall("done")],
+    stopWhen: [stepCountIs(25), tokenBudget(150_000)],
     prepareStep: buildPrepareStep({
       bus,
       agentId,
