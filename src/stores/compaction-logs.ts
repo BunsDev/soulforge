@@ -20,11 +20,11 @@ export interface CompactionLogEntry {
 
 type LogExtra = Omit<CompactionLogEntry, "id" | "kind" | "message" | "timestamp">;
 
-interface CompactionLogState {
+type CompactionLogState = {
   entries: CompactionLogEntry[];
   push: (kind: CompactionEventKind, message: string, extra?: LogExtra) => void;
   clear: () => void;
-}
+};
 
 export const useCompactionLogStore = create<CompactionLogState>()((set) => ({
   entries: [],

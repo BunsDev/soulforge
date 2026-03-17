@@ -1,6 +1,11 @@
 {
   "version": 1,
   "skills": {
+    "ai-sdk": {
+      "source": "vercel/ai",
+      "sourceType": "github",
+      "computedHash": "58ce68f628890c3925aea2b5435a649251ac182057541045c68fc19a27aaa0ec"
+    },
     "opentui": {
       "source": "msmps/opentui-skill",
       "sourceType": "github",
@@ -15,6 +20,11 @@
       "source": "dimitrigilbert/ai-skills",
       "sourceType": "github",
       "computedHash": "65fa9c0f8b3bc9e6d3eb8d22f91f4688b37703781a19dd0daa68d8cae243d295"
+    },
+    "zustand-state-management": {
+      "source": "smithery.ai",
+      "sourceType": "well-known",
+      "computedHash": "1b48919fe7f16b6a42e2906b8d2fd95a46d302a9b699dc15cbe02a1450345459"
     }
   }
 }

@@ -124,7 +124,7 @@ function callPrepareStep(
 		steps?: Array<{ usage: { inputTokens: number; outputTokens: number } }>;
 	},
 ) {
-	const fn = buildPrepareStep(opts);
+	const { prepareStep: fn } = buildPrepareStep(opts);
 	const result = fn({
 		stepNumber: stepArgs.stepNumber,
 		messages: stepArgs.messages,

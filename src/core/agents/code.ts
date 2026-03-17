@@ -6,7 +6,7 @@ import { EPHEMERAL_CACHE } from "../llm/provider-options.js";
 import { buildSubagentCodeTools, wrapWithBusCache } from "../tools/index.js";
 import type { AgentBus } from "./agent-bus.js";
 import { buildBusTools } from "./bus-tools.js";
-import { buildPrepareStep, buildSymbolLookup, tokenBudget } from "./step-utils.js";
+import { buildPrepareStep, buildSymbolLookup } from "./step-utils.js";
 import { repairToolCall } from "./stream-options.js";
 
 function codeBase(): string {
@@ -74,6 +74,17 @@ export function createCodeAgent(model: LanguageModel, options?: CodeAgentOptions
     ...busTools,
   };
 
+  const { prepareStep, tokenStop } = buildPrepareStep({
+    bus,
+    agentId,
+    parentToolCallId: options?.parentToolCallId,
+    role: "code",
+    allTools,
+    symbolLookup: buildSymbolLookup(options?.repoMap),
+    stepLimit: 25,
+    tokenBudgetMax: 170_000,
+  });
+
   return new ToolLoopAgent({
     id: options?.agentId ?? "code",
     model,
@@ -89,16 +100,8 @@ export function createCodeAgent(model: LanguageModel, options?: CodeAgentOptions
       providerOptions: EPHEMERAL_CACHE,
     },
     output: codeOutput,
-    stopWhen: [stepCountIs(25), tokenBudget(150_000)],
-    prepareStep: buildPrepareStep({
-      bus,
-      agentId,
-      parentToolCallId: options?.parentToolCallId,
-      role: "code",
-      allTools,
-      symbolLookup: buildSymbolLookup(options?.repoMap),
-      stepLimit: 25,
-    }),
+    stopWhen: [stepCountIs(25), tokenStop],
+    prepareStep,
     experimental_repairToolCall: repairToolCall,
     ...(options?.providerOptions && Object.keys(options.providerOptions).length > 0
       ? { providerOptions: options.providerOptions }

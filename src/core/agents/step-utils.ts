@@ -17,6 +17,7 @@ export interface PrepareStepOptions {
   allTools: Record<string, unknown>;
   symbolLookup?: SymbolLookup;
   stepLimit?: number;
+  tokenBudgetMax?: number;
 }
 
 const READ_TOOLS = new Set([
@@ -423,6 +424,13 @@ function compactOldToolResults(
   }) as ModelMessage[];
 }
 
+export interface PrepareStepResult {
+  // biome-ignore lint/suspicious/noExplicitAny: TOOLS generic is invariant — tool-agnostic functions use <any> (same as SDK's stepCountIs/hasToolCall)
+  prepareStep: PrepareStepFunction<any>;
+  // biome-ignore lint/suspicious/noExplicitAny: TOOLS generic is invariant
+  tokenStop: StopCondition<any>;
+}
+
 export function buildPrepareStep({
   bus,
   agentId,
@@ -431,8 +439,9 @@ export function buildPrepareStep({
   allTools,
   symbolLookup,
   stepLimit,
+  tokenBudgetMax,
   // biome-ignore lint/suspicious/noExplicitAny: TOOLS generic is invariant — tool-agnostic functions use <any> (same as SDK's stepCountIs/hasToolCall)
-}: PrepareStepOptions): PrepareStepFunction<any> {
+}: PrepareStepOptions): PrepareStepResult {
   const allToolNames = Object.keys(allTools);
   const readOnlyNames = allToolNames.filter((n) => READ_TOOLS.has(n));
   const trimThreshold =
@@ -441,7 +450,9 @@ export function buildPrepareStep({
   const ENTITY_MAX_WARNINGS = 3;
   const ENTITY_REWARD_INTERVAL = 3;
 
-  return ({ stepNumber, steps, messages }) => {
+  let nudgeFired = false;
+
+  const prepareStep: PrepareStepFunction<any> = ({ stepNumber, steps, messages }) => {
     const result: {
       toolChoice?: "required" | "auto" | "none";
       activeTools?: string[];
@@ -591,6 +602,7 @@ export function buildPrepareStep({
     const atStepLimit = stepLimit != null && stepNumber >= stepLimit - 2;
     const atTokenLimit = totalTokens > outputNudge;
     if (atStepLimit || atTokenLimit) {
+      nudgeFired = true;
       if (parentToolCallId) {
         emitSubagentStep({
           parentToolCallId,
@@ -619,6 +631,19 @@ export function buildPrepareStep({
 
     return Object.keys(result).length > 0 ? result : undefined;
   };
+
+  // Nudge-aware token stop: if over budget but nudge hasn't fired yet,
+  // allow one more step so prepareStep can disable tools and force output.
+  // The nudge step is text-only (tools disabled) so it's cheap.
+  const tokenStop: StopCondition<any> = ({ steps }) => {
+    const total = steps.reduce((sum, s) => {
+      return sum + (s.usage.inputTokens ?? 0) + (s.usage.outputTokens ?? 0);
+    }, 0);
+    if (total >= (tokenBudgetMax ?? 0) && !nudgeFired) return false;
+    return total >= (tokenBudgetMax ?? 0);
+  };
+
+  return { prepareStep, tokenStop };
 }
 
 function buildBusSummary(bus: AgentBus, agentId: string, role: string): string {
@@ -658,15 +683,6 @@ function buildBusSummary(bus: AgentBus, agentId: string, role: string): string {
   return parts.length > 1 ? parts.join("\n") : "";
 }
 
-// biome-ignore lint/suspicious/noExplicitAny: TOOLS generic is invariant — tool-agnostic functions use <any> (same as SDK's stepCountIs/hasToolCall)
-export function tokenBudget(maxTokens: number): StopCondition<any> {
-  return ({ steps }) => {
-    const total = steps.reduce((sum, s) => {
-      return sum + (s.usage.inputTokens ?? 0) + (s.usage.outputTokens ?? 0);
-    }, 0);
-    return total >= maxTokens;
-  };
-}
 
 export function buildSymbolLookup(repoMap?: {
   isReady: boolean;

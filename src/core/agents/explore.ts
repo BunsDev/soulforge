@@ -6,7 +6,7 @@ import { EPHEMERAL_CACHE } from "../llm/provider-options.js";
 import { buildSubagentExploreTools, wrapWithBusCache } from "../tools/index.js";
 import type { AgentBus } from "./agent-bus.js";
 import { buildBusTools } from "./bus-tools.js";
-import { buildPrepareStep, buildSymbolLookup, tokenBudget } from "./step-utils.js";
+import { buildPrepareStep, buildSymbolLookup } from "./step-utils.js";
 import { repairToolCall } from "./stream-options.js";
 
 function exploreBase(): string {
@@ -92,6 +92,17 @@ export function createExploreAgent(model: LanguageModel, options?: ExploreAgentO
     ...busTools,
   };
 
+  const { prepareStep, tokenStop } = buildPrepareStep({
+    bus,
+    agentId,
+    parentToolCallId: options?.parentToolCallId,
+    role: "explore",
+    allTools,
+    symbolLookup: buildSymbolLookup(options?.repoMap),
+    stepLimit: 15,
+    tokenBudgetMax: 95_000,
+  });
+
   return new ToolLoopAgent({
     id: options?.agentId ?? "explore",
     model,
@@ -107,16 +118,8 @@ export function createExploreAgent(model: LanguageModel, options?: ExploreAgentO
       providerOptions: EPHEMERAL_CACHE,
     },
     output: exploreOutput,
-    stopWhen: [stepCountIs(15), tokenBudget(80_000)],
-    prepareStep: buildPrepareStep({
-      bus,
-      agentId,
-      parentToolCallId: options?.parentToolCallId,
-      role: "explore",
-      allTools,
-      symbolLookup: buildSymbolLookup(options?.repoMap),
-      stepLimit: 15,
-    }),
+    stopWhen: [stepCountIs(15), tokenStop],
+    prepareStep,
     experimental_repairToolCall: repairToolCall,
     ...(options?.providerOptions && Object.keys(options.providerOptions).length > 0
       ? { providerOptions: options.providerOptions }
