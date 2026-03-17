@@ -219,7 +219,8 @@ export function LspStatusPopup({ visible, onClose }: Props) {
             <PopupRow w={innerW}>
               <text fg="#555" bg={POPUP_BG}>
                 {detailScroll > 0 ? "\u2191 " : "  "}
-                {String(detailScroll + 1)}-{String(Math.min(detailScroll + maxDetailLines, detailLines.length))}/
+                {String(detailScroll + 1)}-
+                {String(Math.min(detailScroll + maxDetailLines, detailLines.length))}/
                 {String(detailLines.length)}
                 {detailScroll + maxDetailLines < detailLines.length ? " \u2193" : ""}
               </text>

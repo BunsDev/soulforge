@@ -435,7 +435,6 @@ export function buildPrepareStep({
   allTools,
   symbolLookup,
   contextWindow: ctxWindow,
-  // biome-ignore lint/suspicious/noExplicitAny: TOOLS generic is invariant — tool-agnostic functions use <any> (same as SDK's stepCountIs/hasToolCall)
 }: PrepareStepOptions): PrepareStepResult {
   const cw = ctxWindow ?? DEFAULT_CONTEXT_WINDOW;
   const pruneThreshold = Math.floor(cw * PRUNE_PCT);
@@ -450,6 +449,7 @@ export function buildPrepareStep({
 
   let nudgeFired = false;
 
+  // biome-ignore lint/suspicious/noExplicitAny: TOOLS generic is invariant — tool-agnostic functions use <any> (same as SDK's stepCountIs/hasToolCall)
   const prepareStep: PrepareStepFunction<any> = ({ stepNumber, steps, messages }) => {
     const result: {
       toolChoice?: "required" | "auto" | "none";
@@ -624,6 +624,7 @@ export function buildPrepareStep({
 
   // Nudge-aware token stop: uses last step's input tokens (actual context window size).
   // If over budget but nudge hasn't fired yet, allow one more step for graceful output.
+  // biome-ignore lint/suspicious/noExplicitAny: TOOLS generic is invariant
   const tokenStop: StopCondition<any> = ({ steps }) => {
     const last = steps.length > 0 ? steps[steps.length - 1] : undefined;
     const ctx = last?.usage.inputTokens ?? 0;
