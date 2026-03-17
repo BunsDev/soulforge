@@ -859,7 +859,7 @@ const MultiAgentChildRow = memo(
                       {continuation}
                       {"  "}├{" "}
                     </span>
-                    <span fg="#444">+{hiddenCount} completed</span>
+                    <span fg="#444">+{String(hiddenCount)} completed</span>
                   </text>
                 </box>
               )}
@@ -1261,7 +1261,7 @@ const ToolRow = memo(
                     <box height={1} flexShrink={0} marginLeft={3}>
                       <text truncate>
                         <span fg="#333">├ </span>
-                        <span fg="#444">+{hiddenCount} completed</span>
+                        <span fg="#444">+{String(hiddenCount)} completed</span>
                       </text>
                     </box>
                   )}
