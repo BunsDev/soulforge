@@ -160,7 +160,7 @@ export function SystemBanner({ messages, expanded = false }: Props) {
             minute: "2-digit",
           })
         : "",
-    [current?.timestamp],
+    [current?.timestamp, current],
   );
 
   if (phase === "hidden" || !current) return null;
