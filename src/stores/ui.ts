@@ -20,6 +20,7 @@ export type ModalName =
   | "repoMapStatus"
   | "setup"
   | "webSearchSettings"
+  | "apiKeySettings"
   | "lspStatus"
   | "lspInstall"
   | "compactionLog";
@@ -42,6 +43,7 @@ const INITIAL_MODALS: Modals = {
   repoMapStatus: false,
   setup: false,
   webSearchSettings: false,
+  apiKeySettings: false,
   lspStatus: false,
   lspInstall: false,
   compactionLog: false,

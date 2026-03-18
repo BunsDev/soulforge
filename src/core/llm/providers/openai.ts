@@ -1,4 +1,5 @@
 import { createOpenAI } from "@ai-sdk/openai";
+import { getProviderApiKey } from "../../secrets.js";
 import type { ProviderDefinition, ProviderModelInfo } from "./types.js";
 
 interface OpenAIModel {
@@ -15,14 +16,15 @@ export const openai: ProviderDefinition = {
   icon: "󰧑", // nf-md-head_snowflake U+F09D1
 
   createModel(modelId: string) {
-    if (!process.env.OPENAI_API_KEY) {
+    const apiKey = getProviderApiKey("OPENAI_API_KEY");
+    if (!apiKey) {
       throw new Error("OPENAI_API_KEY is not set");
     }
-    return createOpenAI()(modelId);
+    return createOpenAI({ apiKey })(modelId);
   },
 
   async fetchModels(): Promise<ProviderModelInfo[] | null> {
-    const apiKey = process.env.OPENAI_API_KEY;
+    const apiKey = getProviderApiKey("OPENAI_API_KEY");
     if (!apiKey) return null;
     const res = await fetch("https://api.openai.com/v1/models", {
       headers: { Authorization: `Bearer ${apiKey}` },

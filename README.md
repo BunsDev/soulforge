@@ -263,7 +263,7 @@ SoulForge checks for prerequisites on first launch and offers to install Neovim 
 `/git` `/commit` `/push` `/pull` `/branch` `/log` `/diff` `/stash` `/lazygit` `/co-author-commits`
 
 **Intelligence & LSP**
-`/lsp` `/lsp-install` `/diagnose` `/repo-map` `/web-search`
+`/lsp` `/lsp-install` `/diagnose` `/repo-map` `/web-search` `/keys`
 
 **Context & Memory**
 `/compact` `/context` `/memory` `/compaction`

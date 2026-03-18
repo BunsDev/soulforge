@@ -35,6 +35,7 @@ import { logBackgroundError } from "../stores/errors.js";
 import { startMemoryPoll } from "../stores/statusbar.js";
 import { type ModalName, selectIsAnyModalOpen, useUIStore } from "../stores/ui.js";
 import type { AppConfig, ChatMessage, EditorIntegration } from "../types/index.js";
+import { ApiKeySettings } from "./ApiKeySettings.js";
 import { BrandTag } from "./BrandTag.js";
 import { CommandPicker } from "./CommandPicker.js";
 import { CompactionLog } from "./CompactionLog.js";
@@ -807,6 +808,7 @@ export function App({
         },
         openProviderSettings: () => uiState.openModal("providerSettings"),
         openWebSearchSettings: () => uiState.openModal("webSearchSettings"),
+        openApiKeySettings: () => uiState.openModal("apiKeySettings"),
         openLspStatus: () => uiState.openModal("lspStatus"),
         openCompactionLog: () => uiState.openModal("compactionLog"),
         openCommandPicker: (pickerConfig) => uiState.openCommandPicker(pickerConfig),
@@ -1214,6 +1216,8 @@ export function App({
         visible={modals.webSearchSettings}
         onClose={getCloser("webSearchSettings")}
       />
+
+      <ApiKeySettings visible={modals.apiKeySettings} onClose={getCloser("apiKeySettings")} />
 
       <RouterSettings
         visible={modals.routerSettings && !routerSlotPicking}

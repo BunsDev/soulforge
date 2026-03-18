@@ -1,4 +1,5 @@
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { getProviderApiKey } from "../../secrets.js";
 import type { ProviderDefinition, ProviderModelInfo } from "./types.js";
 
 interface GoogleModel {
@@ -16,14 +17,15 @@ export const google: ProviderDefinition = {
   icon: "󰊭", // nf-md-google U+F02AD
 
   createModel(modelId: string) {
-    if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+    const apiKey = getProviderApiKey("GOOGLE_GENERATIVE_AI_API_KEY");
+    if (!apiKey) {
       throw new Error("GOOGLE_GENERATIVE_AI_API_KEY is not set");
     }
-    return createGoogleGenerativeAI()(modelId);
+    return createGoogleGenerativeAI({ apiKey })(modelId);
   },
 
   async fetchModels(): Promise<ProviderModelInfo[] | null> {
-    const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    const apiKey = getProviderApiKey("GOOGLE_GENERATIVE_AI_API_KEY");
     if (!apiKey) return null;
     const res = await fetch("https://generativelanguage.googleapis.com/v1beta/models", {
       headers: { "x-goog-api-key": apiKey },

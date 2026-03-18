@@ -1,4 +1,5 @@
 import { createLLMGateway } from "@llmgateway/ai-sdk-provider";
+import { getProviderApiKey } from "../../secrets.js";
 import type { ProviderDefinition, ProviderModelInfo } from "./types.js";
 
 export const llmgateway: ProviderDefinition = {
@@ -9,13 +10,12 @@ export const llmgateway: ProviderDefinition = {
   grouped: true,
 
   createModel(modelId) {
-    if (!process.env.LLM_GATEWAY_API_KEY) {
+    const apiKey = getProviderApiKey("LLM_GATEWAY_API_KEY");
+    if (!apiKey) {
       throw new Error("LLM_GATEWAY_API_KEY is not set");
     }
 
-    const provider = createLLMGateway({
-      apiKey: process.env.LLM_GATEWAY_API_KEY,
-    });
+    const provider = createLLMGateway({ apiKey });
 
     // LLMGatewayChatModelId is a union of literal model IDs, not exported.
     // We accept arbitrary model IDs at runtime so cast is needed.

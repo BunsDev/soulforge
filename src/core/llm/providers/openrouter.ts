@@ -1,4 +1,5 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { getProviderApiKey } from "../../secrets.js";
 import type { ProviderDefinition, ProviderModelInfo } from "./types.js";
 
 export const openrouter: ProviderDefinition = {
@@ -9,12 +10,11 @@ export const openrouter: ProviderDefinition = {
   grouped: true,
 
   createModel(modelId: string) {
-    if (!process.env.OPENROUTER_API_KEY) {
+    const apiKey = getProviderApiKey("OPENROUTER_API_KEY");
+    if (!apiKey) {
       throw new Error("OPENROUTER_API_KEY is not set");
     }
-    const provider = createOpenRouter({
-      apiKey: process.env.OPENROUTER_API_KEY,
-    });
+    const provider = createOpenRouter({ apiKey });
     return provider(modelId);
   },
 

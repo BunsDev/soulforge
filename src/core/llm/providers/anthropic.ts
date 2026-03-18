@@ -1,4 +1,5 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
+import { getProviderApiKey } from "../../secrets.js";
 import type { ProviderDefinition, ProviderModelInfo } from "./types.js";
 
 interface AnthropicModel {
@@ -15,14 +16,15 @@ export const anthropic: ProviderDefinition = {
   icon: "󱜙", // nf-md-* U+F1719
 
   createModel(modelId: string) {
-    if (!process.env.ANTHROPIC_API_KEY) {
+    const apiKey = getProviderApiKey("ANTHROPIC_API_KEY");
+    if (!apiKey) {
       throw new Error("ANTHROPIC_API_KEY is not set");
     }
-    return createAnthropic()(modelId);
+    return createAnthropic({ apiKey })(modelId);
   },
 
   async fetchModels(): Promise<ProviderModelInfo[] | null> {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
+    const apiKey = getProviderApiKey("ANTHROPIC_API_KEY");
     if (!apiKey) return null;
     const res = await fetch("https://api.anthropic.com/v1/models", {
       headers: {

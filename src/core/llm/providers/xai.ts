@@ -1,4 +1,5 @@
 import { createXai } from "@ai-sdk/xai";
+import { getProviderApiKey } from "../../secrets.js";
 import type { ProviderDefinition, ProviderModelInfo } from "./types.js";
 
 interface XaiModel {
@@ -13,14 +14,15 @@ export const xai: ProviderDefinition = {
   icon: "\uF0E7", // nf-fa-bolt U+F0E7
 
   createModel(modelId: string) {
-    if (!process.env.XAI_API_KEY) {
+    const apiKey = getProviderApiKey("XAI_API_KEY");
+    if (!apiKey) {
       throw new Error("XAI_API_KEY is not set");
     }
-    return createXai()(modelId);
+    return createXai({ apiKey })(modelId);
   },
 
   async fetchModels(): Promise<ProviderModelInfo[] | null> {
-    const apiKey = process.env.XAI_API_KEY;
+    const apiKey = getProviderApiKey("XAI_API_KEY");
     if (!apiKey) return null;
     const res = await fetch("https://api.x.ai/v1/models", {
       headers: { Authorization: `Bearer ${apiKey}` },

@@ -20,26 +20,28 @@ interface KeyInfo {
   source: "env" | "keychain" | "file" | "none";
 }
 
-interface WebSearchState {
+interface ApiKeyState {
   keys: Partial<Record<SecretKey, KeyInfo>>;
   refresh: () => void;
 }
 
-export const useWebSearchStore = create<WebSearchState>()((set) => ({
-  keys: {
-    "brave-api-key": hasSecret("brave-api-key"),
-    "jina-api-key": hasSecret("jina-api-key"),
-  },
+const PROVIDER_KEYS: SecretKey[] = [
+  "anthropic-api-key",
+  "openai-api-key",
+  "google-api-key",
+  "xai-api-key",
+  "openrouter-api-key",
+  "llmgateway-api-key",
+  "vercel-gateway-api-key",
+];
+
+export const useApiKeyStore = create<ApiKeyState>()((set) => ({
+  keys: Object.fromEntries(PROVIDER_KEYS.map((k) => [k, hasSecret(k)])),
   refresh: () =>
     set({
-      keys: {
-        "brave-api-key": hasSecret("brave-api-key"),
-        "jina-api-key": hasSecret("jina-api-key"),
-      },
+      keys: Object.fromEntries(PROVIDER_KEYS.map((k) => [k, hasSecret(k)])),
     }),
 }));
-
-type Mode = "menu" | "input";
 
 interface KeyItem {
   id: SecretKey;
@@ -50,46 +52,78 @@ interface KeyItem {
 
 const KEY_ITEMS: KeyItem[] = [
   {
-    id: "brave-api-key",
-    label: "Brave Search API Key",
-    envVar: "BRAVE_SEARCH_API_KEY",
-    desc: "Better search results (free: 2k queries/mo)",
+    id: "anthropic-api-key",
+    label: "Anthropic",
+    envVar: "ANTHROPIC_API_KEY",
+    desc: "Claude models (claude-opus-4, claude-sonnet-4, ...)",
   },
   {
-    id: "jina-api-key",
-    label: "Jina Reader API Key",
-    envVar: "JINA_API_KEY",
-    desc: "Faster page reading (free: 10M tokens)",
+    id: "openai-api-key",
+    label: "OpenAI",
+    envVar: "OPENAI_API_KEY",
+    desc: "GPT-4o, o3, o1 models",
+  },
+  {
+    id: "google-api-key",
+    label: "Google Gemini",
+    envVar: "GOOGLE_GENERATIVE_AI_API_KEY",
+    desc: "Gemini 2.5 Pro, Flash models",
+  },
+  {
+    id: "xai-api-key",
+    label: "xAI Grok",
+    envVar: "XAI_API_KEY",
+    desc: "Grok 3, Grok 3 Mini models",
+  },
+  {
+    id: "openrouter-api-key",
+    label: "OpenRouter",
+    envVar: "OPENROUTER_API_KEY",
+    desc: "Unified access to 300+ models",
+  },
+  {
+    id: "llmgateway-api-key",
+    label: "LLM Gateway",
+    envVar: "LLM_GATEWAY_API_KEY",
+    desc: "Gateway to multiple providers",
+  },
+  {
+    id: "vercel-gateway-api-key",
+    label: "Vercel AI Gateway",
+    envVar: "AI_GATEWAY_API_KEY",
+    desc: "Vercel-hosted AI Gateway",
   },
 ];
 
 type MenuItem =
   | { type: "key"; item: KeyItem; info: KeyInfo }
-  | { type: "action"; id: "remove-brave" | "remove-jina"; label: string; keyId: SecretKey };
+  | { type: "action"; id: string; label: string; keyId: SecretKey };
 
 interface Props {
   visible: boolean;
   onClose: () => void;
 }
 
-export function WebSearchSettings({ visible, onClose }: Props) {
+export function ApiKeySettings({ visible, onClose }: Props) {
   const renderer = useRenderer();
   const { width: termCols, height: termRows } = useTerminalDimensions();
   const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.75));
   const innerW = popupWidth - 2;
   const maxVisible = Math.max(4, Math.floor((termRows - 2) * 0.7) - CHROME_ROWS);
 
-  const { keys, refresh } = useWebSearchStore();
+  const { keys, refresh } = useApiKeyStore();
   const [cursor, setCursor] = useState(0);
-  const [mode, setMode] = useState<Mode>("menu");
+  const [mode, setMode] = useState<"menu" | "input">("menu");
   const [inputValue, setInputValue] = useState("");
   const [inputTarget, setInputTarget] = useState<SecretKey | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [scrollOffset, setScrollOffset] = useState(0);
 
   useEffect(() => {
     if (visible) {
       refresh();
       setCursor(0);
+      setScrollOffset(0);
       setMode("menu");
       setStatusMsg(null);
     }
@@ -113,10 +147,9 @@ export function WebSearchSettings({ visible, onClose }: Props) {
     if (!info) continue;
     menuItems.push({ type: "key", item: k, info });
     if (info.set && info.source !== "env") {
-      const removeId = k.id === "brave-api-key" ? "remove-brave" : "remove-jina";
       menuItems.push({
         type: "action",
-        id: removeId as "remove-brave" | "remove-jina",
+        id: `remove:${k.id}`,
         label: `  Remove ${k.label}`,
         keyId: k.id,
       });
@@ -170,6 +203,11 @@ export function WebSearchSettings({ visible, onClose }: Props) {
     refresh();
   };
 
+  // Clamp cursor and handle scroll
+  const clampedCursor = Math.min(cursor, Math.max(0, menuItems.length - 1));
+  const effectiveScrollOffset = Math.min(scrollOffset, Math.max(0, menuItems.length - maxVisible));
+  const visibleItems = menuItems.slice(effectiveScrollOffset, effectiveScrollOffset + maxVisible);
+
   useKeyboard((evt) => {
     if (!visible) return;
 
@@ -194,20 +232,27 @@ export function WebSearchSettings({ visible, onClose }: Props) {
       return;
     }
 
+    // Menu mode
     if (evt.name === "escape") {
       onClose();
       return;
     }
     if (evt.name === "up") {
-      setCursor((c) => (c > 0 ? c - 1 : menuItems.length - 1));
+      const next = clampedCursor > 0 ? clampedCursor - 1 : menuItems.length - 1;
+      setCursor(next);
+      if (next < effectiveScrollOffset) setScrollOffset(next);
       return;
     }
     if (evt.name === "down") {
-      setCursor((c) => (c < menuItems.length - 1 ? c + 1 : 0));
+      const next = clampedCursor < menuItems.length - 1 ? clampedCursor + 1 : 0;
+      setCursor(next);
+      if (next >= effectiveScrollOffset + maxVisible) {
+        setScrollOffset(next - maxVisible + 1);
+      }
       return;
     }
     if (evt.name === "return" || evt.name === " ") {
-      const item = menuItems[cursor];
+      const item = menuItems[clampedCursor];
       if (!item) return;
       if (item.type === "key") {
         handleSetKey(item.item.id);
@@ -221,13 +266,7 @@ export function WebSearchSettings({ visible, onClose }: Props) {
 
   const backend = getStorageBackend();
   const backendLabel = backend === "keychain" ? "OS Keychain" : "~/.soulforge/secrets.json";
-
-  const hasBrave = keys["brave-api-key"]?.set ?? false;
-  const hasJina = keys["jina-api-key"]?.set ?? false;
-  const searchLabel = hasBrave ? "Brave Search" : "DuckDuckGo";
-  const searchNote = hasBrave ? "(API key set)" : "(free, no key)";
-  const readerLabel = "Jina Reader";
-  const readerNote = hasJina ? "(API key set, 500 RPM)" : "(free, 20 RPM)";
+  const configuredCount = KEY_ITEMS.filter((k) => keys[k.id]?.set).length;
 
   if (mode === "input") {
     const target = KEY_ITEMS.find((k) => k.id === inputTarget);
@@ -247,7 +286,7 @@ export function WebSearchSettings({ visible, onClose }: Props) {
         >
           <PopupRow w={innerW}>
             <text bg={POPUP_BG} fg="#9B30FF" attributes={TextAttributes.BOLD}>
-              {icon("proxy")}
+              {icon("key") ?? ""}
             </text>
             <text bg={POPUP_BG} fg="white" attributes={TextAttributes.BOLD}>
               {" "}
@@ -301,13 +340,17 @@ export function WebSearchSettings({ visible, onClose }: Props) {
         borderColor="#8B5CF6"
         width={popupWidth}
       >
+        {/* Title */}
         <PopupRow w={innerW}>
           <text bg={POPUP_BG} fg="#9B30FF" attributes={TextAttributes.BOLD}>
-            {icon("web_search")}
+            {icon("key") ?? ""}
           </text>
           <text bg={POPUP_BG} fg="white" attributes={TextAttributes.BOLD}>
             {" "}
-            Web Search
+            API Keys
+          </text>
+          <text bg={POPUP_BG} fg="#555">
+            {`  ${String(configuredCount)}/${String(KEY_ITEMS.length)} configured`}
           </text>
         </PopupRow>
 
@@ -317,92 +360,55 @@ export function WebSearchSettings({ visible, onClose }: Props) {
           </text>
         </PopupRow>
 
-        <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#888">
-            {"Search: "}
-          </text>
-          <text bg={POPUP_BG} fg={hasBrave ? "#2d5" : "#888"}>
-            {searchLabel}
-          </text>
-          <text bg={POPUP_BG} fg="#555">
-            {" "}
-            {searchNote}
-          </text>
-        </PopupRow>
-        <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#888">
-            {"Reader: "}
-          </text>
-          <text bg={POPUP_BG} fg={hasJina ? "#2d5" : "#888"}>
-            {readerLabel}
-          </text>
-          <text bg={POPUP_BG} fg="#555">
-            {" "}
-            {readerNote}
-          </text>
-        </PopupRow>
+        {/* Key list */}
+        {visibleItems.map((mi, idx) => {
+          const absoluteIdx = effectiveScrollOffset + idx;
+          const isSelected = absoluteIdx === clampedCursor;
+          const bg = isSelected ? POPUP_HL : POPUP_BG;
 
-        <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#333">
-            {"─".repeat(innerW - 2)}
-          </text>
-        </PopupRow>
-
-        <box
-          flexDirection="column"
-          height={Math.min(menuItems.length, maxVisible)}
-          overflow="hidden"
-        >
-          {menuItems.map((mi, i) => {
-            const isSelected = i === cursor;
-            const bg = isSelected ? POPUP_HL : POPUP_BG;
-
-            if (mi.type === "action") {
-              return (
-                <PopupRow key={mi.id} bg={bg} w={innerW}>
-                  <text bg={bg} fg={isSelected ? "#FF0040" : "#555"}>
-                    {isSelected ? "› " : "  "}
-                  </text>
-                  <text bg={bg} fg="#e55">
-                    {mi.label}
-                  </text>
-                </PopupRow>
-              );
-            }
-
-            const info = mi.info;
-            const statusColor = info.set ? "#2d5" : "#555";
-            const statusText = info.set
-              ? info.source === "env"
-                ? `set (${mi.item.envVar})`
-                : `set (${info.source})`
-              : "not set";
-
+          if (mi.type === "action") {
             return (
-              <PopupRow key={mi.item.id} bg={bg} w={innerW}>
+              <PopupRow key={mi.id} w={innerW}>
                 <text bg={bg} fg={isSelected ? "#FF0040" : "#555"}>
-                  {isSelected ? "› " : "  "}
-                </text>
-                <text bg={bg} fg="white">
-                  {mi.item.label}
-                </text>
-                <text bg={bg} fg={statusColor}>
-                  {" "}
-                  [{statusText}]
+                  {isSelected ? "›" : " "}
+                  {"  "}
+                  {mi.label.trimStart()}
                 </text>
               </PopupRow>
             );
-          })}
-        </box>
+          }
 
+          const info = mi.info;
+          const item = mi.item;
+          const statusColor = info.set ? "#2d5" : "#555";
+          const statusText = info.set
+            ? info.source === "env"
+              ? `set (${item.envVar})`
+              : `set (${info.source})`
+            : "not set";
+
+          return (
+            <PopupRow key={item.id} w={innerW}>
+              <text bg={bg} fg={isSelected ? "white" : "#ccc"}>
+                {isSelected ? "›" : " "} {item.label}
+              </text>
+              <text bg={bg} fg={statusColor}>
+                {" "}
+                [{statusText}]
+              </text>
+            </PopupRow>
+          );
+        })}
+
+        {/* Description for selected key item */}
         {(() => {
-          const mi = menuItems[cursor];
-          if (mi?.type === "key") {
+          const selected = menuItems[clampedCursor];
+          if (selected?.type === "key") {
             return (
               <PopupRow w={innerW}>
-                <text bg={POPUP_BG} fg="#666">
-                  {"  "}
-                  {mi.item.desc}
+                <text bg={POPUP_BG} fg="#555">
+                  {"   "}
+                  {selected.item.desc}
                 </text>
               </PopupRow>
             );
@@ -410,29 +416,41 @@ export function WebSearchSettings({ visible, onClose }: Props) {
           return null;
         })()}
 
+        {/* Scroll indicator */}
+        {menuItems.length > maxVisible && (
+          <PopupRow w={innerW}>
+            <text bg={POPUP_BG} fg="#555">
+              {`  ${String(effectiveScrollOffset + 1)}-${String(Math.min(effectiveScrollOffset + maxVisible, menuItems.length))}/${String(menuItems.length)}`}
+            </text>
+          </PopupRow>
+        )}
+
+        {/* Status message */}
+        {statusMsg && (
+          <PopupRow w={innerW}>
+            <text bg={POPUP_BG} fg="#FF9500">
+              {" "}
+              {statusMsg}
+            </text>
+          </PopupRow>
+        )}
+
         <PopupRow w={innerW}>
           <text bg={POPUP_BG} fg="#333">
             {"─".repeat(innerW - 2)}
           </text>
         </PopupRow>
 
-        {statusMsg ? (
-          <PopupRow w={innerW}>
-            <text bg={POPUP_BG} fg="#8B5CF6">
-              {statusMsg}
-            </text>
-          </PopupRow>
-        ) : (
-          <PopupRow w={innerW}>
-            <text bg={POPUP_BG} fg="#555">
-              Storage: {backendLabel}
-            </text>
-          </PopupRow>
-        )}
+        <PopupRow w={innerW}>
+          <text bg={POPUP_BG} fg="#555">
+            {"↑↓ navigate  ↵ set key  esc close"}
+          </text>
+        </PopupRow>
 
         <PopupRow w={innerW}>
           <text bg={POPUP_BG} fg="#555">
-            {"↑↓"} nav | {"⏎"} set key | esc close
+            {"Storage: "}
+            {backendLabel}
           </text>
         </PopupRow>
       </box>

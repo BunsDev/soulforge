@@ -1,4 +1,5 @@
 import type { LanguageModel } from "ai";
+import { getProviderApiKey } from "../secrets.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
 
 export interface ProviderStatus {
@@ -24,7 +25,7 @@ export async function checkProviders(): Promise<ProviderStatus[]> {
       if (p.checkAvailability) {
         available = await p.checkAvailability();
       } else {
-        available = p.envVar === "" ? true : Boolean(process.env[p.envVar]);
+        available = p.envVar === "" ? true : Boolean(getProviderApiKey(p.envVar));
       }
       return { id: p.id, name: p.name, envVar: p.envVar, available };
     }),

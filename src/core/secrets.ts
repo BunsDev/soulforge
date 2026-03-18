@@ -7,11 +7,27 @@ const SECRETS_DIR = join(homedir(), ".soulforge");
 const SECRETS_FILE = join(SECRETS_DIR, "secrets.json");
 const KEYCHAIN_SERVICE = "soulforge";
 
-type SecretKey = "brave-api-key" | "jina-api-key";
+type SecretKey =
+  | "brave-api-key"
+  | "jina-api-key"
+  | "anthropic-api-key"
+  | "openai-api-key"
+  | "google-api-key"
+  | "xai-api-key"
+  | "openrouter-api-key"
+  | "llmgateway-api-key"
+  | "vercel-gateway-api-key";
 
 const ENV_MAP: Record<SecretKey, string> = {
   "brave-api-key": "BRAVE_SEARCH_API_KEY",
   "jina-api-key": "JINA_API_KEY",
+  "anthropic-api-key": "ANTHROPIC_API_KEY",
+  "openai-api-key": "OPENAI_API_KEY",
+  "google-api-key": "GOOGLE_GENERATIVE_AI_API_KEY",
+  "xai-api-key": "XAI_API_KEY",
+  "openrouter-api-key": "OPENROUTER_API_KEY",
+  "llmgateway-api-key": "LLM_GATEWAY_API_KEY",
+  "vercel-gateway-api-key": "AI_GATEWAY_API_KEY",
 };
 
 function keychainAvailable(): boolean {
@@ -198,5 +214,30 @@ export function getStorageBackend(): "keychain" | "file" {
   return keychainAvailable() ? "keychain" : "file";
 }
 
-export const SECRET_KEYS: SecretKey[] = ["brave-api-key", "jina-api-key"];
+export const SECRET_KEYS: SecretKey[] = [
+  "brave-api-key",
+  "jina-api-key",
+  "anthropic-api-key",
+  "openai-api-key",
+  "google-api-key",
+  "xai-api-key",
+  "openrouter-api-key",
+  "llmgateway-api-key",
+  "vercel-gateway-api-key",
+];
 export type { SecretKey };
+
+/** Reverse lookup: given an env var name, find its SecretKey */
+const ENV_TO_SECRET = new Map(Object.entries(ENV_MAP).map(([k, v]) => [v, k as SecretKey]));
+
+/**
+ * Resolve a provider API key: checks process.env first, then secrets store.
+ * Used by provider createModel/fetchModels as a drop-in for process.env[envVar].
+ */
+export function getProviderApiKey(envVar: string): string | undefined {
+  const envValue = process.env[envVar];
+  if (envValue) return envValue;
+  const secretKey = ENV_TO_SECRET.get(envVar);
+  if (!secretKey) return undefined;
+  return getSecret(secretKey) ?? undefined;
+}

@@ -65,6 +65,7 @@
 | `/diagnose` | Intelligence health check — probes all backends (LSP, ts-morph, tree-sitter, regex) |
 | `/repo-map` | Repo map settings and status |
 | `/web-search` | Web search configuration (API keys, page fetcher) |
+| `/keys` | Manage LLM provider API keys (Anthropic, OpenAI, Google, xAI, etc.) |
 
 ### LSP Install Tabs
 

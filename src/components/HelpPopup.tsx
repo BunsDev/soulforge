@@ -37,6 +37,7 @@ const LINES: HelpLine[] = [
   { type: "entry", label: "/branch [name]", desc: "show or create branch" },
   { type: "entry", label: "/init", desc: "initialize git repo" },
   { type: "entry", label: "/git", desc: "open git menu" },
+  { type: "entry", label: "/keys", desc: "manage LLM provider API keys" },
   { type: "entry", label: "/lazygit", desc: "launch lazygit fullscreen" },
   { type: "entry", label: "/proxy", desc: "show proxy status (installed, running)" },
   { type: "entry", label: "/proxy login", desc: "authenticate with Claude (browser OAuth)" },

@@ -1,4 +1,5 @@
 import { gateway as aiGateway } from "ai";
+import { getProviderApiKey } from "../../secrets.js";
 import type { ProviderDefinition, ProviderModelInfo } from "./types.js";
 
 export const vercelGatewayProvider: ProviderDefinition = {
@@ -9,7 +10,8 @@ export const vercelGatewayProvider: ProviderDefinition = {
   grouped: true,
 
   createModel(modelId: string) {
-    if (!process.env.AI_GATEWAY_API_KEY) {
+    const apiKey = getProviderApiKey("AI_GATEWAY_API_KEY");
+    if (!apiKey) {
       throw new Error("AI_GATEWAY_API_KEY is not set");
     }
     return aiGateway(modelId);

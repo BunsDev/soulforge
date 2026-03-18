@@ -45,6 +45,7 @@ const CMD_DEFS: Array<{ cmd: string; ic: string; desc: string }> = [
   { cmd: "/git", ic: "git", desc: "Git menu" },
   { cmd: "/help", ic: "help", desc: "Show available commands" },
   { cmd: "/init", ic: "git", desc: "Initialize git repo" },
+  { cmd: "/keys", ic: "cog", desc: "Manage LLM provider API keys" },
   { cmd: "/lazygit", ic: "git", desc: "Launch lazygit" },
   { cmd: "/log", ic: "git", desc: "Show recent commits" },
   { cmd: "/lsp", ic: "brain", desc: "Language server status & diagnostics" },

@@ -71,6 +71,7 @@ export interface CommandContext {
   openRouterSettings: () => void;
   openProviderSettings: () => void;
   openWebSearchSettings: () => void;
+  openApiKeySettings: () => void;
   openLspStatus: () => void;
   openLspInstall: () => void;
   openCommandPicker: (config: CommandPickerConfig) => void;
@@ -1235,6 +1236,10 @@ async function handleCommandInner(input: string, ctx: CommandContext): Promise<v
       break;
     case "/web-search":
       ctx.openWebSearchSettings();
+      break;
+    case "/keys":
+    case "/api-keys":
+      ctx.openApiKeySettings();
       break;
     case "/changes":
     case "/files":
