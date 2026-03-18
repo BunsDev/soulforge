@@ -365,10 +365,24 @@ function formatDuration(seconds: number): string {
   return remMins > 0 ? `${String(hrs)}h ${String(remMins)}m` : `${String(hrs)}h`;
 }
 
-const StatusIcon = memo(function StatusIcon({ state }: { state: LiveToolCall["state"] }) {
+const StatusIcon = memo(function StatusIcon({
+  state,
+  result,
+}: {
+  state: LiveToolCall["state"];
+  result?: string;
+}) {
   if (state === "running") return <Spinner />;
-  if (state === "done") return <span fg={COLORS.checkDone}>✓</span>;
-  return <span fg={COLORS.error}>✗</span>;
+  if (state === "error") return <span fg={COLORS.error}>✗</span>;
+  if (result) {
+    try {
+      const parsed = JSON.parse(result);
+      if (parsed.success === false) return <span fg="#d9a020">⚠</span>;
+    } catch {
+      // not JSON — treat as success
+    }
+  }
+  return <span fg={COLORS.checkDone}>✓</span>;
 });
 
 interface DispatchDisplayData {
@@ -1165,7 +1179,7 @@ const ToolRow = memo(
       <box flexDirection="column">
         <box height={1} flexShrink={0}>
           <text truncate>
-            <StatusIcon state={tc.state} />
+            <StatusIcon state={tc.state} result={tc.result} />
             <span fg={isDone ? COLORS.textDone : iconColor}> {icon} </span>
             {category ? <span fg={isDone ? "#444" : categoryColor}>[{category}]</span> : null}
             {backendTag ? (
