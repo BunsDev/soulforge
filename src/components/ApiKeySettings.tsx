@@ -111,7 +111,8 @@ export function ApiKeySettings({ visible, onClose }: Props) {
   const innerW = popupWidth - 2;
   const maxVisible = Math.max(4, Math.floor((termRows - 2) * 0.7) - CHROME_ROWS);
 
-  const { keys, refresh } = useApiKeyStore();
+  const keys = useApiKeyStore((s) => s.keys);
+  const refresh = useApiKeyStore((s) => s.refresh);
   const [cursor, setCursor] = useState(0);
   const [mode, setMode] = useState<"menu" | "input">("menu");
   const [inputValue, setInputValue] = useState("");

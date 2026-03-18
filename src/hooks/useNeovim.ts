@@ -52,6 +52,7 @@ export function useNeovim(
   const nvimRef = useRef<NvimInstance | null>(null);
   const mountedRef = useRef(true);
   const launchingRef = useRef(false);
+  const closeHandlerRef = useRef<(() => void) | null>(null);
 
   const [ready, setReady] = useState(false);
   const [screen, setScreen] = useState<ScreenState>({
@@ -148,13 +149,15 @@ export function useNeovim(
         // Detect when neovim exits (user runs :q, :qa, etc.)
         // Always null the global instance — even after unmount — to prevent
         // readBufferContent from calling RPC on a dead process (hangs forever).
-        nvim.process.on("close", () => {
+        const handleClose = () => {
           nvimRef.current = null;
           setNvimInstance(null);
           if (!mountedRef.current) return;
           setReady(false);
           onExitRef.current?.();
-        });
+        };
+        closeHandlerRef.current = handleClose;
+        nvim.process.on("close", handleClose);
       })
       .catch((err: unknown) => {
         if (mountedRef.current) {
@@ -224,6 +227,10 @@ export function useNeovim(
       }
       const nvim = nvimRef.current;
       if (nvim) {
+        if (closeHandlerRef.current) {
+          nvim.process.removeListener("close", closeHandlerRef.current);
+          closeHandlerRef.current = null;
+        }
         nvim.screen.onFlush = null;
         setNvimInstance(null);
         shutdownNeovim(nvim).catch(() => {});

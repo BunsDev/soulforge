@@ -1180,6 +1180,9 @@ export function useChat({
 
   const handleSubmit = useCallback(
     async (input: string) => {
+      // Concurrency guard — prevent dual-stream corruption if called while streaming
+      if (abortRef.current) return;
+
       if (activeModelRef.current === "none") {
         const hint: ChatMessage = {
           id: crypto.randomUUID(),

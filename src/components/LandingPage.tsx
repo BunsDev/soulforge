@@ -197,7 +197,15 @@ function IndexingStatus() {
   useEffect(
     () =>
       useRepoMapStore.subscribe((s) => {
-        setState({ status: s.status, files: s.files, scanProgress: s.scanProgress });
+        setState((prev) => {
+          if (
+            prev.status === s.status &&
+            prev.files === s.files &&
+            prev.scanProgress === s.scanProgress
+          )
+            return prev;
+          return { status: s.status, files: s.files, scanProgress: s.scanProgress };
+        });
       }),
     [],
   );

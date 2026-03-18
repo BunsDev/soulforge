@@ -347,25 +347,57 @@ export function App({
     editorSplit: editorSplitRef.current,
   });
 
-  const {
-    modals,
-    routerSlotPicking,
-    commandPickerConfig,
-    infoPopupConfig,
-    suspended,
-    isModalOpen,
-    editorSplit,
-  } = useUIStore(
-    useShallow((s) => ({
-      modals: s.modals,
-      routerSlotPicking: s.routerSlotPicking,
-      commandPickerConfig: s.commandPickerConfig,
-      infoPopupConfig: s.infoPopupConfig,
-      suspended: s.suspended,
-      isModalOpen: selectIsAnyModalOpen(s),
-      editorSplit: s.editorSplit,
-    })),
-  );
+  const { routerSlotPicking, commandPickerConfig, infoPopupConfig, suspended, editorSplit } =
+    useUIStore(
+      useShallow((s) => ({
+        routerSlotPicking: s.routerSlotPicking,
+        commandPickerConfig: s.commandPickerConfig,
+        infoPopupConfig: s.infoPopupConfig,
+        suspended: s.suspended,
+        editorSplit: s.editorSplit,
+      })),
+    );
+
+  // Individual modal selectors — only the modal that changed triggers a re-render
+  const modalLlmSelector = useUIStore((s) => s.modals.llmSelector);
+  const modalGitCommit = useUIStore((s) => s.modals.gitCommit);
+  const modalGitMenu = useUIStore((s) => s.modals.gitMenu);
+  const modalSessionPicker = useUIStore((s) => s.modals.sessionPicker);
+  const modalSkillSearch = useUIStore((s) => s.modals.skillSearch);
+  const modalLspInstall = useUIStore((s) => s.modals.lspInstall);
+  const modalHelpPopup = useUIStore((s) => s.modals.helpPopup);
+  const modalEditorSettings = useUIStore((s) => s.modals.editorSettings);
+  const modalProviderSettings = useUIStore((s) => s.modals.providerSettings);
+  const modalWebSearchSettings = useUIStore((s) => s.modals.webSearchSettings);
+  const modalApiKeySettings = useUIStore((s) => s.modals.apiKeySettings);
+  const modalRouterSettings = useUIStore((s) => s.modals.routerSettings);
+  const modalSetup = useUIStore((s) => s.modals.setup);
+  const modalErrorLog = useUIStore((s) => s.modals.errorLog);
+  const modalCommandPicker = useUIStore((s) => s.modals.commandPicker);
+  const modalInfoPopup = useUIStore((s) => s.modals.infoPopup);
+  const modalRepoMapStatus = useUIStore((s) => s.modals.repoMapStatus);
+  const modalLspStatus = useUIStore((s) => s.modals.lspStatus);
+  const modalCompactionLog = useUIStore((s) => s.modals.compactionLog);
+  const isModalOpen =
+    modalLlmSelector ||
+    modalGitCommit ||
+    modalGitMenu ||
+    modalSessionPicker ||
+    modalSkillSearch ||
+    modalLspInstall ||
+    modalHelpPopup ||
+    modalEditorSettings ||
+    modalProviderSettings ||
+    modalWebSearchSettings ||
+    modalApiKeySettings ||
+    modalRouterSettings ||
+    modalSetup ||
+    modalErrorLog ||
+    modalCommandPicker ||
+    modalInfoPopup ||
+    modalRepoMapStatus ||
+    modalLspStatus ||
+    modalCompactionLog;
 
   // Stable close handlers — cached in ref so memo'd children see stable refs
   const closerCache = useRef<Partial<Record<ModalName, () => void>>>({});
@@ -1110,7 +1142,7 @@ export function App({
       </box>
 
       <LlmSelector
-        visible={modals.llmSelector}
+        visible={modalLlmSelector}
         activeModel={activeModelForHeader}
         onSelect={(modelId) => {
           const slot = useUIStore.getState().routerSlotPicking;
@@ -1141,7 +1173,7 @@ export function App({
       />
 
       <GitCommitModal
-        visible={modals.gitCommit}
+        visible={modalGitCommit}
         cwd={cwd}
         coAuthor={activeChatRef.current?.coAuthorCommits ?? true}
         onClose={getCloser("gitCommit")}
@@ -1150,7 +1182,7 @@ export function App({
       />
 
       <GitMenu
-        visible={modals.gitMenu}
+        visible={modalGitMenu}
         cwd={cwd}
         onClose={getCloser("gitMenu")}
         onCommit={onGitMenuCommit}
@@ -1160,7 +1192,7 @@ export function App({
       />
 
       <SessionPicker
-        visible={modals.sessionPicker}
+        visible={modalSessionPicker}
         cwd={cwd}
         onClose={getCloser("sessionPicker")}
         onRestore={(sessionId) => {
@@ -1176,14 +1208,14 @@ export function App({
       />
 
       <SkillSearch
-        visible={modals.skillSearch}
+        visible={modalSkillSearch}
         contextManager={tabMgr.getActiveChat()?.contextManager ?? contextManager}
         onClose={getCloser("skillSearch")}
         onSystemMessage={addSystemMessage}
       />
 
       <LspInstallSearch
-        visible={modals.lspInstall}
+        visible={modalLspInstall}
         cwd={cwd}
         onClose={getCloser("lspInstall")}
         onSystemMessage={addSystemMessage}
@@ -1192,10 +1224,10 @@ export function App({
         disabledServers={effectiveConfig.disabledLspServers ?? []}
       />
 
-      <HelpPopup visible={modals.helpPopup} onClose={getCloser("helpPopup")} />
+      <HelpPopup visible={modalHelpPopup} onClose={getCloser("helpPopup")} />
 
       <EditorSettings
-        visible={modals.editorSettings}
+        visible={modalEditorSettings}
         settings={effectiveConfig.editorIntegration}
         initialScope={detectScope("editorIntegration")}
         onUpdate={(settings: EditorIntegration, toScope, fromScope) => {
@@ -1205,7 +1237,7 @@ export function App({
       />
 
       <ProviderSettings
-        visible={modals.providerSettings}
+        visible={modalProviderSettings}
         globalConfig={globalConfig}
         projectConfig={projConfig}
         onUpdate={(patch, toScope, fromScope) => saveToScope(patch, toScope, fromScope)}
@@ -1213,14 +1245,14 @@ export function App({
       />
 
       <WebSearchSettings
-        visible={modals.webSearchSettings}
+        visible={modalWebSearchSettings}
         onClose={getCloser("webSearchSettings")}
       />
 
-      <ApiKeySettings visible={modals.apiKeySettings} onClose={getCloser("apiKeySettings")} />
+      <ApiKeySettings visible={modalApiKeySettings} onClose={getCloser("apiKeySettings")} />
 
       <RouterSettings
-        visible={modals.routerSettings && !routerSlotPicking}
+        visible={modalRouterSettings && !routerSlotPicking}
         router={effectiveConfig.taskRouter}
         activeModel={activeModelForHeader}
         scope={routerScope}
@@ -1243,30 +1275,30 @@ export function App({
       />
 
       <SetupGuide
-        visible={modals.setup}
+        visible={modalSetup}
         onClose={getCloser("setup")}
         onSystemMessage={addSystemMessage}
       />
 
       <ErrorLog
-        visible={modals.errorLog}
+        visible={modalErrorLog}
         messages={activeChatRef.current?.messages ?? []}
         onClose={getCloser("errorLog")}
       />
 
       <CommandPicker
-        visible={modals.commandPicker}
+        visible={modalCommandPicker}
         config={commandPickerConfig}
         onClose={getCloser("commandPicker")}
       />
 
-      <InfoPopup visible={modals.infoPopup} config={infoPopupConfig} onClose={closeInfoPopup} />
+      <InfoPopup visible={modalInfoPopup} config={infoPopupConfig} onClose={closeInfoPopup} />
 
-      <RepoMapStatusPopup visible={modals.repoMapStatus} onClose={getCloser("repoMapStatus")} />
+      <RepoMapStatusPopup visible={modalRepoMapStatus} onClose={getCloser("repoMapStatus")} />
 
-      <LspStatusPopup visible={modals.lspStatus} onClose={getCloser("lspStatus")} />
+      <LspStatusPopup visible={modalLspStatus} onClose={getCloser("lspStatus")} />
 
-      <CompactionLog visible={modals.compactionLog} onClose={getCloser("compactionLog")} />
+      <CompactionLog visible={modalCompactionLog} onClose={getCloser("compactionLog")} />
     </box>
   );
 }
