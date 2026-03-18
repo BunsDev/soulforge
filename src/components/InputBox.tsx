@@ -184,7 +184,7 @@ function buildVisualRows(lines: string[], width: number): VisualRow[] {
   return rows;
 }
 
-export function InputBox({
+export const InputBox = memo(function InputBox({
   onSubmit,
   isLoading,
   isCompacting,
@@ -1045,7 +1045,7 @@ export function InputBox({
       </box>
     </box>
   );
-}
+});
 
 /** The actual text editor area — handles all 3 cases: single, wrapped, multiline */
 const InputEditor = memo(function InputEditor({

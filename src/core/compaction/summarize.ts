@@ -1,6 +1,7 @@
 import type { JSONObject } from "@ai-sdk/provider";
 import type { ModelMessage } from "ai";
 import { generateText } from "ai";
+import { logBackgroundError } from "../../stores/errors.js";
 import type { WorkingStateManager } from "./working-state.js";
 
 /**
@@ -31,38 +32,46 @@ export async function buildV2Summary(opts: {
 
   const convoText = buildFullConvoText(olderMessages, 12000);
 
-  const { text: gapFill } = await generateText({
-    model,
-    maxOutputTokens: 2048,
-    ...(abortSignal ? { abortSignal } : {}),
-    ...(providerOptions && Object.keys(providerOptions).length > 0 ? { providerOptions } : {}),
-    ...(headers ? { headers } : {}),
-    prompt: [
-      "You are reviewing a structured summary of a coding conversation to find MISSING information.",
-      "",
-      "EXISTING STRUCTURED STATE (already extracted):",
-      structuredState,
-      "",
-      "FULL CONVERSATION (older messages being compacted):",
-      convoText,
-      "",
-      "Your job: output ONLY information that is genuinely MISSING from the structured state above.",
-      "Focus on:",
-      "- User requirements or constraints not captured",
-      "- Important decisions or reasoning not reflected",
-      "- Error details or test results that matter for ongoing work",
-      "- Context that would be needed to continue the task",
-      "",
-      "Format as bullet points under these headers (skip empty sections):",
-      "",
-      "## Missing Requirements",
-      "## Missing Decisions",
-      "## Missing Context",
-      "",
-      "If the structured state already covers everything important, output exactly: COMPLETE",
-      "Be concise but thorough. Include specific details (file names, error messages, code snippets) not vague summaries.",
-    ].join("\n"),
-  });
+  let gapFill: string | undefined;
+  try {
+    const result = await generateText({
+      model,
+      maxOutputTokens: 2048,
+      maxRetries: 0,
+      ...(abortSignal ? { abortSignal } : {}),
+      ...(providerOptions && Object.keys(providerOptions).length > 0 ? { providerOptions } : {}),
+      ...(headers ? { headers } : {}),
+      prompt: [
+        "You are reviewing a structured summary of a coding conversation to find MISSING information.",
+        "",
+        "EXISTING STRUCTURED STATE (already extracted):",
+        structuredState,
+        "",
+        "FULL CONVERSATION (older messages being compacted):",
+        convoText,
+        "",
+        "Your job: output ONLY information that is genuinely MISSING from the structured state above.",
+        "Focus on:",
+        "- User requirements or constraints not captured",
+        "- Important decisions or reasoning not reflected",
+        "- Error details or test results that matter for ongoing work",
+        "- Context that would be needed to continue the task",
+        "",
+        "Format as bullet points under these headers (skip empty sections):",
+        "",
+        "## Missing Requirements",
+        "## Missing Decisions",
+        "## Missing Context",
+        "",
+        "If the structured state already covers everything important, output exactly: COMPLETE",
+        "Be concise but thorough. Include specific details (file names, error messages, code snippets) not vague summaries.",
+      ].join("\n"),
+    });
+    gapFill = result.text;
+  } catch (err: unknown) {
+    logBackgroundError("compaction-summarize", err instanceof Error ? err.message : String(err));
+    return structuredState;
+  }
 
   if (!gapFill || gapFill.trim() === "COMPLETE" || gapFill.trim().length < 20) {
     return structuredState;

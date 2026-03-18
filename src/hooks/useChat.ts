@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StreamSegment } from "../components/StreamSegmentList.js";
 import type { LiveToolCall } from "../components/ToolCallDisplay.js";
 import { createForgeAgent } from "../core/agents/index.js";
-import { smoothStreamOptions } from "../core/agents/stream-options.js";
+import { getSmoothStreamOptions } from "../core/agents/stream-options.js";
 import { onAgentStats, onMultiAgentEvent } from "../core/agents/subagent-events.js";
 import type { SharedCacheRef } from "../core/agents/subagent-tools.js";
 import {
@@ -357,12 +357,16 @@ export function useChat({
     }, 0);
   }, [flushStreamState]);
 
-  // Clean up pending microtask flush on unmount
+  // Clean up pending microtask flush and stream flush timer on unmount
   useEffect(() => {
     return () => {
       if (flushMicrotaskTimer.current) {
         clearTimeout(flushMicrotaskTimer.current);
         flushMicrotaskTimer.current = null;
+      }
+      if (flushTimerRef.current) {
+        clearInterval(flushTimerRef.current);
+        flushTimerRef.current = null;
       }
     };
   }, []);
@@ -1492,7 +1496,7 @@ export function useChat({
                   messages: newCoreMessages,
                   abortSignal: abortController.signal,
                   options: { userMessage: input },
-                  ...smoothStreamOptions,
+                  ...getSmoothStreamOptions(),
                 })) as unknown as StreamTextResult<ToolSet, never>;
                 break;
               } catch (err: unknown) {
@@ -1518,7 +1522,19 @@ export function useChat({
                 timestamp: Date.now(),
               },
             ]);
-            await new Promise((r) => setTimeout(r, delay));
+            await new Promise<void>((resolve, reject) => {
+              const timer = setTimeout(resolve, delay);
+              const onAbort = () => {
+                clearTimeout(timer);
+                reject(new Error("aborted"));
+              };
+              if (abortController.signal.aborted) {
+                clearTimeout(timer);
+                reject(new Error("aborted"));
+              } else {
+                abortController.signal.addEventListener("abort", onAbort, { once: true });
+              }
+            });
           }
         }
 

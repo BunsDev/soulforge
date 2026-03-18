@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { rebuildCoreMessages } from "../core/sessions/rebuild.js";
 import type { TabMeta } from "../core/sessions/types.js";
 import type { ChatMessage } from "../types/index.js";
@@ -39,7 +39,7 @@ export interface UseTabsReturn {
   getActiveChat: () => ChatInstance | null;
   getChat: (id: string) => ChatInstance | null;
   getAllTabStates: () => TabState[];
-  initialStates: React.MutableRefObject<Map<string, TabState>>;
+  initialStates: React.RefObject<Map<string, TabState>>;
   restoreFromMeta: (
     tabMetas: TabMeta[],
     activeId: string,
@@ -60,80 +60,89 @@ export function useTabs(): UseTabsReturn {
   const initialStates = useRef(new Map<string, TabState>());
   const [, forceRender] = useState(0);
 
-  const activeTab = (tabs.find((t) => t.id === activeTabId) ?? tabs[0]) as (typeof tabs)[number];
-  const activeTabIndex = tabs.findIndex((t) => t.id === activeTabId);
+  // Stable refs so callbacks don't depend on tabs/activeTabId arrays
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
+  const activeTabIdRef = useRef(activeTabId);
+  activeTabIdRef.current = activeTabId;
 
-  const switchTab = useCallback(
-    (targetId: string) => {
-      if (targetId === activeTabId) return;
-      if (!tabs.some((t) => t.id === targetId)) return;
-      const activity = activityMap.current.get(targetId);
-      if (activity && (activity.hasUnread || activity.hasError)) {
-        activityMap.current.set(targetId, { ...activity, hasUnread: false, hasError: false });
-      }
-      setActiveTabId(targetId);
-    },
-    [activeTabId, tabs],
+  const activeTab = useMemo(
+    () => (tabs.find((t) => t.id === activeTabId) ?? tabs[0]) as (typeof tabs)[number],
+    [tabs, activeTabId],
+  );
+  const activeTabIndex = useMemo(
+    () => tabs.findIndex((t) => t.id === activeTabId),
+    [tabs, activeTabId],
   );
 
+  const switchTab = useCallback((targetId: string) => {
+    if (targetId === activeTabIdRef.current) return;
+    if (!tabsRef.current.some((t) => t.id === targetId)) return;
+    const activity = activityMap.current.get(targetId);
+    if (activity && (activity.hasUnread || activity.hasError)) {
+      activityMap.current.set(targetId, { ...activity, hasUnread: false, hasError: false });
+    }
+    setActiveTabId(targetId);
+  }, []);
+
   const createTab = useCallback(() => {
-    if (tabs.length >= MAX_TABS) return;
+    if (tabsRef.current.length >= MAX_TABS) return;
     tabCounter.current += 1;
     const newId = crypto.randomUUID();
     const newLabel = `Tab ${String(tabCounter.current)}`;
     setTabs((prev) => [...prev, { id: newId, label: newLabel }]);
     setActiveTabId(newId);
-  }, [tabs.length]);
+  }, []);
 
-  const closeTab = useCallback(
-    (targetId: string): boolean => {
-      if (tabs.length <= 1) return false;
-      const idx = tabs.findIndex((t) => t.id === targetId);
-      if (idx === -1) return false;
+  const closeTab = useCallback((targetId: string): boolean => {
+    const currentTabs = tabsRef.current;
+    if (currentTabs.length <= 1) return false;
+    const idx = currentTabs.findIndex((t) => t.id === targetId);
+    if (idx === -1) return false;
 
-      const chat = chatRegistry.current.get(targetId);
-      if (chat?.isLoading) chat.abort();
+    const chat = chatRegistry.current.get(targetId);
+    if (chat?.isLoading) chat.abort();
 
-      chatRegistry.current.delete(targetId);
-      autoLabeled.current.delete(targetId);
-      activityMap.current.delete(targetId);
-      initialStates.current.delete(targetId);
+    chatRegistry.current.delete(targetId);
+    autoLabeled.current.delete(targetId);
+    activityMap.current.delete(targetId);
+    initialStates.current.delete(targetId);
 
-      const newTabs = tabs.filter((t) => t.id !== targetId);
-      setTabs(newTabs);
+    const newTabs = currentTabs.filter((t) => t.id !== targetId);
+    setTabs(newTabs);
 
-      if (targetId === activeTabId) {
-        const newIdx = Math.min(idx, newTabs.length - 1);
-        const newActiveId = newTabs[newIdx]?.id ?? newTabs[0]?.id ?? "";
-        setActiveTabId(newActiveId);
-      }
+    if (targetId === activeTabIdRef.current) {
+      const newIdx = Math.min(idx, newTabs.length - 1);
+      const newActiveId = newTabs[newIdx]?.id ?? newTabs[0]?.id ?? "";
+      setActiveTabId(newActiveId);
+    }
 
-      return true;
-    },
-    [tabs, activeTabId],
-  );
+    return true;
+  }, []);
 
   const switchToIndex = useCallback(
     (index: number) => {
-      const tab = tabs[index];
+      const tab = tabsRef.current[index];
       if (tab) switchTab(tab.id);
     },
-    [tabs, switchTab],
+    [switchTab],
   );
 
   const nextTab = useCallback(() => {
-    const idx = tabs.findIndex((t) => t.id === activeTabId);
-    const nextIdx = (idx + 1) % tabs.length;
-    const tab = tabs[nextIdx];
+    const currentTabs = tabsRef.current;
+    const idx = currentTabs.findIndex((t) => t.id === activeTabIdRef.current);
+    const nextIdx = (idx + 1) % currentTabs.length;
+    const tab = currentTabs[nextIdx];
     if (tab) switchTab(tab.id);
-  }, [tabs, activeTabId, switchTab]);
+  }, [switchTab]);
 
   const prevTab = useCallback(() => {
-    const idx = tabs.findIndex((t) => t.id === activeTabId);
-    const prevIdx = (idx - 1 + tabs.length) % tabs.length;
-    const tab = tabs[prevIdx];
+    const currentTabs = tabsRef.current;
+    const idx = currentTabs.findIndex((t) => t.id === activeTabIdRef.current);
+    const prevIdx = (idx - 1 + currentTabs.length) % currentTabs.length;
+    const tab = currentTabs[prevIdx];
     if (tab) switchTab(tab.id);
-  }, [tabs, activeTabId, switchTab]);
+  }, [switchTab]);
 
   const renameTab = useCallback((id: string, label: string) => {
     setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, label } : t)));
@@ -164,18 +173,15 @@ export function useTabs(): UseTabsReturn {
     setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, label } : t)));
   }, []);
 
-  const setTabActivity = useCallback(
-    (id: string, activity: Partial<TabActivity>) => {
-      const current = activityMap.current.get(id) ?? { ...DEFAULT_ACTIVITY };
-      const updated = { ...current, ...activity };
-      if (activity.hasUnread && id === activeTabId) {
-        updated.hasUnread = false;
-      }
-      activityMap.current.set(id, updated);
-      forceRender((n) => n + 1);
-    },
-    [activeTabId],
-  );
+  const setTabActivity = useCallback((id: string, activity: Partial<TabActivity>) => {
+    const current = activityMap.current.get(id) ?? { ...DEFAULT_ACTIVITY };
+    const updated = { ...current, ...activity };
+    if (activity.hasUnread && id === activeTabIdRef.current) {
+      updated.hasUnread = false;
+    }
+    activityMap.current.set(id, updated);
+    forceRender((n) => n + 1);
+  }, []);
 
   const getTabActivity = useCallback((id: string): TabActivity => {
     return activityMap.current.get(id) ?? { ...DEFAULT_ACTIVITY };
@@ -191,8 +197,8 @@ export function useTabs(): UseTabsReturn {
   }, []);
 
   const getActiveChat = useCallback((): ChatInstance | null => {
-    return chatRegistry.current.get(activeTabId) ?? null;
-  }, [activeTabId]);
+    return chatRegistry.current.get(activeTabIdRef.current) ?? null;
+  }, []);
 
   const getChat = useCallback((id: string): ChatInstance | null => {
     return chatRegistry.current.get(id) ?? null;
@@ -200,14 +206,14 @@ export function useTabs(): UseTabsReturn {
 
   const getAllTabStates = useCallback((): TabState[] => {
     const states: TabState[] = [];
-    for (const tab of tabs) {
+    for (const tab of tabsRef.current) {
       const chat = chatRegistry.current.get(tab.id);
       if (chat) {
         states.push(chat.snapshot(tab.label));
       }
     }
     return states;
-  }, [tabs]);
+  }, []);
 
   const restoreFromMeta = useCallback(
     (tabMetas: TabMeta[], activeId: string, tabMessages: Map<string, ChatMessage[]>) => {

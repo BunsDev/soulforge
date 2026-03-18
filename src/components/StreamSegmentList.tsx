@@ -35,15 +35,13 @@ export const StreamSegmentList = memo(function StreamSegmentList({
 }) {
   const toolCallMap = useMemo(() => new Map(toolCalls.map((tc) => [tc.id, tc])), [toolCalls]);
 
-  let lastTextIndex = -1;
-  if (streaming) {
+  const lastTextIndex = useMemo(() => {
+    if (!streaming) return -1;
     for (let j = segments.length - 1; j >= 0; j--) {
-      if (segments[j]?.type === "text") {
-        lastTextIndex = j;
-        break;
-      }
+      if (segments[j]?.type === "text") return j;
     }
-  }
+    return -1;
+  }, [segments, streaming]);
 
   let lastVisibleType: string | null = null;
   return (
