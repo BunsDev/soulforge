@@ -419,14 +419,18 @@ export function useChat({
   const contextManagerRef = useRef(contextManager);
   contextManagerRef.current = contextManager;
   const pinnedContextWindow = useRef(new Map<string, number>());
-  useEffect(() => {
+
+  // Sync context window immediately on mount + on model change (not deferred to useEffect)
+  const prevSyncedModel = useRef("");
+  if (activeModel !== prevSyncedModel.current && activeModel !== "none") {
+    prevSyncedModel.current = activeModel;
     const cached = pinnedContextWindow.current.get(activeModel);
     const fresh = getModelContextWindow(activeModel);
     const windowTokens = cached ? Math.max(cached, fresh) : fresh;
     pinnedContextWindow.current.set(activeModel, windowTokens);
     contextManagerRef.current.setContextWindow(windowTokens);
     if (visible) useStatusBarStore.getState().setContextWindow(windowTokens);
-  }, [activeModel, visible]);
+  }
 
   const [tokenUsage, setTokenUsageRaw] = useState<TokenUsage>(
     initialState?.tokenUsage ?? { ...ZERO_USAGE },
@@ -860,19 +864,12 @@ export function useChat({
 
         const summaryMsg: ModelMessage = {
           role: "user" as const,
-          content: [
-            "[CONTEXT COMPACTION — Summary of earlier conversation]",
-            "",
-            summary,
-            "",
-            "[End of compacted context. Recent messages follow.]",
-          ].join("\n"),
+          content: summary,
         };
 
         const ackMsg: ModelMessage = {
           role: "assistant" as const,
-          content:
-            "Understood. I have the context from our earlier conversation and will continue seamlessly.",
+          content: "Continuing.",
         };
 
         const newMessages = [summaryMsg, ackMsg, ...recentMessages];
@@ -912,9 +909,8 @@ export function useChat({
           {
             id: crypto.randomUUID(),
             role: "system",
-            content: `Context compacted: ${beforePct}% → ${afterPct}%\n${currentCore.length} messages summarized into ${newMessages.length} (summary + ${recentMessages.length} recent). Messages above are no longer in context.`,
+            content: `Context optimized (${beforePct}% → ${afterPct}%).`,
             timestamp: Date.now(),
-            showInChat: true,
           },
         ]);
 

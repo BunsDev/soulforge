@@ -31,6 +31,8 @@ const INDEXABLE_EXTENSIONS: Record<string, Language> = {
   ".cc": "cpp",
   ".cxx": "cpp",
   ".hpp": "cpp",
+  ".hh": "cpp",
+  ".hxx": "cpp",
   ".cs": "csharp",
   ".rb": "ruby",
   ".php": "php",
@@ -38,6 +40,7 @@ const INDEXABLE_EXTENSIONS: Record<string, Language> = {
   ".kt": "kotlin",
   ".kts": "kotlin",
   ".scala": "scala",
+  ".sc": "scala",
   ".lua": "lua",
   ".ex": "elixir",
   ".exs": "elixir",
@@ -46,16 +49,31 @@ const INDEXABLE_EXTENSIONS: Record<string, Language> = {
   ".sh": "bash",
   ".bash": "bash",
   ".zsh": "bash",
+  ".ml": "ocaml",
+  ".mli": "ocaml",
+  ".m": "objc",
+  ".el": "elisp",
+  ".res": "rescript",
+  ".resi": "rescript",
+  ".sol": "solidity",
+  ".tla": "tlaplus",
+  ".vue": "vue",
+  // Additional extensions from EXT_TO_LANGUAGE
+  ".pyw": "python",
+  ".erb": "ruby",
   // Config/data files — no AST symbols, but tracked in the map
   ".json": "unknown",
+  ".jsonc": "unknown",
   ".yaml": "unknown",
   ".yml": "unknown",
   ".toml": "unknown",
   ".xml": "unknown",
   ".md": "unknown",
-  ".css": "unknown",
-  ".scss": "unknown",
-  ".html": "unknown",
+  ".css": "css",
+  ".scss": "css",
+  ".less": "css",
+  ".html": "html",
+  ".htm": "html",
   ".sql": "unknown",
   ".graphql": "unknown",
   ".gql": "unknown",
@@ -66,6 +84,19 @@ const INDEXABLE_EXTENSIONS: Record<string, Language> = {
   ".cfg": "unknown",
   ".dockerfile": "unknown",
 };
+
+/** Languages that are tracked in the file list but should not produce identifier-based refs.
+ *  They have no meaningful AST symbols and their text content (JSON keys, YAML fields, markdown prose)
+ *  would pollute the cross-file reference graph with false edges. */
+const NON_CODE_LANGUAGES: ReadonlySet<Language> = new Set<Language>([
+  "unknown",
+  "css",
+  "html",
+  "json",
+  "toml",
+  "yaml",
+  "dockerfile",
+]);
 
 const IGNORED_DIRS = new Set([
   "node_modules",
@@ -530,6 +561,19 @@ export class RepoMap {
       CREATE INDEX IF NOT EXISTS idx_fragments_file ON token_fragments(file_id);
     `);
 
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS calls (
+        caller_symbol_id INTEGER NOT NULL REFERENCES symbols(id) ON DELETE CASCADE,
+        callee_name TEXT NOT NULL,
+        callee_symbol_id INTEGER REFERENCES symbols(id) ON DELETE SET NULL,
+        callee_file_id INTEGER REFERENCES files(id) ON DELETE CASCADE,
+        line INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_calls_caller ON calls(caller_symbol_id);
+      CREATE INDEX IF NOT EXISTS idx_calls_callee ON calls(callee_symbol_id);
+      CREATE INDEX IF NOT EXISTS idx_calls_callee_file ON calls(callee_file_id);
+    `);
+
     this.migrateSemanticSource();
 
     this.rebuildFts();
@@ -625,8 +669,10 @@ export class RepoMap {
 
       if (toIndex.length > 0 || stale.length > 0) {
         this.resolveUnresolvedRefs();
+        this.resolveIdentifierRefs();
         this.onProgress?.(-1, -1);
         await tick();
+        this.buildCallGraph();
         this.buildEdges();
         this.onProgress?.(-2, -2);
         await tick();
@@ -677,6 +723,9 @@ export class RepoMap {
       .get(relPath);
 
     if (existing) {
+      // Delete calls before symbols — CASCADE handles caller side but we also
+      // need to clean callee refs pointing to this file
+      this.db.query("DELETE FROM calls WHERE callee_file_id = ?").run(existing.id);
       this.db.query("DELETE FROM symbols WHERE file_id = ?").run(existing.id);
       this.db.query("DELETE FROM refs WHERE file_id = ?").run(existing.id);
       this.db.query("DELETE FROM external_imports WHERE file_id = ?").run(existing.id);
@@ -743,6 +792,18 @@ export class RepoMap {
           const key = `${sym.name}:${String(sym.location.line)}`;
           if (seen.has(key)) continue;
           seen.add(key);
+
+          // Filter local variables: only index top-level symbols.
+          // Variables/constants inside function bodies add noise (9k+ symbols).
+          // Keep: exported, non-variable kinds, or top-level (indentation ≤ 2 spaces).
+          if (sym.kind === "variable" || sym.kind === "constant") {
+            if (!exportedNames.has(sym.name)) {
+              const srcLine = lines[sym.location.line - 1] ?? "";
+              const indent = srcLine.length - srcLine.trimStart().length;
+              if (indent > 2) continue; // local variable — skip
+            }
+          }
+
           const sig = extractSignature(lines, sym.location.line - 1, sym.kind);
           insertSym.run(
             fileId,
@@ -839,12 +900,16 @@ export class RepoMap {
       }
     }
 
-    const identifiers = this.extractIdentifiers(content, language);
-    for (const id of identifiers) {
-      if (allRefNames.size >= MAX_REFS_PER_FILE) break;
-      if (!allRefNames.has(id)) {
-        allRefNames.add(id);
-        resolvedRefs.push({ name: id, sourceFileId: null, importSource: null });
+    // Only extract identifiers from code files — non-code files (JSON, YAML, MD, etc.)
+    // produce noise refs ("name", "version", "scripts") that create bogus edges.
+    if (!NON_CODE_LANGUAGES.has(language)) {
+      const identifiers = this.extractIdentifiers(content, language);
+      for (const id of identifiers) {
+        if (allRefNames.size >= MAX_REFS_PER_FILE) break;
+        if (!allRefNames.has(id)) {
+          allRefNames.add(id);
+          resolvedRefs.push({ name: id, sourceFileId: null, importSource: null });
+        }
       }
     }
 
@@ -978,8 +1043,8 @@ export class RepoMap {
     let normalized: string | null = null;
 
     if (importSource.startsWith("./") || importSource.startsWith("../")) {
-      // Direct relative import
-      normalized = importSource;
+      // Direct relative import — strip .js/.mjs/.cjs extensions that map to .ts files
+      normalized = importSource.replace(/\.(m?js|cjs|jsx)$/, "");
     } else if (
       importSource.startsWith(".") &&
       !importSource.startsWith("./") &&
@@ -1030,9 +1095,13 @@ export class RepoMap {
   }
 
   private resolveRelPath(relBase: string): number | null {
-    const base = join(this.cwd, relBase);
+    // Strip .js/.mjs/.cjs extensions that map to .ts in the files table
+    const stripped = relBase.replace(/\.(m?js|cjs|jsx)$/, "");
+    const base = join(this.cwd, stripped);
     const candidates = [base];
-    const ext = extname(base);
+    // Also try the original path if it had an extension we stripped
+    if (stripped !== relBase) candidates.push(join(this.cwd, relBase));
+    const ext = extname(stripped);
     if (!ext) {
       for (const tryExt of Object.keys(INDEXABLE_EXTENSIONS)) {
         candidates.push(base + tryExt);
@@ -1053,6 +1122,63 @@ export class RepoMap {
       if (row) return row.id;
     }
     return null;
+  }
+
+  /**
+   * Resolve identifier-only refs (no import_source) by matching against uniquely-exported symbols.
+   * Only resolves when the ref's file already has an import-traced edge to the target file,
+   * preventing false positives like matching local variable `formatDate` to an unrelated export.
+   */
+  private resolveIdentifierRefs(): void {
+    // Step 1: Build a map of symbol name → file_id for symbols exported from exactly one file
+    const uniqueExports = this.db
+      .query<{ name: string; file_id: number }, []>(
+        `SELECT s.name, s.file_id
+         FROM symbols s
+         WHERE s.is_exported = 1
+         GROUP BY s.name
+         HAVING COUNT(DISTINCT s.file_id) = 1`,
+      )
+      .all();
+    if (uniqueExports.length === 0) return;
+
+    // Step 2: Build a set of (file_id, target_file_id) pairs from already-resolved import refs
+    const importEdges = new Set<string>();
+    const resolvedImports = this.db
+      .query<{ file_id: number; source_file_id: number }, []>(
+        `SELECT DISTINCT file_id, source_file_id FROM refs
+         WHERE source_file_id IS NOT NULL`,
+      )
+      .all();
+    for (const row of resolvedImports) {
+      importEdges.add(`${row.file_id}:${row.source_file_id}`);
+    }
+
+    // Step 3: Resolve identifier refs where file has an import edge to the export's file
+    const exportMap = new Map<string, number>();
+    for (const row of uniqueExports) {
+      exportMap.set(row.name, row.file_id);
+    }
+
+    const update = this.db.prepare("UPDATE refs SET source_file_id = ? WHERE rowid = ?");
+    const unresolvedIds = this.db
+      .query<{ rowid: number; file_id: number; name: string }, []>(
+        `SELECT rowid, file_id, name FROM refs
+         WHERE source_file_id IS NULL AND import_source IS NULL`,
+      )
+      .all();
+
+    const tx = this.db.transaction(() => {
+      for (const ref of unresolvedIds) {
+        const targetFileId = exportMap.get(ref.name);
+        if (targetFileId === undefined) continue;
+        if (targetFileId === ref.file_id) continue; // self-ref
+        // Only resolve if there's an existing import edge from this file to the target
+        if (!importEdges.has(`${ref.file_id}:${targetFileId}`)) continue;
+        update.run(targetFileId, ref.rowid);
+      }
+    });
+    tx();
   }
 
   /**
@@ -1293,7 +1419,7 @@ export class RepoMap {
       logOutput = await new Promise<string>((resolve, reject) => {
         execFile(
           "git",
-          ["log", `--format=---COMMIT---`, "--name-only", "-n", String(GIT_LOG_COMMITS)],
+          ["log", "--pretty=format:---COMMIT---", "--name-only", "-n", String(GIT_LOG_COMMITS)],
           { cwd: this.cwd, timeout: 10_000, maxBuffer: 5_000_000 },
           (err, stdout) => (err ? reject(err) : resolve(stdout)),
         );
@@ -1832,9 +1958,105 @@ export class RepoMap {
     }
   }
 
+  /**
+   * Build function-level call graph by cross-referencing imported names with function body content.
+   * Language-agnostic: uses symbol line ranges from the DB and import specifiers.
+   * For each function, checks which imported names appear within its body lines.
+   */
+  private buildCallGraph(): void {
+    this.db.run("DELETE FROM calls");
+
+    // Get all files with both functions and resolved imports
+    const filesWithImports = this.db
+      .query<{ id: number; path: string }, []>(
+        `SELECT DISTINCT f.id, f.path FROM files f
+         WHERE EXISTS (SELECT 1 FROM symbols s WHERE s.file_id = f.id AND s.kind IN ('function', 'method'))
+           AND EXISTS (SELECT 1 FROM refs r WHERE r.file_id = f.id AND r.source_file_id IS NOT NULL)`,
+      )
+      .all();
+
+    if (filesWithImports.length === 0) return;
+
+    const getImports = this.db.prepare<{ name: string; source_file_id: number }, [number]>(
+      `SELECT DISTINCT r.name, r.source_file_id FROM refs r
+       WHERE r.file_id = ? AND r.source_file_id IS NOT NULL AND r.name != '*'`,
+    );
+
+    const getFunctions = this.db.prepare<
+      { id: number; name: string; line: number; end_line: number },
+      [number]
+    >(
+      `SELECT id, name, line, end_line FROM symbols
+       WHERE file_id = ? AND kind IN ('function', 'method') AND end_line > line`,
+    );
+
+    const resolveCallee = this.db.prepare<{ id: number }, [number, string]>(
+      `SELECT id FROM symbols WHERE file_id = ? AND name = ? AND is_exported = 1 LIMIT 1`,
+    );
+
+    const insertCall = this.db.prepare(
+      `INSERT INTO calls (caller_symbol_id, callee_name, callee_symbol_id, callee_file_id, line)
+       VALUES (?, ?, ?, ?, ?)`,
+    );
+
+    const tx = this.db.transaction(() => {
+      for (const file of filesWithImports) {
+        let lines: string[];
+        try {
+          const content = require("node:fs").readFileSync(
+            join(this.cwd, file.path),
+            "utf-8",
+          ) as string;
+          lines = content.split("\n");
+        } catch {
+          continue;
+        }
+
+        const imports = getImports.all(file.id);
+        if (imports.length === 0) continue;
+
+        const functions = getFunctions.all(file.id);
+        if (functions.length === 0) continue;
+
+        // Build word-boundary regex for each import
+        const importPatterns = imports.map((imp) => ({
+          name: imp.name,
+          sourceFileId: imp.source_file_id,
+          re: new RegExp(`\\b${imp.name.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\b`),
+        }));
+
+        for (const func of functions) {
+          const bodyStart = func.line; // 1-indexed, inclusive
+          const bodyEnd = Math.min(func.end_line, lines.length); // 1-indexed, inclusive
+          const bodyText = lines.slice(bodyStart - 1, bodyEnd).join("\n");
+
+          for (const imp of importPatterns) {
+            if (imp.name === func.name) continue; // skip self-definitions
+
+            if (imp.re.test(bodyText)) {
+              let callLine = func.line;
+              for (let i = bodyStart - 1; i < bodyEnd; i++) {
+                const ln = lines[i];
+                if (ln !== undefined && imp.re.test(ln)) {
+                  callLine = i + 1;
+                  break;
+                }
+              }
+
+              const calleeRow = resolveCallee.get(imp.sourceFileId, imp.name);
+              insertCall.run(func.id, imp.name, calleeRow?.id ?? null, imp.sourceFileId, callLine);
+            }
+          }
+        }
+      }
+    });
+    tx();
+  }
+
   private flushIfDirty(): void {
     if (!this.dirty || this.dirtyTimer) return;
     this.dirty = false;
+    this.buildCallGraph();
     this.buildEdges();
     this.computePageRank();
   }
@@ -2938,11 +3160,87 @@ export class RepoMap {
       .all(pkg);
   }
 
-  getStats(): { files: number; symbols: number; edges: number; summaries: number } {
+  /** Get all functions that call a given symbol */
+  getCallers(
+    symbolName: string,
+    filePath?: string,
+  ): Array<{
+    callerName: string;
+    callerPath: string;
+    callerLine: number;
+    callLine: number;
+  }> {
+    const query = filePath
+      ? this.db
+          .query<
+            { caller_name: string; caller_path: string; caller_line: number; call_line: number },
+            [string, string]
+          >(
+            `SELECT s.name as caller_name, f.path as caller_path, s.line as caller_line, c.line as call_line
+           FROM calls c
+           JOIN symbols s ON c.caller_symbol_id = s.id
+           JOIN files f ON s.file_id = f.id
+           WHERE c.callee_name = ?
+             AND c.callee_file_id = (SELECT id FROM files WHERE path = ?)
+           ORDER BY f.path, c.line`,
+          )
+          .all(symbolName, filePath)
+      : this.db
+          .query<
+            { caller_name: string; caller_path: string; caller_line: number; call_line: number },
+            [string]
+          >(
+            `SELECT s.name as caller_name, f.path as caller_path, s.line as caller_line, c.line as call_line
+           FROM calls c
+           JOIN symbols s ON c.caller_symbol_id = s.id
+           JOIN files f ON s.file_id = f.id
+           WHERE c.callee_name = ?
+           ORDER BY f.path, c.line`,
+          )
+          .all(symbolName);
+    return query.map((r) => ({
+      callerName: r.caller_name,
+      callerPath: r.caller_path,
+      callerLine: r.caller_line,
+      callLine: r.call_line,
+    }));
+  }
+
+  /** Get all imported symbols that a function calls */
+  getCallees(symbolId: number): Array<{
+    calleeName: string;
+    calleeFile: string;
+    calleeLine: number;
+    callLine: number;
+  }> {
+    const rows = this.db
+      .query<
+        { callee_name: string; callee_path: string; callee_line: number; call_line: number },
+        [number]
+      >(
+        `SELECT c.callee_name, f.path as callee_path,
+              COALESCE(s2.line, 0) as callee_line, c.line as call_line
+       FROM calls c
+       LEFT JOIN symbols s2 ON c.callee_symbol_id = s2.id
+       JOIN files f ON c.callee_file_id = f.id
+       WHERE c.caller_symbol_id = ?
+       ORDER BY c.line`,
+      )
+      .all(symbolId);
+    return rows.map((r) => ({
+      calleeName: r.callee_name,
+      calleeFile: r.callee_path,
+      calleeLine: r.callee_line,
+      callLine: r.call_line,
+    }));
+  }
+
+  getStats(): { files: number; symbols: number; edges: number; summaries: number; calls: number } {
     const files = this.db.query<{ c: number }, []>("SELECT COUNT(*) as c FROM files").get()?.c ?? 0;
     const symbols =
       this.db.query<{ c: number }, []>("SELECT COUNT(*) as c FROM symbols").get()?.c ?? 0;
     const edges = this.db.query<{ c: number }, []>("SELECT COUNT(*) as c FROM edges").get()?.c ?? 0;
+    const calls = this.db.query<{ c: number }, []>("SELECT COUNT(*) as c FROM calls").get()?.c ?? 0;
     const summaries =
       this.semanticMode === "on"
         ? (this.db
@@ -2955,7 +3253,7 @@ export class RepoMap {
               "SELECT COUNT(*) as c FROM semantic_summaries WHERE source = ?",
             )
             .get(this.semanticMode === "off" ? "llm" : this.semanticMode)?.c ?? 0);
-    return { files, symbols, edges, summaries };
+    return { files, symbols, edges, summaries, calls };
   }
 
   /**

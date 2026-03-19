@@ -571,6 +571,8 @@ export class TreeSitterBackend implements IntelligenceBackend {
         );
         const kind = this.captureToKind(patternCapture?.name ?? "unknown");
 
+        // Use the declaration node (pattern capture) for endLine, not the name node
+        const declNode = patternCapture?.node ?? nameCapture.node.parent ?? nameCapture.node;
         symbols.push({
           name,
           kind,
@@ -578,7 +580,7 @@ export class TreeSitterBackend implements IntelligenceBackend {
             file: resolve(file),
             line: nameCapture.node.startPosition.row + 1,
             column: nameCapture.node.startPosition.column + 1,
-            endLine: nameCapture.node.endPosition.row + 1,
+            endLine: declNode.endPosition.row + 1,
           },
         });
       }
@@ -965,6 +967,8 @@ export class TreeSitterBackend implements IntelligenceBackend {
           // Handle symbols
           if (nameCapture) {
             const kind = this.captureToKind(patternCapture?.name ?? "unknown");
+            // Use the declaration node (pattern capture) for endLine, not the name node
+            const declNode = patternCapture?.node ?? nameCapture.node.parent ?? nameCapture.node;
             symbols.push({
               name: nameCapture.node.text,
               kind,
@@ -972,7 +976,7 @@ export class TreeSitterBackend implements IntelligenceBackend {
                 file: absFile,
                 line: nameCapture.node.startPosition.row + 1,
                 column: nameCapture.node.startPosition.column + 1,
-                endLine: nameCapture.node.endPosition.row + 1,
+                endLine: declNode.endPosition.row + 1,
               },
             });
           }

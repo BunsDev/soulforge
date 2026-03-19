@@ -769,10 +769,7 @@ export class ContextManager {
     ];
 
     if (!isMinimal) {
-      parts.push(
-        "Context compaction is automatic and preserves plan, tasks, working state. Memory is for long-term knowledge only, not session checkpoints.",
-        ...buildToolGuidance(hasRepoMap),
-      );
+      parts.push(...buildToolGuidance(hasRepoMap));
       if (this.repoMapReady && this.repoMap.getStats().symbols === 0) {
         parts.push(
           "Code intelligence limited: No symbols indexed. Intelligence tools fall back to regex.",
