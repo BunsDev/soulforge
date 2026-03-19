@@ -4,6 +4,7 @@ import type { ToolResult } from "../../types";
 import { analyzeFile } from "../analysis/complexity";
 import { getNvimInstance, readBufferContent } from "../editor/instance";
 import { isForbidden } from "../security/forbidden.js";
+import { pushEdit } from "./edit-stack.js";
 import { emitFileEdited } from "./file-events.js";
 
 interface EditFileArgs {
@@ -181,6 +182,7 @@ export const editFileTool = {
         // Intelligence not available
       }
 
+      pushEdit(filePath, content);
       writeFileSync(filePath, updated, "utf-8");
       emitFileEdited(filePath, updated);
 

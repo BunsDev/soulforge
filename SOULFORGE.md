@@ -25,19 +25,28 @@ AI-Powered Terminal IDE by proxySoul.
 ## CLI Flags
 
 - `--session <id>` / `--resume <id>` / `-s <id>` — resume a saved session
-- `--headless <prompt>` — run without TUI, stream output to stdout
+- `--headless <prompt>` — run without TUI, stream to stdout
 - `--headless --json` — structured JSON after completion
-- `--headless --events` — JSONL event stream (real-time tool calls, text, steps)
+- `--headless --events` — JSONL event stream (real-time)
 - `--headless --model <provider/model>` — override model
 - `--headless --mode <mode>` — set mode (default/architect/plan/auto)
+- `--headless --system "..."` — inject system prompt
+- `--headless --include <file>` — pre-load file into context (repeatable)
+- `--headless --session <id>` — resume a previous session
+- `--headless --save-session` — save session after completion
 - `--headless --max-steps <n>` — limit agent steps
 - `--headless --timeout <ms>` — abort after timeout
+- `--headless --no-repomap` — skip repo map scan
+- `--headless --diff` — show files changed after run
 - `--headless --quiet` / `-q` — suppress header/footer
 - `--headless --cwd <dir>` — set working directory
-- `--list-providers` — show providers and their key status
+- `--list-providers` — show providers and key status
 - `--list-models [provider]` — show available models
-- `--set-key <provider> <key>` — save an API key to system keychain
+- `--set-key <provider> <key>` — save API key
+- `--version` / `-v` — show version
+- `--help` / `-h` — show usage
 - Piped input: `echo "prompt" | soulforge --headless`
+- Exit codes: 0=success, 1=error, 2=timeout, 130=abort
 
 ## Conventions
 
@@ -55,7 +64,7 @@ AI-Powered Terminal IDE by proxySoul.
 
 - `src/boot.tsx` — main entry, splash animation, headless detection, dependency setup
 - `src/index.tsx` — TUI renderer setup (OpenTUI + React)
-- `src/headless.ts` — headless CLI mode (no TUI)
+- `src/headless/` — headless CLI (parse, run, providers, output, types, constants)
 - `src/components/App.tsx` — main React component
 
 ### Core Modules
@@ -64,8 +73,10 @@ AI-Powered Terminal IDE by proxySoul.
 - `src/core/context/manager.ts` — ContextManager (system prompt, repo map, memory)
 - `src/core/tools/` — all 30+ tools (read_file, edit_file, shell, soul_*, etc.)
 - `src/core/llm/` — provider registry, model resolution, provider options
+- `src/core/llm/providers/custom.ts` — config-driven custom provider builder
 - `src/core/intelligence/` — LSP, ts-morph, tree-sitter, regex fallback chain
-- `src/core/instructions.ts` — SOULFORGE.md / CLAUDE.md / .cursorrules loader
+- `src/core/instructions.ts` — SOULFORGE.md / CLAUDE.md / .cursorrules loader (10 sources)
+- `src/core/sessions/` — session save/restore (used by TUI and headless)
 
 ### Key Patterns
 

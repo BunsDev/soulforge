@@ -11,20 +11,34 @@ soulforge --headless "explain the auth middleware"
 # Pipe a prompt from stdin
 echo "find all unused exports" | soulforge --headless
 
-# From a file
-cat prompt.txt | soulforge --headless
-
 # JSON output for scripting
 soulforge --headless --json "list all TODO comments"
 
-# Override model
-soulforge --headless --model anthropic/claude-sonnet-4-20250514 "refactor store.ts"
+# JSONL event stream (real-time tool calls, text, steps)
+soulforge --headless --events "refactor the store"
+
+# Override model and mode
+soulforge --headless --model anthropic/claude-sonnet-4-20250514 --mode architect "review auth"
+
+# Inject system prompt + include files
+soulforge --headless --system "you are a security auditor" --include src/auth.ts "find vulnerabilities"
+
+# Fast query (skip repo map scan)
+soulforge --headless --no-repomap "what does this project do?"
+
+# CI/CD with safety limits
+soulforge --headless --max-steps 20 --timeout 120000 --save-session "fix lint errors"
+
+# Resume a previous session
+soulforge --headless --session abc123 "now add tests for it"
 ```
 
 ## CLI Flags
 
 ### Headless Execution
 
+| Flag | Description |
+|------|-------------|
 | Flag | Description |
 |------|-------------|
 | `--headless <prompt>` | Run without TUI. Prompt is all non-flag arguments joined. |
@@ -36,8 +50,18 @@ soulforge --headless --model anthropic/claude-sonnet-4-20250514 "refactor store.
 | `--max-steps <n>` | Limit agent to N steps, then abort. |
 | `--timeout <ms>` | Abort after N milliseconds. |
 | `--cwd <dir>` | Set working directory (default: current directory). |
+| `--system "..."` | Inject custom system prompt instructions for this run. |
+| `--include <file>` | Pre-load a file into context (repeatable). |
+| `--no-repomap` | Skip repo map scan for faster startup. |
+| `--diff` | Show list of files changed after the run. |
+| `--session <id>` | Resume a previous session by ID (prefix match supported). |
+| `--save-session` | Save the conversation after completion for later resume. |
+| `--version` / `-v` | Print version and exit. |
+| `--help` / `-h` | Print usage and exit. |
 
 When no prompt arguments are given and stdin is not a TTY, the prompt is read from stdin.
+
+**Exit codes:** `0` success, `1` error, `2` timeout, `130` abort (Ctrl+C).
 
 ### Provider & Model Management
 
@@ -48,6 +72,8 @@ soulforge --list-providers                   # Show providers + key status
 soulforge --list-models                      # Show models for all configured providers
 soulforge --list-models anthropic            # Show models for a specific provider
 soulforge --set-key anthropic sk-ant-...     # Save API key to system keychain
+soulforge --version                          # Print version
+soulforge --help                             # Print usage
 ```
 
 | Flag | Description |
@@ -55,6 +81,8 @@ soulforge --set-key anthropic sk-ant-...     # Save API key to system keychain
 | `--list-providers` | Show all providers with availability status and env var names. |
 | `--list-models [provider]` | List available models. Without a provider, shows all configured providers. |
 | `--set-key <provider> <key>` | Save an API key to the system keychain (macOS Keychain, Linux secret-tool). |
+| `--version` / `-v` | Print version. |
+| `--help` / `-h` | Print full usage. |
 
 `--set-key` works with all built-in providers (`anthropic`, `openai`, `google`, `xai`, `openrouter`, `llmgateway`, `vercel_gateway`) and any custom provider that has an `envVar` configured.
 
@@ -122,9 +150,10 @@ Event types:
 - `tool-result` — tool returned a result (summary, max 200 chars)
 - `step` — agent completed a step with cumulative token counts
 - `error` — error occurred (timeout, abort, API error)
-- `done` — final event with full output, token totals, tool list, duration
+- `done` — final event with full output, token totals, tool list, files edited, duration
+- `session-saved` — session was saved (when `--save-session` is used)
 
-This is the format to use when building integrations — parse one line at a time, react to events as they arrive.
+The `done` event includes a `filesEdited` array (also present in `--json` output). This is the format to use when building integrations — parse one line at a time, react to events as they arrive.
 
 ## What's Available
 
@@ -148,10 +177,20 @@ Headless mode runs the full Forge agent with all tools:
 
 ## Examples
 
-### CI/CD: lint and fix
+### CI/CD: lint and fix with safety limits
 
 ```bash
-soulforge --headless "run the linter, fix all issues, then verify typecheck passes"
+soulforge --headless --max-steps 20 --timeout 120000 --diff \
+  "run the linter, fix all issues, then verify typecheck passes"
+```
+
+### Security review with custom role
+
+```bash
+soulforge --headless --mode architect \
+  --system "you are a security auditor. focus on OWASP top 10." \
+  --include src/auth/middleware.ts \
+  "review this authentication code for vulnerabilities"
 ```
 
 ### Scripting: batch analysis
@@ -162,16 +201,33 @@ for dir in packages/*/; do
 done
 ```
 
-### Automation: generate and pipe
+### Multi-step workflow with sessions
 
 ```bash
-soulforge --headless --json "list all files that import from legacy/" | jq '.output'
+# Step 1: analyze and save
+soulforge --headless --save-session "analyze the auth module, find all issues"
+# Step 2: resume and fix
+soulforge --headless --session <id> --save-session "now fix the issues you found"
+# Step 3: resume and test
+soulforge --headless --session <id> "write tests for the fixes"
 ```
 
-### Quick answers
+### Quick answers (skip repo map)
 
 ```bash
-soulforge --headless "what does the dispatch tool do?"
+soulforge --headless --no-repomap "what does the dispatch tool do?"
+```
+
+### Real-time monitoring with events
+
+```bash
+soulforge --headless --events "refactor the store module" | while read -r line; do
+  type=$(echo "$line" | jq -r '.type')
+  case "$type" in
+    tool-call) echo "Tool: $(echo "$line" | jq -r '.tool')" ;;
+    done) echo "Done in $(echo "$line" | jq -r '.duration')ms" ;;
+  esac
+done
 ```
 
 ## Configuration
@@ -282,17 +338,34 @@ In the TUI, custom providers appear in the model picker (`Ctrl+L`) and can be as
 
 ## Architecture
 
-Headless bypasses the entire TUI stack. The call path is:
+Headless bypasses the entire TUI stack. The code lives in `src/headless/`:
 
 ```
-boot.tsx (--headless detected)
-  → headless.ts
-    → loadConfig() + loadProjectConfig()
-    → ContextManager.createAsync()  (repo map, memory)
-    → resolveModel() + buildProviderOptions()
-    → createForgeAgent()            (same agent as TUI)
-    → agent.stream()                (async iterator)
-    → stdout                        (text or JSON)
+src/headless/
+  index.ts       — entry point, config init, action dispatcher
+  types.ts       — HeadlessRunOptions, HeadlessAction
+  constants.ts   — ANSI codes, exit codes, version
+  parse.ts       — CLI arg parsing
+  run.ts         — agent execution, streaming, session save/restore
+  output.ts      — stderr helpers, formatters
+  providers.ts   — list-providers, list-models, set-key
+```
+
+Call path:
+
+```
+boot.tsx (CLI flag detected)
+  → headless/index.ts
+    → parse.ts (parseHeadlessArgs)
+    → initConfig() + registerCustomProviders()
+    → run.ts (runPrompt)
+      → ContextManager.createAsync()   (repo map, memory)
+      → loadInstructions()             (SOULFORGE.md + --system)
+      → SessionManager.loadSession()   (if --session)
+      → createForgeAgent()             (same agent as TUI)
+      → agent.stream()                 (async iterator)
+      → SessionManager.saveSession()   (if --save-session)
+      → stdout                         (text, JSON, or JSONL events)
 ```
 
 The `createForgeAgent()` factory is shared with the TUI — same tools, same prompts, same agent loop. The only difference is no interactive callbacks (approval prompts auto-allow) and no renderer.

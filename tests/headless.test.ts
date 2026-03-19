@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeEach, spyOn } from "bun:test";
-import { parseHeadlessArgs } from "../src/headless.js";
+import { parseHeadlessArgs } from "../src/headless/index.js";
 
 // Prevent process.exit from actually exiting during tests
 let exitCode: number | undefined;
@@ -59,6 +59,12 @@ describe("parseHeadlessArgs", () => {
 				maxSteps: undefined,
 				timeout: undefined,
 				cwd: undefined,
+				sessionId: undefined,
+				saveSession: false,
+				system: undefined,
+				noRepomap: false,
+				include: undefined,
+				diff: false,
 			},
 		});
 	});
@@ -202,18 +208,103 @@ describe("parseHeadlessArgs", () => {
 		}
 	});
 
-	test("skips --session args", async () => {
+	test("parses --session to resume", async () => {
 		const result = await parseHeadlessArgs(["--headless", "--session", "abc123", "test"]);
 		if (result!.type === "run") {
 			expect(result!.opts.prompt).toBe("test");
+			expect(result!.opts.sessionId).toBe("abc123");
 		}
 	});
 
-	test("skips --resume= args", async () => {
+	test("parses --resume= syntax", async () => {
 		const result = await parseHeadlessArgs(["--headless", "--resume=abc123", "test"]);
 		if (result!.type === "run") {
-			expect(result!.opts.prompt).toBe("test");
+			expect(result!.opts.sessionId).toBe("abc123");
 		}
+	});
+
+	test("parses --save-session", async () => {
+		const result = await parseHeadlessArgs(["--headless", "--save-session", "test"]);
+		if (result!.type === "run") {
+			expect(result!.opts.saveSession).toBe(true);
+		}
+	});
+
+	test("parses --system", async () => {
+		const result = await parseHeadlessArgs([
+			"--headless",
+			"--system",
+			"you are a security auditor",
+			"review the code",
+		]);
+		if (result!.type === "run") {
+			expect(result!.opts.system).toBe("you are a security auditor");
+			expect(result!.opts.prompt).toBe("review the code");
+		}
+	});
+
+	test("parses --no-repomap", async () => {
+		const result = await parseHeadlessArgs(["--headless", "--no-repomap", "test"]);
+		if (result!.type === "run") {
+			expect(result!.opts.noRepomap).toBe(true);
+		}
+	});
+
+	test("parses --include (single)", async () => {
+		const result = await parseHeadlessArgs([
+			"--headless",
+			"--include",
+			"src/types.ts",
+			"explain this",
+		]);
+		if (result!.type === "run") {
+			expect(result!.opts.include).toEqual(["src/types.ts"]);
+		}
+	});
+
+	test("parses --include (multiple)", async () => {
+		const result = await parseHeadlessArgs([
+			"--headless",
+			"--include",
+			"a.ts",
+			"--include",
+			"b.ts",
+			"explain",
+		]);
+		if (result!.type === "run") {
+			expect(result!.opts.include).toEqual(["a.ts", "b.ts"]);
+		}
+	});
+
+	test("parses --diff", async () => {
+		const result = await parseHeadlessArgs(["--headless", "--diff", "fix the bug"]);
+		if (result!.type === "run") {
+			expect(result!.opts.diff).toBe(true);
+		}
+	});
+
+	test("parses --version", async () => {
+		const result = await parseHeadlessArgs(["--version"]);
+		expect(result).toEqual({ type: "version" });
+	});
+
+	test("parses -v", async () => {
+		const result = await parseHeadlessArgs(["-v"]);
+		expect(result).toEqual({ type: "version" });
+	});
+
+	test("--help exits with code 0", async () => {
+		try {
+			await parseHeadlessArgs(["--help"]);
+		} catch {}
+		expect(exitCode).toBe(0);
+	});
+
+	test("-h exits with code 0", async () => {
+		try {
+			await parseHeadlessArgs(["-h"]);
+		} catch {}
+		expect(exitCode).toBe(0);
 	});
 
 	test("--headless without prompt exits with usage", async () => {

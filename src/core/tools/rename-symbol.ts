@@ -4,12 +4,14 @@ import type { ToolResult } from "../../types/index.js";
 import { getIntelligenceRouter } from "../intelligence/index.js";
 import type { FileEdit } from "../intelligence/types.js";
 import { isForbidden } from "../security/forbidden.js";
+import { pushEdit } from "./edit-stack.js";
 import { emitFileEdited } from "./file-events.js";
 
 function applyEdits(edits: FileEdit[]): void {
   for (const edit of edits) {
     const blocked = isForbidden(edit.file);
     if (blocked) throw new Error(`Cannot edit forbidden file: ${edit.file} (${blocked})`);
+    pushEdit(edit.file, edit.oldContent);
     writeFileSync(edit.file, edit.newContent, "utf-8");
     emitFileEdited(edit.file, edit.newContent);
   }
@@ -499,6 +501,7 @@ export const renameSymbolTool = {
             if (refBlocked) continue;
             const updated = replaceInCode(content, escaped, args.newName, ref);
             if (updated !== content) {
+              pushEdit(ref, content);
               writeFileSync(ref, updated, "utf-8");
               emitFileEdited(ref, updated);
               textFixed.push(ref);

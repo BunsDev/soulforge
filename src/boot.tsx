@@ -9,10 +9,14 @@ const hasCli =
   cliArgs.includes("--headless") ||
   cliArgs.includes("--list-providers") ||
   cliArgs.includes("--list-models") ||
-  cliArgs.includes("--set-key");
+  cliArgs.includes("--set-key") ||
+  cliArgs.includes("--version") ||
+  cliArgs.includes("-v") ||
+  cliArgs.includes("--help") ||
+  cliArgs.includes("-h");
 
 if (hasCli) {
-  const { parseHeadlessArgs, runHeadless } = await import("./headless.js");
+  const { parseHeadlessArgs, runHeadless } = await import("./headless/index.js");
   const action = await parseHeadlessArgs(cliArgs);
   if (action) await runHeadless(action);
   process.exit(0);

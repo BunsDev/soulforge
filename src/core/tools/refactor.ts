@@ -4,6 +4,7 @@ import type { ToolResult } from "../../types/index.js";
 import { type CodeIntelligenceRouter, getIntelligenceRouter } from "../intelligence/index.js";
 import type { FileEdit, FormatEdit, Language, RefactorResult } from "../intelligence/types.js";
 import { isForbidden } from "../security/forbidden.js";
+import { pushEdit } from "./edit-stack.js";
 import { emitFileEdited } from "./file-events.js";
 
 async function resolveSymbolRange(
@@ -41,6 +42,7 @@ interface RefactorArgs {
 
 function applyEdits(edits: FileEdit[]): void {
   for (const edit of edits) {
+    pushEdit(edit.file, edit.oldContent);
     writeFileSync(edit.file, edit.newContent, "utf-8");
     emitFileEdited(edit.file, edit.newContent);
   }
@@ -393,6 +395,7 @@ function applyFormatEdits(formatEdit: FormatEdit): void {
     result = result.slice(0, startOffset) + edit.newText + result.slice(endOffset);
   }
 
+  pushEdit(formatEdit.file, content);
   writeFileSync(formatEdit.file, result, "utf-8");
   emitFileEdited(formatEdit.file, result);
 }
