@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { execSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { stat as statAsync } from "node:fs/promises";
-import { extname, join, relative } from "node:path";
+import { dirname, extname, join, relative, resolve } from "node:path";
 import { isForbidden } from "../security/forbidden.js";
 import {
   computeFragmentHashes,
@@ -430,11 +430,21 @@ export class RepoMap {
     this.db.run(`
       CREATE TABLE IF NOT EXISTS refs (
         file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
-        name TEXT NOT NULL
+        name TEXT NOT NULL,
+        source_file_id INTEGER REFERENCES files(id) ON DELETE CASCADE
       );
       CREATE INDEX IF NOT EXISTS idx_refs_file ON refs(file_id);
       CREATE INDEX IF NOT EXISTS idx_refs_name ON refs(name);
     `);
+
+    // Migration: add source_file_id column if missing
+    try {
+      this.db.run(
+        "ALTER TABLE refs ADD COLUMN source_file_id INTEGER REFERENCES files(id) ON DELETE CASCADE",
+      );
+    } catch {
+      // Column already exists
+    }
 
     this.db.run(`
       CREATE TABLE IF NOT EXISTS cochanges (
@@ -756,12 +766,19 @@ export class RepoMap {
       this.extractTokenSignatures(fileId, outline.symbols, content);
     }
 
-    const refs = new Set<string>();
+    // Refs with resolved source_file_id (from import statements)
+    const resolvedRefs: Array<{ name: string; sourceFileId: number | null }> = [];
+    // Unresolved refs (from identifier regex extraction)
+    const allRefNames = new Set<string>();
 
     if (outline && outline.imports.length > 0) {
       const extImports = new Map<string, Set<string>>();
       for (const imp of outline.imports) {
-        for (const s of imp.specifiers) refs.add(s);
+        const sourceFileId = this.resolveImportSource(imp.source, absPath);
+        for (const s of imp.specifiers) {
+          allRefNames.add(s);
+          resolvedRefs.push({ name: s, sourceFileId });
+        }
 
         if (
           imp.source.startsWith(".") ||
@@ -795,15 +812,20 @@ export class RepoMap {
 
     const identifiers = this.extractIdentifiers(content, language);
     for (const id of identifiers) {
-      if (refs.size >= MAX_REFS_PER_FILE) break;
-      refs.add(id);
+      if (allRefNames.size >= MAX_REFS_PER_FILE) break;
+      if (!allRefNames.has(id)) {
+        allRefNames.add(id);
+        resolvedRefs.push({ name: id, sourceFileId: null });
+      }
     }
 
-    if (refs.size > 0) {
-      const insertRef = this.db.prepare("INSERT INTO refs (file_id, name) VALUES (?, ?)");
+    if (resolvedRefs.length > 0) {
+      const insertRef = this.db.prepare(
+        "INSERT INTO refs (file_id, name, source_file_id) VALUES (?, ?, ?)",
+      );
       const tx = this.db.transaction(() => {
-        for (const name of refs) {
-          insertRef.run(fileId, name);
+        for (const ref of resolvedRefs) {
+          insertRef.run(fileId, ref.name, ref.sourceFileId);
         }
       });
       tx();
@@ -872,6 +894,61 @@ export class RepoMap {
     }
 
     return ids;
+  }
+
+  /**
+   * Resolve an import source path to a file_id in the files table.
+   * Works for relative imports (./foo, ../bar) across all languages.
+   * Returns null for package/external imports or unresolvable paths.
+   */
+  private resolveImportSource(importSource: string, importerAbsPath: string): number | null {
+    // Only resolve relative imports
+    if (!importSource.startsWith(".")) return null;
+
+    const importerDir = dirname(importerAbsPath);
+
+    // Python relative imports: ".foo" → "./foo", "..foo.bar" → "../foo/bar"
+    const normalized =
+      importSource.startsWith(".") &&
+      !importSource.startsWith("./") &&
+      !importSource.startsWith("../")
+        ? importSource
+            .replace(/^(\.+)/, (dots) => {
+              const levels = dots.length - 1;
+              return levels === 0 ? "./" : "../".repeat(levels);
+            })
+            .replace(/\./g, "/")
+        : importSource;
+
+    const base = resolve(importerDir, normalized);
+
+    // Try exact path first, then common extensions
+    const candidates = [base];
+    const ext = extname(base);
+    if (!ext) {
+      for (const tryExt of Object.keys(INDEXABLE_EXTENSIONS)) {
+        candidates.push(base + tryExt);
+      }
+      // index files
+      for (const tryExt of [".ts", ".tsx", ".js", ".jsx", ".py", ".rb"]) {
+        candidates.push(join(base, `index${tryExt}`));
+      }
+      // __init__.py for Python packages
+      candidates.push(join(base, "__init__.py"));
+      // mod.rs for Rust modules
+      candidates.push(join(base, "mod.rs"));
+    }
+
+    for (const candidate of candidates) {
+      const relPath = relative(this.cwd, candidate);
+      if (relPath.startsWith("..")) continue;
+      const row = this.db
+        .query<{ id: number }, [string]>("SELECT id FROM files WHERE path = ?")
+        .get(relPath);
+      if (row) return row.id;
+    }
+
+    return null;
   }
 
   private buildEdges(): void {
@@ -2062,6 +2139,13 @@ export class RepoMap {
          WHERE s.is_exported = 1
          AND NOT EXISTS (
            SELECT 1 FROM refs r WHERE r.name = s.name AND r.file_id != s.file_id
+           AND (
+             r.source_file_id = s.file_id
+             OR (r.source_file_id IS NULL AND (
+               SELECT COUNT(*) FROM symbols s2
+               WHERE s2.name = s.name AND s2.is_exported = 1
+             ) = 1)
+           )
          )
          ORDER BY f.pagerank DESC
          LIMIT 50`,

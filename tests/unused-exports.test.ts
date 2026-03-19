@@ -1,0 +1,610 @@
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { RepoMap } from "../src/core/intelligence/repo-map.js";
+
+/**
+ * Unused exports detection tests.
+ *
+ * Verifies that getUnusedExports correctly identifies dead exports
+ * across languages, handles duplicate symbol names, and resolves
+ * import sources to avoid false negatives.
+ */
+
+const TMP = join(tmpdir(), `unused-exports-${Date.now()}`);
+
+function write(relPath: string, content: string): void {
+  const abs = join(TMP, relPath);
+  const dir = abs.slice(0, abs.lastIndexOf("/"));
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(abs, content);
+}
+
+let repoMap: RepoMap;
+
+// ══════════════════════════════════════════════════════════════
+// Test fixture: multi-language codebase with known dead/alive exports
+// ══════════════════════════════════════════════════════════════
+
+beforeAll(async () => {
+  mkdirSync(TMP, { recursive: true });
+
+  // ── TypeScript: basic alive + dead exports ──
+  write(
+    "src/utils.ts",
+    `export function formatDate(d: Date): string { return d.toISOString(); }
+export function deadHelper(): void { /* never imported */ }
+export const MAGIC = 42;
+`,
+  );
+
+  write(
+    "src/app.ts",
+    `import { formatDate, MAGIC } from "./utils";
+console.log(formatDate(new Date()), MAGIC);
+`,
+  );
+
+  // ── TypeScript: duplicate symbol names across files ──
+  write(
+    "src/config/database.ts",
+    `export interface Config {
+  host: string;
+  port: number;
+}
+export function createConfig(): Config { return { host: "localhost", port: 5432 }; }
+`,
+  );
+
+  write(
+    "src/config/cache.ts",
+    `export interface Config {
+  ttl: number;
+  maxSize: number;
+}
+export function createCacheConfig(): Config { return { ttl: 60, maxSize: 100 }; }
+`,
+  );
+
+  write(
+    "src/server.ts",
+    `import { Config, createConfig } from "./config/database";
+const cfg: Config = createConfig();
+console.log(cfg.host);
+`,
+  );
+  // cache.ts Config is NOT imported by anyone → should be detected as unused
+  // BUT with name-only matching, it would be hidden by database.ts Config
+
+  // ── TypeScript: re-exports ──
+  write(
+    "src/index.ts",
+    `export { formatDate } from "./utils";
+export { Config } from "./config/database";
+`,
+  );
+
+  // ── Python: alive + dead exports ──
+  write(
+    "lib/helpers.py",
+    `def parse_json(raw: str) -> dict:
+    import json
+    return json.loads(raw)
+
+def _private_helper():
+    pass
+
+def dead_function():
+    """Never imported anywhere"""
+    pass
+`,
+  );
+
+  write(
+    "lib/main.py",
+    `from helpers import parse_json
+
+data = parse_json('{"key": "value"}')
+print(data)
+`,
+  );
+
+  // ── Go: capitalized = public, used + unused ──
+  write(
+    "pkg/handler.go",
+    `package handler
+
+func ServeHTTP(w Writer, r *Request) {
+    w.Write([]byte("hello"))
+}
+
+func UnusedHandler() {
+    // never called from outside
+}
+`,
+  );
+
+  write(
+    "cmd/main.go",
+    `package main
+
+import "handler"
+
+func main() {
+    handler.ServeHTTP(nil, nil)
+}
+`,
+  );
+
+  // ── Rust: pub = public, used + unused ──
+  write(
+    "src/lib.rs",
+    `pub fn process_data(input: &str) -> String {
+    input.to_uppercase()
+}
+
+pub fn unused_utility() -> i32 {
+    42
+}
+
+fn private_helper() {
+    // not exported
+}
+`,
+  );
+
+  write(
+    "src/main.rs",
+    `use crate::lib::process_data;
+
+fn main() {
+    let result = process_data("hello");
+    println!("{}", result);
+}
+`,
+  );
+
+  // ── Java: public class used + unused ──
+  write(
+    "src/main/java/UserService.java",
+    `public class UserService {
+    public User getUser(String id) {
+        return new User(id);
+    }
+}
+`,
+  );
+
+  write(
+    "src/main/java/DeadService.java",
+    `public class DeadService {
+    public void doNothing() {
+        // never instantiated or referenced
+    }
+}
+`,
+  );
+
+  write(
+    "src/main/java/App.java",
+    `import UserService;
+
+public class App {
+    public static void main(String[] args) {
+        UserService svc = new UserService();
+        svc.getUser("123");
+    }
+}
+`,
+  );
+
+  // ── Kotlin: public by default, private = hidden ──
+  write(
+    "src/main/kotlin/Repository.kt",
+    `class Repository {
+    fun findAll(): List<String> = listOf("a", "b")
+}
+
+class UnusedRepository {
+    fun findNone(): List<String> = emptyList()
+}
+
+private class InternalHelper {
+    fun help() {}
+}
+`,
+  );
+
+  write(
+    "src/main/kotlin/Main.kt",
+    `fun main() {
+    val repo = Repository()
+    println(repo.findAll())
+}
+`,
+  );
+
+  // ── Swift: public/open = exported, internal = default ──
+  write(
+    "Sources/NetworkClient.swift",
+    `public class NetworkClient {
+    public func fetch(url: String) -> Data? {
+        return nil
+    }
+}
+
+public class UnusedClient {
+    public func unused() {}
+}
+
+class InternalHelper {
+    func help() {}
+}
+`,
+  );
+
+  write(
+    "Sources/App.swift",
+    `let client = NetworkClient()
+client.fetch(url: "https://example.com")
+`,
+  );
+
+  // ── C: header = public ──
+  write(
+    "include/math_utils.h",
+    `int add(int a, int b);
+int multiply(int a, int b);
+int dead_function(void);
+`,
+  );
+
+  write(
+    "src/math_utils.c",
+    `#include "math_utils.h"
+
+int add(int a, int b) { return a + b; }
+int multiply(int a, int b) { return a * b; }
+int dead_function(void) { return 0; }
+`,
+  );
+
+  write(
+    "src/main.c",
+    `#include "math_utils.h"
+
+int main() {
+    int sum = add(1, 2);
+    int prod = multiply(3, 4);
+    return 0;
+}
+`,
+  );
+
+  // ── Elixir: def = public, defp = private ──
+  write(
+    "lib/parser.ex",
+    `defmodule Parser do
+  def parse(input) do
+    String.split(input, ",")
+  end
+
+  def unused_parse(input) do
+    String.split(input, ";")
+  end
+
+  defp internal_helper(x) do
+    x
+  end
+end
+`,
+  );
+
+  write(
+    "lib/app.ex",
+    `defmodule App do
+  def run do
+    Parser.parse("a,b,c")
+  end
+end
+`,
+  );
+
+  // ── PHP: public/private visibility ──
+  write(
+    "src/UserController.php",
+    `<?php
+class UserController {
+    public function index() {
+        return $this->getUsers();
+    }
+
+    private function getUsers() {
+        return [];
+    }
+}
+
+class DeadController {
+    public function dead() {}
+}
+`,
+  );
+
+  write(
+    "src/routes.php",
+    `<?php
+$controller = new UserController();
+$controller->index();
+`,
+  );
+
+  // ── Ruby: everything public by convention ──
+  write(
+    "lib/calculator.rb",
+    `class Calculator
+  def add(a, b)
+    a + b
+  end
+
+  def unused_method
+    nil
+  end
+end
+`,
+  );
+
+  write(
+    "app.rb",
+    `require_relative 'lib/calculator'
+
+calc = Calculator.new
+puts calc.add(1, 2)
+`,
+  );
+
+  // ── Dart: underscore = private ──
+  write(
+    "lib/widget.dart",
+    `class AppWidget {
+  void build() {}
+}
+
+class _PrivateWidget {
+  void build() {}
+}
+
+class UnusedWidget {
+  void build() {}
+}
+`,
+  );
+
+  write(
+    "lib/main.dart",
+    `import 'widget.dart';
+
+void main() {
+  final w = AppWidget();
+  w.build();
+}
+`,
+  );
+
+  // ── Legacy JavaScript (CommonJS) ──
+  write(
+    "legacy/utils.js",
+    `function formatName(first, last) {
+  return first + ' ' + last;
+}
+
+function deadLegacy() {
+  return null;
+}
+
+module.exports = { formatName, deadLegacy };
+`,
+  );
+
+  write(
+    "legacy/app.js",
+    `const { formatName } = require('./utils');
+console.log(formatName('John', 'Doe'));
+`,
+  );
+
+  repoMap = new RepoMap(TMP);
+  await repoMap.scan();
+});
+
+afterAll(() => {
+  repoMap?.close();
+  rmSync(TMP, { recursive: true, force: true });
+});
+
+// ══════════════════════════════════════════════════════════════
+// Tests
+// ══════════════════════════════════════════════════════════════
+
+function getUnused(): Array<{ name: string; path: string; kind: string; usedInternally: boolean }> {
+  return repoMap.getUnusedExports();
+}
+
+function unusedNames(): string[] {
+  return getUnused().map((u) => u.name);
+}
+
+
+
+describe("unused exports — TypeScript", () => {
+  it("detects deadHelper as unused", () => {
+    const unused = getUnused();
+    expect(unused.some((u) => u.name === "deadHelper")).toBe(true);
+  });
+
+  it("does not flag formatDate as unused (imported by app.ts)", () => {
+    expect(unusedNames()).not.toContain("formatDate");
+  });
+
+  it("does not flag MAGIC as unused (imported by app.ts)", () => {
+    expect(unusedNames()).not.toContain("MAGIC");
+  });
+});
+
+describe("unused exports — duplicate symbol names", () => {
+  it("does not flag database Config as unused (imported by server.ts)", () => {
+    const unused = getUnused();
+    const dbConfig = unused.find(
+      (u) => u.name === "Config" && u.path.includes("database"),
+    );
+    expect(dbConfig).toBeUndefined();
+  });
+
+  it("detects cache Config as unused when source resolution works", () => {
+    // With name-only matching, both Configs appear "used" because
+    // server.ts refs "Config" which matches both definitions.
+    // With source_file_id resolution, only database.ts Config is
+    // matched (server.ts imports from "./config/database").
+    const unused = getUnused();
+    const cacheConfig = unused.find(
+      (u) => u.name === "Config" && u.path.includes("cache"),
+    );
+    // This test documents the expected behavior after source resolution.
+    // If this fails, source_file_id resolution is not working yet.
+    expect(cacheConfig).toBeDefined();
+  });
+
+  it("detects createCacheConfig as unused (never imported)", () => {
+    expect(unusedNames()).toContain("createCacheConfig");
+  });
+});
+
+describe("unused exports — Python", () => {
+  it.todo("detects dead_function as unused — blocked on Python tree-sitter def extraction");
+
+  it("does not flag parse_json as unused", () => {
+    expect(unusedNames()).not.toContain("parse_json");
+  });
+
+  it("does not flag _private_helper (not exported due to underscore)", () => {
+    expect(unusedNames()).not.toContain("_private_helper");
+  });
+});
+
+describe("unused exports — Go", () => {
+  it("detects UnusedHandler as unused", () => {
+    expect(unusedNames()).toContain("UnusedHandler");
+  });
+
+  it("does not flag ServeHTTP as unused", () => {
+    expect(unusedNames()).not.toContain("ServeHTTP");
+  });
+});
+
+describe("unused exports — Rust", () => {
+  it("detects unused_utility as unused", () => {
+    expect(unusedNames()).toContain("unused_utility");
+  });
+
+  it("does not flag process_data as unused", () => {
+    expect(unusedNames()).not.toContain("process_data");
+  });
+
+  it("does not flag private_helper (not exported, no pub)", () => {
+    expect(unusedNames()).not.toContain("private_helper");
+  });
+});
+
+describe("unused exports — Java", () => {
+  it("detects DeadService as unused", () => {
+    expect(unusedNames()).toContain("DeadService");
+  });
+
+  it("does not flag UserService as unused", () => {
+    expect(unusedNames()).not.toContain("UserService");
+  });
+});
+
+describe("unused exports — Kotlin", () => {
+  it("detects UnusedRepository as unused", () => {
+    expect(unusedNames()).toContain("UnusedRepository");
+  });
+
+  it("does not flag Repository as unused", () => {
+    expect(unusedNames()).not.toContain("Repository");
+  });
+
+  it("does not flag InternalHelper (private)", () => {
+    expect(unusedNames()).not.toContain("InternalHelper");
+  });
+});
+
+describe("unused exports — Swift", () => {
+  it("detects UnusedClient as unused", () => {
+    expect(unusedNames()).toContain("UnusedClient");
+  });
+
+  it("does not flag NetworkClient as unused", () => {
+    expect(unusedNames()).not.toContain("NetworkClient");
+  });
+});
+
+describe("unused exports — Elixir", () => {
+  it("detects unused_parse as unused", () => {
+    expect(unusedNames()).toContain("unused_parse");
+  });
+
+  it("does not flag parse as unused", () => {
+    expect(unusedNames()).not.toContain("parse");
+  });
+
+  it("does not flag internal_helper (defp = private)", () => {
+    expect(unusedNames()).not.toContain("internal_helper");
+  });
+});
+
+describe("unused exports — PHP", () => {
+  it("detects DeadController as unused", () => {
+    expect(unusedNames()).toContain("DeadController");
+  });
+
+  it("does not flag UserController as unused", () => {
+    expect(unusedNames()).not.toContain("UserController");
+  });
+});
+
+describe("unused exports — Dart", () => {
+  it("detects UnusedWidget as unused", () => {
+    expect(unusedNames()).toContain("UnusedWidget");
+  });
+
+  it("does not flag AppWidget as unused", () => {
+    expect(unusedNames()).not.toContain("AppWidget");
+  });
+
+  it("does not flag _PrivateWidget (underscore = private)", () => {
+    expect(unusedNames()).not.toContain("_PrivateWidget");
+  });
+});
+
+describe("unused exports — usedInternally classification", () => {
+  it("marks deadHelper as not used internally", () => {
+    const dead = getUnused().find((u) => u.name === "deadHelper");
+    expect(dead).toBeDefined();
+    expect(dead!.usedInternally).toBe(false);
+  });
+});
+
+describe("unused exports — re-exports", () => {
+  it("does not flag formatDate (re-exported via index.ts)", () => {
+    expect(unusedNames()).not.toContain("formatDate");
+  });
+});
+
+describe("unused exports — legacy JavaScript (CommonJS)", () => {
+  it.todo("detects deadLegacy as unused — blocked on CommonJS module.exports parsing");
+
+  it("does not flag formatName as unused", () => {
+    expect(unusedNames()).not.toContain("formatName");
+  });
+});
