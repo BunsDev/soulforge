@@ -7,7 +7,6 @@ import type { StreamSegment } from "../components/StreamSegmentList.js";
 import type { LiveToolCall } from "../components/ToolCallDisplay.js";
 import { createForgeAgent } from "../core/agents/index.js";
 import { ReadTracker } from "../core/agents/read-tracker.js";
-import { RecallStore } from "../core/agents/recall-store.js";
 import { getSmoothStreamOptions } from "../core/agents/stream-options.js";
 import { onAgentStats, onMultiAgentEvent } from "../core/agents/subagent-events.js";
 import type { SharedCacheRef } from "../core/agents/subagent-tools.js";
@@ -437,7 +436,6 @@ export function useChat({
     (() => {
       const ref: SharedCacheRef = {
         current: undefined,
-        entity: { warnings: 0, lastWarningStep: 0, cleanSteps: 0 },
         updateFile(absPath: string, content: string) {
           if (!ref.current) return;
           const prefix = cwd.endsWith("/") ? cwd : `${cwd}/`;
@@ -452,7 +450,6 @@ export function useChat({
     })(),
   );
 
-  const recallStoreRef = useRef(new RecallStore());
   const readTrackerRef = useRef(new ReadTracker());
 
   useEffect(() => {
@@ -880,7 +877,6 @@ export function useChat({
 
         const newMessages = [summaryMsg, ackMsg, ...recentMessages];
         setCoreMessages(newMessages);
-        recallStoreRef.current.clear();
         readTrackerRef.current.clear();
 
         const trackedFiles = contextManager.getTrackedFiles();
@@ -1462,7 +1458,6 @@ export function useChat({
           cwd,
           sessionId: sessionIdRef.current,
           sharedCacheRef: sharedCacheRef.current,
-          recallStore: recallStoreRef.current,
           readTracker: readTrackerRef.current,
           agentFeatures: effectiveConfig.agentFeatures,
           planExecution: planExecutionRef.current,
@@ -1500,7 +1495,6 @@ export function useChat({
                           codeExecution: effectiveConfig.codeExecution,
                           cwd,
                           sessionId: sessionIdRef.current,
-                          recallStore: recallStoreRef.current,
                           readTracker: readTrackerRef.current,
                           agentFeatures: effectiveConfig.agentFeatures,
                           planExecution: planExecutionRef.current,

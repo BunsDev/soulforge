@@ -3,7 +3,6 @@ import type { PrepareStepFunction, StopCondition } from "ai";
 import { EPHEMERAL_CACHE } from "../llm/provider-options.js";
 import { renderTaskList } from "../tools/task-list.js";
 import type { AgentBus } from "./agent-bus.js";
-import type { RecallStore } from "./recall-store.js";
 import { emitSubagentStep } from "./subagent-events.js";
 
 export type SymbolLookup = (
@@ -18,7 +17,6 @@ export interface PrepareStepOptions {
   allTools: Record<string, unknown>;
   symbolLookup?: SymbolLookup;
   contextWindow?: number;
-  recallStore?: RecallStore;
 }
 
 // Context-proportional thresholds (fraction of model's context window).
@@ -69,7 +67,6 @@ function extractText(output: unknown): string {
 interface SummaryContext {
   symbolHint?: string;
   args?: Record<string, unknown>;
-  recallId?: string;
 }
 
 function buildSummary(toolName: string, text: string, ctx?: SummaryContext): string | null {
@@ -79,7 +76,7 @@ function buildSummary(toolName: string, text: string, ctx?: SummaryContext): str
   if (charCount <= 200) return null;
 
   const args = ctx?.args;
-  const tag = ctx?.recallId ? `[pruned:${ctx.recallId}]` : "[pruned]";
+  const tag = "[pruned]";
 
   if (toolName === "read_file" || toolName === "read_code") {
     const parts = [`${tag} ${String(lineCount)} lines`];
@@ -345,7 +342,6 @@ function compactOldToolResults(
   messages: ModelMessage[],
   symbolLookup?: SymbolLookup,
   pathMap?: Map<string, string>,
-  recallStore?: RecallStore,
 ): ModelMessage[] {
   if (messages.length <= KEEP_RECENT_MESSAGES) return messages;
 
@@ -398,16 +394,9 @@ function compactOldToolResults(
         }
       }
 
-      let recallId: string | undefined;
-      if (recallStore) {
-        const toolArgs = argsMap.get(part.toolCallId) ?? {};
-        recallId = recallStore.record(part.toolCallId, part.toolName, toolArgs, text, idx);
-      }
-
       const summary = buildSummary(part.toolName, text, {
         symbolHint,
         args: argsMap.get(part.toolCallId),
-        recallId,
       });
       if (!summary) return part;
       changed = true;
@@ -437,9 +426,6 @@ export function buildPrepareStep({
   const cw = Math.min(ctxWindow ?? DEFAULT_CONTEXT_WINDOW, MAX_SUBAGENT_CONTEXT);
   const nudgeThreshold = Math.floor(cw * OUTPUT_NUDGE_PCT);
   const hardStop = Math.floor(cw * HARD_STOP_PCT);
-  const entity = { warnings: 0, prevReReadCount: 0 };
-  const ENTITY_MAX_WARNINGS = 3;
-
   let nudgeFired = false;
 
   // biome-ignore lint/suspicious/noExplicitAny: TOOLS generic is invariant — tool-agnostic functions use <any> (same as SDK's stepCountIs/hasToolCall)
@@ -495,71 +481,7 @@ export function buildPrepareStep({
       }
     }
 
-    // Entity: detect re-reads via content hashing — runs BEFORE semantic prune because
-    // prune replaces duplicates with "[re-read]" stubs which would prevent hash matching.
-    if (stepNumber >= 1) {
-      const contentHashes = new Set<number>();
-      let totalReReads = 0;
-      const reReadTools: string[] = [];
-      const msgs = result.messages ?? messages;
-      for (const msg of msgs) {
-        if (msg.role !== "tool" || typeof msg.content === "string") continue;
-        if (!Array.isArray(msg.content)) continue;
-        for (const part of msg.content) {
-          if (typeof part !== "object" || part === null) continue;
-          if (!("type" in part) || (part as { type: string }).type !== "tool-result") continue;
-          const text = extractText((part as { output?: unknown }).output);
-          if (text.length <= 200) continue;
-          const hash = Number(Bun.hash(text));
-          if (contentHashes.has(hash)) {
-            totalReReads++;
-            const tn = (part as { toolName?: string }).toolName;
-            if (tn && !reReadTools.includes(tn)) reReadTools.push(tn);
-          } else {
-            contentHashes.add(hash);
-          }
-        }
-      }
-      const newViolations = totalReReads - entity.prevReReadCount;
-      entity.prevReReadCount = totalReReads;
-
-      if (newViolations > 0) {
-        entity.warnings = Math.min(entity.warnings + newViolations, ENTITY_MAX_WARNINGS);
-        const tools = reReadTools.join(", ");
-        if (entity.warnings >= ENTITY_MAX_WARNINGS) {
-          nudgeFired = true;
-          if (parentToolCallId) {
-            emitSubagentStep({
-              parentToolCallId,
-              toolName: "_nudge",
-              args: "duplicate content",
-              state: "done",
-              agentId,
-            });
-          }
-          const nudgeMsgs = result.messages ?? messages;
-          result.messages = [
-            ...nudgeMsgs,
-            {
-              role: "user" as const,
-              content: [
-                {
-                  type: "text" as const,
-                  text: `Duplicate content limit reached (${tools}). Stop calling tools. Produce your structured output now with all findings gathered so far.`,
-                },
-              ],
-            },
-          ];
-          result.toolChoice = "none";
-          result.activeTools = [];
-        } else {
-          const warn = `⚠ ENTITY → WARNING ${String(entity.warnings)}/${String(ENTITY_MAX_WARNINGS)}: Duplicate content detected (${tools}). You already have this content — use read_code for specific symbols or act on what you have.`;
-          result.system = `${result.system ?? ""}\n${warn}`.trim();
-        }
-      }
-    }
-
-    // Semantic pruning: stale reads + canceled plans + re-read stubbing (runs AFTER entity check)
+    // Semantic pruning: stale reads + canceled plans + re-read stubbing
     if (stepNumber >= 1) {
       let msgs = result.messages ?? messages;
       msgs = semanticPrune(msgs, pathMap);

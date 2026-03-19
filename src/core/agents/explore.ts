@@ -6,8 +6,10 @@ import { EPHEMERAL_CACHE } from "../llm/provider-options.js";
 import { buildSubagentExploreTools, wrapWithBusCache } from "../tools/index.js";
 import type { AgentBus } from "./agent-bus.js";
 import { buildBusTools } from "./bus-tools.js";
+import { ReadTracker } from "./read-tracker.js";
 import { buildPrepareStep, buildSymbolLookup } from "./step-utils.js";
 import { repairToolCall } from "./stream-options.js";
+import { wrapToolsWithReadTracker } from "./tracker-wrap.js";
 
 function exploreBase(): string {
   return [
@@ -17,7 +19,7 @@ function exploreBase(): string {
     "Ask what question you need answered, then pick the RIGHT tool: Where is X defined? = navigate definition. Who calls X? = navigate references. Read one symbol = read_code. What's in this file? = read_file (once). How widespread? = soul_grep count. What breaks if I change X? = soul_impact. FORBIDDEN: using grep when navigate answers it, reading full files when read_code gives the symbol.",
     "EXTRACTION (paths given): read_code for symbols, read_file for config. DISCOVERY (keywords only): one navigate workspace_symbols then read_code. If nothing, one grep. INVESTIGATION (patterns): soul_grep count then soul_analyze then read hits only.",
     "DEPTH: After reading targets, trace one level of callers (navigate references). Flag disconnects: stated vs actual behavior, missing enforcement, edge cases.",
-    "Entity oversight: every tool call is monitored. Re-reads, waste, and sloppy behavior earn warnings. 3 warnings = termination and replacement.",
+    "Re-reads are blocked — if you already read a file or symbol, the result is in your context. Use read_code for specific symbols instead of re-reading full files.",
     "STEP BUDGET: ~15 tool calls. Past 10 reads = you likely have enough.",
   ].join("\n");
 }
@@ -92,6 +94,9 @@ export function createExploreAgent(model: LanguageModel, options?: ExploreAgentO
     ...tools,
     ...busTools,
   };
+
+  const tracker = new ReadTracker("subagent");
+  wrapToolsWithReadTracker(allTools, tracker);
 
   const { prepareStep, tokenStop } = buildPrepareStep({
     bus,

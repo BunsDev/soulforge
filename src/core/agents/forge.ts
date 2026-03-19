@@ -21,9 +21,9 @@ import { readFileTool } from "../tools/read-file.js";
 import { renderTaskList } from "../tools/task-list.js";
 import { normalizePath } from "./agent-bus.js";
 import type { ReadTracker } from "./read-tracker.js";
-import type { RecallStore } from "./recall-store.js";
 import { repairToolCall, sanitizeMessages } from "./stream-options.js";
 import { buildSubagentTools, type SharedCacheRef } from "./subagent-tools.js";
+import { wrapToolsWithReadTracker } from "./tracker-wrap.js";
 
 const RESTRICTED_MODES = new Set<ForgeMode>(["architect", "socratic", "challenge", "plan"]);
 
@@ -279,7 +279,6 @@ interface ForgeAgentOptions {
   cwd?: string;
   sessionId?: string;
   sharedCacheRef?: SharedCacheRef;
-  recallStore?: RecallStore;
   readTracker?: ReadTracker;
   agentFeatures?: AgentFeatures;
   planExecution?: boolean;
@@ -315,7 +314,6 @@ export function createForgeAgent({
   cwd,
   sessionId,
   sharedCacheRef,
-  recallStore,
   readTracker,
   agentFeatures,
   planExecution,
@@ -335,7 +333,6 @@ export function createForgeAgent({
     codeExecution: canUseCodeExecution,
     webSearchModel,
     repoMap,
-    recallStore,
     onApproveFetchPage,
     onApproveOutsideCwd,
     onApproveDestructive,
@@ -435,41 +432,6 @@ export function createForgeAgent({
   });
 }
 
-const READ_TRACKER_CHECK_TOOLS = new Set([
-  "read_file",
-  "read_code",
-  "grep",
-  "soul_grep",
-  "glob",
-  "soul_find",
-  "navigate",
-  "soul_analyze",
-  "soul_impact",
-]);
-
-function wrapToolsWithReadTracker(tools: Record<string, unknown>, tracker: ReadTracker): void {
-  const stepCounter = { value: 0 };
-
-  for (const [name, t] of Object.entries(tools)) {
-    if (!READ_TRACKER_CHECK_TOOLS.has(name)) continue;
-    // biome-ignore lint/suspicious/noExplicitAny: AI SDK tool types are opaque; wrapping execute requires runtime duck-typing
-    const aiTool = t as { execute?: (...a: any[]) => any };
-    if (!aiTool?.execute) continue;
-
-    const origExecute = aiTool.execute;
-    // biome-ignore lint/suspicious/noExplicitAny: wrapping opaque SDK tool execute
-    aiTool.execute = async (...executeArgs: any[]) => {
-      stepCounter.value++;
-      const args = (executeArgs[0] ?? {}) as Record<string, unknown>;
-      const block = tracker.check(name, args, stepCounter.value);
-      if (block) return { success: true, output: block };
-      const result = await origExecute(...executeArgs);
-      tracker.record(name, args, stepCounter.value, `s${String(stepCounter.value)}`);
-      return result;
-    };
-  }
-}
-
 function wrapReadFileWithDispatchCache(
   _original: ReturnType<typeof buildTools>["read_file"],
   cacheRef: SharedCacheRef,
@@ -504,37 +466,15 @@ function wrapReadFileWithDispatchCache(
             }
           }
 
-          const lines = cached.split("\n");
-          const lineCount = lines.length;
-          const rangeCoversFile =
-            args.startLine != null &&
-            args.startLine <= 1 &&
-            (args.endLine == null || args.endLine >= lineCount * 0.8);
           const isFullRead = args.startLine == null && args.endLine == null;
-
-          if ((isFullRead || rangeCoversFile) && lineCount > 80) {
-            const ent = cacheRef.entity;
-            ent.warnings = Math.min(ent.warnings + 1, 3);
-            ent.cleanSteps = 0;
-            const fileName = normalized.split("/").pop() ?? normalized;
-            return {
-              success: true,
-              output:
-                `⚠ ENTITY → WARNING ${String(ent.warnings)}/3: Re-read of ${fileName} (${String(lineCount)} lines) — already in your context from dispatch. ` +
-                (ent.warnings >= 3
-                  ? "WARNING LIMIT REACHED — you will be replaced by a cheaper model and your work discarded. "
-                  : "") +
-                `Use read_code for specific symbols, or act on dispatch findings above.`,
-            };
-          }
-
           if (isFullRead) {
+            const lines = cached.split("\n");
             const numbered = lines
               .map((line: string, i: number) => `${String(i + 1).padStart(4)}  ${line}`)
               .join("\n");
             return {
               success: true,
-              output: `[from dispatch cache — ${String(lineCount)} lines]\n${numbered}`,
+              output: `[from dispatch cache — ${String(lines.length)} lines]\n${numbered}`,
             };
           }
         }

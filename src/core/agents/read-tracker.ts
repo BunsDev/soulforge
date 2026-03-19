@@ -1,6 +1,19 @@
 import { resolve } from "node:path";
 import type { FileReadRecord } from "./agent-bus.js";
-import { normalizeArgs } from "./recall-store.js";
+
+const PATH_KEYS = new Set(["path", "file", "filePath", "from", "to", "cwd"]);
+
+function normalizeArgs(toolName: string, args: Record<string, unknown>): string {
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(args).sort()) {
+    let val = args[key];
+    if (PATH_KEYS.has(key) && typeof val === "string") {
+      val = resolve(val);
+    }
+    sorted[key] = val;
+  }
+  return `${toolName}:${JSON.stringify(sorted)}`;
+}
 
 interface ReadRecord {
   tool: string;
@@ -36,9 +49,16 @@ function rangeCovers(
   return eStart <= rStart && eEnd >= rEnd;
 }
 
+export type ReadTrackerMode = "main" | "subagent";
+
 export class ReadTracker {
   private records = new Map<string, ReadRecord>();
   private pathIndex = new Map<string, Set<string>>();
+  private mode: ReadTrackerMode;
+
+  constructor(mode: ReadTrackerMode = "main") {
+    this.mode = mode;
+  }
 
   check(toolName: string, args: Record<string, unknown>, _currentStep: number): string | null {
     if (args.fresh === true) {
@@ -59,23 +79,30 @@ export class ReadTracker {
       return "This file was read by a subagent during dispatch. The findings are in your context above.";
     }
 
+    const step = String(existing.step);
+    const hint =
+      this.mode === "subagent"
+        ? "The content is in your context above. Use read_code for specific symbols."
+        : `Use recall('${existing.recallId}') for the content.`;
+    const freshHint = this.mode === "subagent" ? "" : " Set fresh: true to re-execute.";
+
     if (READ_CODE_TOOLS.has(toolName)) {
-      return `You read this symbol at step ${String(existing.step)}. Use recall('${existing.recallId}') for the content.`;
+      return `You read this symbol at step ${step}. ${hint}`;
     }
 
     if (GREP_TOOLS.has(toolName)) {
-      return `You already searched for this pattern at step ${String(existing.step)}. See recall('${existing.recallId}') for results. Set fresh: true to re-execute.`;
+      return `You already searched for this pattern at step ${step}. ${hint}${freshHint}`;
     }
 
     if (GLOB_TOOLS.has(toolName)) {
-      return `You already ran this search at step ${String(existing.step)}. See recall('${existing.recallId}') for results. Set fresh: true to re-execute.`;
+      return `You already ran this search at step ${step}. ${hint}${freshHint}`;
     }
 
     if (NAVIGATE_TOOLS.has(toolName)) {
-      return `You already navigated this at step ${String(existing.step)}. See recall('${existing.recallId}') for results.`;
+      return `You already navigated this at step ${step}. ${hint}`;
     }
 
-    return `You already ran this at step ${String(existing.step)}. See recall('${existing.recallId}') for results.`;
+    return `You already ran this at step ${step}. ${hint}`;
   }
 
   record(toolName: string, args: Record<string, unknown>, step: number, recallId: string): void {
@@ -184,7 +211,11 @@ export class ReadTracker {
           rec.startLine == null && rec.endLine == null
             ? "full file"
             : `lines ${String(rec.startLine ?? 1)}-${String(rec.endLine ?? "end")}`;
-        return `You read this file at step ${String(rec.step)} (${rangeDesc}). Use recall('${rec.recallId}') for the content, or read_code for specific symbols.`;
+        const hint =
+          this.mode === "subagent"
+            ? "The content is in your context above. Use read_code for specific symbols."
+            : `Use recall('${rec.recallId}') for the content, or read_code for specific symbols.`;
+        return `You read this file at step ${String(rec.step)} (${rangeDesc}). ${hint}`;
       }
     }
     return null;

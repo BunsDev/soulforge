@@ -21,15 +21,8 @@ import { createCodeAgent } from "./code.js";
 import { createExploreAgent } from "./explore.js";
 import { emitAgentStats, emitMultiAgentEvent, emitSubagentStep } from "./subagent-events.js";
 
-export interface EntityState {
-  warnings: number;
-  lastWarningStep: number;
-  cleanSteps: number;
-}
-
 export interface SharedCacheRef {
   current: SharedCache | undefined;
-  entity: EntityState;
   updateFile(path: string, content: string): void;
 }
 
@@ -1162,7 +1155,6 @@ function matchSkillsToTask(
 export function buildSubagentTools(models: SubagentModels) {
   const cacheRef: SharedCacheRef = models.sharedCacheRef ?? {
     current: undefined,
-    entity: { warnings: 0, lastWarningStep: 0, cleanSteps: 0 },
     updateFile() {},
   };
 

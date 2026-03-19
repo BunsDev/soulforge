@@ -5,7 +5,6 @@ import { tool } from "ai";
 import { z } from "zod";
 import type { EditorIntegration } from "../../types/index.js";
 import { type AgentBus, normalizePath } from "../agents/agent-bus.js";
-import type { RecallStore } from "../agents/recall-store.js";
 import type { RepoMap } from "../intelligence/repo-map.js";
 import { MemoryManager } from "../memory/manager.js";
 import {
@@ -77,7 +76,6 @@ export function buildTools(
     memoryManager?: MemoryManager;
     webSearchModel?: import("ai").LanguageModel;
     repoMap?: RepoMap;
-    recallStore?: RecallStore;
     onApproveFetchPage?: (url: string) => Promise<boolean>;
     onApproveOutsideCwd?: (toolName: string, path: string) => Promise<boolean>;
     onApproveDestructive?: (description: string) => Promise<boolean>;
@@ -711,24 +709,6 @@ export function buildTools(
     ...(opts?.codeExecution
       ? { code_execution: createAnthropic().tools.codeExecution_20260120() }
       : {}),
-
-    ...(opts?.recallStore
-      ? {
-          recall: tool({
-            description:
-              "Retrieve a previously pruned tool result by its recall ID (shown as [pruned:rN] in context)",
-            inputSchema: z.object({
-              id: z.string().describe("Recall ID like 'r17' from a [pruned:r17] message"),
-            }),
-            execute: async ({ id }) => {
-              const entry = opts.recallStore?.get(id);
-              if (!entry)
-                return `Recall ID ${id} not found — it may have been evicted. Re-execute the original tool.`;
-              return entry.result;
-            },
-          }),
-        }
-      : {}),
   };
 }
 
@@ -927,7 +907,6 @@ export function buildSubagentExploreTools(opts?: {
   onApproveWebSearch?: (query: string) => Promise<boolean>;
   onApproveFetchPage?: (url: string) => Promise<boolean>;
   repoMap?: RepoMap;
-  recallStore?: RecallStore;
 }) {
   const subagentCwd = process.cwd();
   return {
@@ -1200,24 +1179,6 @@ export function buildSubagentExploreTools(opts?: {
         projectTool.execute(args as Parameters<typeof projectTool.execute>[0]),
       ),
     }),
-
-    ...(opts?.recallStore
-      ? {
-          recall: tool({
-            description:
-              "Retrieve a previously pruned tool result by its recall ID (shown as [pruned:rN] in context)",
-            inputSchema: z.object({
-              id: z.string().describe("Recall ID like 'r17' from a [pruned:r17] message"),
-            }),
-            execute: async ({ id }) => {
-              const entry = opts.recallStore?.get(id);
-              if (!entry)
-                return `Recall ID ${id} not found — it may have been evicted. Re-execute the original tool.`;
-              return entry.result;
-            },
-          }),
-        }
-      : {}),
   };
 }
 
@@ -1227,7 +1188,6 @@ export function buildSubagentCodeTools(opts?: {
   onApproveWebSearch?: (query: string) => Promise<boolean>;
   onApproveFetchPage?: (url: string) => Promise<boolean>;
   repoMap?: RepoMap;
-  recallStore?: RecallStore;
 }) {
   return {
     ...buildSubagentExploreTools(opts),
