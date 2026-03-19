@@ -489,10 +489,20 @@ async function runDesloppify(
   });
 
   try {
+    const agentContext = tasks
+      .map((t) => {
+        const r = bus.getResult(t.agentId);
+        return r?.result ? `[${t.agentId}] ${t.role}: ${r.result.slice(0, 2000)}` : null;
+      })
+      .filter(Boolean)
+      .join("\n\n");
+    const contextSection = agentContext
+      ? `\n\nAgent context (why these edits were made):\n${agentContext}`
+      : "";
     const desloppifyTask: AgentTask = {
       agentId: "desloppify",
       role: "code",
-      task: `${DESLOPPIFY_PROMPT}\n\nFiles to review:\n${editedPaths.map((p) => `- ${p}`).join("\n")}`,
+      task: `${DESLOPPIFY_PROMPT}\n\nFiles to review:\n${editedPaths.map((p) => `- ${p}`).join("\n")}${contextSection}`,
     };
 
     bus.registerTasks([desloppifyTask]);
@@ -622,10 +632,20 @@ async function runVerifier(
   });
 
   try {
+    const verifyContext = tasks
+      .map((t) => {
+        const r = bus.getResult(t.agentId);
+        return r?.result ? `[${t.agentId}] ${t.role}: ${r.result.slice(0, 2000)}` : null;
+      })
+      .filter(Boolean)
+      .join("\n\n");
+    const verifyContextSection = verifyContext
+      ? `\n\nWhat the code agents did:\n${verifyContext}`
+      : "";
     const verifyTask: AgentTask = {
       agentId: "verifier",
       role: "explore",
-      task: `${VERIFY_PROMPT}\n\nFiles edited by code agents:\n${editedPaths.map((p) => `- ${p}`).join("\n")}`,
+      task: `${VERIFY_PROMPT}\n\nFiles edited by code agents:\n${editedPaths.map((p) => `- ${p}`).join("\n")}${verifyContextSection}`,
     };
 
     bus.registerTasks([verifyTask]);
@@ -910,6 +930,33 @@ async function runAgentTask(
     }) ?? [];
 
   let enrichedPrompt = task.task;
+
+  const taskTargetFiles = new Set<string>();
+  const targetMatch = task.task.match(/Target files:\n([\s\S]*?)(?:\n---|\n\n|$)/);
+  if (targetMatch) {
+    for (const line of targetMatch[1]?.split("\n") ?? []) {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith(" ") && trimmed.includes("/")) {
+        taskTargetFiles.add(normalizePath(trimmed));
+      }
+    }
+  }
+
+  if (taskTargetFiles.size > 0) {
+    const peerTasks = bus.tasks.filter((t) => t.agentId !== task.agentId);
+    const overlaps: string[] = [];
+    for (const peer of peerTasks) {
+      for (const file of taskTargetFiles) {
+        if (peer.task.includes(file)) {
+          overlaps.push(`${peer.agentId} also targets ${file}`);
+        }
+      }
+    }
+    if (overlaps.length > 0) {
+      enrichedPrompt += `\n\nShared files: ${overlaps.join("; ")}. Check their findings before reading.`;
+    }
+  }
+
   if (peerObjectives) {
     enrichedPrompt += `\n\n--- Peer agents ---\n${peerObjectives}`;
   }
