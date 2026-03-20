@@ -707,7 +707,7 @@ const AssistantMessage = memo(function AssistantMessage({
       paddingY={1}
     >
       <box flexDirection="row">
-        <text fg={ASSISTANT_COLOR}>{icon("ai")}</text>
+        <text fg={ASSISTANT_COLOR}>{icon("ai")} Forge</text>
         <text fg="#333"> {time}</text>
       </box>
 
