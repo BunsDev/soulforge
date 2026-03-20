@@ -381,6 +381,16 @@ export function createForgeAgent({
     ...(interactive ? buildInteractiveTools(interactive, { cwd, sessionId }) : {}),
   };
 
+  // Mark the last tool with cache_control so the Anthropic API caches
+  // the entire tools array as a prefix (system prompt + tools = stable prefix).
+  // This saves re-processing ~12k tokens of tool schemas on every step.
+  const toolKeys = Object.keys(allTools);
+  const lastToolKey = toolKeys[toolKeys.length - 1];
+  if (lastToolKey) {
+    const lastTool = allTools[lastToolKey as keyof typeof allTools] as Record<string, unknown>;
+    lastTool.providerOptions = EPHEMERAL_CACHE;
+  }
+
   const allToolNames = Object.keys(allTools) as (keyof typeof allTools)[];
   const restrictedSet = new Set(RESTRICTED_TOOL_NAMES);
   const planExecSet = new Set(PLAN_EXECUTION_TOOL_NAMES);
