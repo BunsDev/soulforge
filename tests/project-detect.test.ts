@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 /**
  * Tests for detectProfile from project.ts.
@@ -20,6 +20,7 @@ function detectProfile(cwd: string) {
     lint: null,
     typecheck: null,
     run: null,
+    format: null,
   };
 
   const has = (f: string) => existsSync(join(cwd, f));
@@ -50,6 +51,19 @@ function detectProfile(cwd: string) {
       return "eslint .";
     return null;
   };
+  const detectJsFormatter = (): string | null => {
+    if (has("biome.json") || has("biome.jsonc")) return "biome format --write";
+    if (has("dprint.json") || has("dprint.jsonc")) return "dprint fmt";
+    if (
+      has(".prettierrc") ||
+      has(".prettierrc.js") ||
+      has(".prettierrc.json") ||
+      has(".prettierrc.yml") ||
+      has("prettier.config.js")
+    )
+      return "prettier --write";
+    return null;
+  };
   const scripts = readPackageScripts();
 
   if (has("bun.lock") || has("bun.lockb")) {
@@ -60,6 +74,7 @@ function detectProfile(cwd: string) {
       ? scripts.typecheck ? "bun run typecheck" : "bunx tsc --noEmit"
       : null;
     profile.run = scripts.dev ? "bun run dev" : scripts.start ? "bun run start" : null;
+    profile.format = scripts.format ? "bun run format" : detectJsFormatter();
     return profile;
   }
 
@@ -69,6 +84,7 @@ function detectProfile(cwd: string) {
     profile.lint = "deno lint";
     profile.typecheck = "deno check .";
     profile.run = scripts.dev ? "deno task dev" : "deno run main.ts";
+    profile.format = "deno fmt";
     return profile;
   }
 
@@ -82,6 +98,7 @@ function detectProfile(cwd: string) {
       ? scripts.typecheck ? `${run} typecheck` : "npx tsc --noEmit"
       : null;
     profile.run = scripts.dev ? `${run} dev` : scripts.start ? `${run} start` : null;
+    profile.format = scripts.format ? `${run} format` : detectJsFormatter();
     return profile;
   }
 
@@ -91,6 +108,7 @@ function detectProfile(cwd: string) {
     profile.lint = "cargo clippy";
     profile.typecheck = "cargo check";
     profile.run = "cargo run";
+    profile.format = "rustfmt";
     return profile;
   }
 
@@ -100,6 +118,7 @@ function detectProfile(cwd: string) {
     profile.lint = has(".golangci.yml") || has(".golangci.yaml") ? "golangci-lint run" : "go vet ./...";
     profile.typecheck = "go build ./...";
     profile.run = "go run .";
+    profile.format = "gofmt -w";
     return profile;
   }
 
@@ -109,6 +128,7 @@ function detectProfile(cwd: string) {
     profile.test = `${prefix}pytest`;
     profile.lint = has("ruff.toml") || has(".ruff.toml") ? `${prefix}ruff check` : `${prefix}flake8`;
     profile.typecheck = `${prefix}mypy .`;
+    profile.format = has("ruff.toml") || has(".ruff.toml") ? `${prefix}ruff format` : `${prefix}black`;
     if (has("manage.py")) profile.run = `${prefix}python manage.py runserver`;
     else if (has("app.py") || has("main.py")) profile.run = `${prefix}uvicorn main:app --reload`;
     return profile;
@@ -120,6 +140,7 @@ function detectProfile(cwd: string) {
     profile.lint = "dart analyze";
     profile.typecheck = "dart analyze";
     profile.run = "flutter run";
+    profile.format = "dart format";
     return profile;
   }
 
@@ -129,6 +150,7 @@ function detectProfile(cwd: string) {
     profile.lint = has(".swiftlint.yml") ? "swiftlint" : null;
     profile.typecheck = "swift build";
     profile.run = "swift run";
+    profile.format = has(".swiftformat") ? "swiftformat" : null;
     return profile;
   }
 
@@ -138,6 +160,7 @@ function detectProfile(cwd: string) {
     profile.lint = "mix credo";
     profile.typecheck = "mix dialyzer";
     profile.run = "mix phx.server";
+    profile.format = "mix format";
     return profile;
   }
 
@@ -146,6 +169,7 @@ function detectProfile(cwd: string) {
     profile.build = null;
     profile.lint = "bundle exec rubocop";
     profile.run = has("config.ru") ? "bundle exec rails server" : null;
+    profile.format = "bundle exec rubocop -a --fail-level error";
     return profile;
   }
 
@@ -156,6 +180,7 @@ function detectProfile(cwd: string) {
     profile.lint = `${gw} check`;
     profile.typecheck = `${gw} compileJava`;
     profile.run = `${gw} run`;
+    profile.format = null;
     return profile;
   }
 
@@ -189,6 +214,7 @@ function detectProfile(cwd: string) {
     profile.build = "zig build";
     profile.typecheck = "zig build";
     profile.run = "zig build run";
+    profile.format = "zig fmt";
     return profile;
   }
 
@@ -475,7 +501,8 @@ describe("detectProfile — edge cases", () => {
     expect(p.lint).toBeNull();
     expect(p.typecheck).toBeNull();
     expect(p.run).toBeNull();
-  });
+      expect(p.format).toBeNull();
+    });
 
   it("bun takes priority over npm when both exist", () => {
     const dir = makeProject("priority1", {
@@ -502,5 +529,151 @@ describe("detectProfile — edge cases", () => {
     });
     const p = detectProfile(dir);
     expect(p.test).toBe("deno test");
+  });
+});
+
+describe("detectProfile — format detection", () => {
+  it("detects biome formatter for bun project", () => {
+    const dir = makeProject("fmt-bun-biome", {
+      "bun.lock": "",
+      "package.json": JSON.stringify({ scripts: {} }),
+      "biome.json": "{}",
+    });
+    const p = detectProfile(dir);
+    expect(p.format).toBe("biome format --write");
+  });
+
+  it("detects prettier formatter for bun project", () => {
+    const dir = makeProject("fmt-bun-prettier", {
+      "bun.lock": "",
+      "package.json": JSON.stringify({ scripts: {} }),
+      ".prettierrc": "{}",
+    });
+    const p = detectProfile(dir);
+    expect(p.format).toBe("prettier --write");
+  });
+
+  it("prefers scripts.format over auto-detection for bun", () => {
+    const dir = makeProject("fmt-bun-script", {
+      "bun.lock": "",
+      "package.json": JSON.stringify({ scripts: { format: "biome format --write ." } }),
+      ".prettierrc": "{}",
+    });
+    const p = detectProfile(dir);
+    expect(p.format).toBe("bun run format");
+  });
+
+  it("detects deno fmt", () => {
+    const dir = makeProject("fmt-deno", { "deno.json": "{}" });
+    const p = detectProfile(dir);
+    expect(p.format).toBe("deno fmt");
+  });
+
+  it("detects npm project with prettier", () => {
+    const dir = makeProject("fmt-npm-prettier", {
+      "package.json": JSON.stringify({ scripts: { test: "jest" } }),
+      ".prettierrc.json": "{}",
+    });
+    const p = detectProfile(dir);
+    expect(p.format).toBe("prettier --write");
+  });
+
+  it("detects npm project with dprint", () => {
+    const dir = makeProject("fmt-npm-dprint", {
+      "package.json": JSON.stringify({ scripts: { test: "jest" } }),
+      "dprint.json": "{}",
+    });
+    const p = detectProfile(dir);
+    expect(p.format).toBe("dprint fmt");
+  });
+
+  it("prefers scripts.format over auto-detection for npm", () => {
+    const dir = makeProject("fmt-npm-script", {
+      "package.json": JSON.stringify({ scripts: { test: "jest", format: "prettier --write ." } }),
+      "biome.json": "{}",
+    });
+    const p = detectProfile(dir);
+    expect(p.format).toBe("npm run format");
+  });
+
+  it("detects rustfmt for Rust", () => {
+    const dir = makeProject("fmt-rust", { "Cargo.toml": "" });
+    const p = detectProfile(dir);
+    expect(p.format).toBe("rustfmt");
+  });
+
+  it("detects gofmt for Go", () => {
+    const dir = makeProject("fmt-go", { "go.mod": "" });
+    const p = detectProfile(dir);
+    expect(p.format).toBe("gofmt -w");
+  });
+
+  it("detects ruff format for Python with ruff", () => {
+    const dir = makeProject("fmt-py-ruff", { "pyproject.toml": "", "ruff.toml": "" });
+    const p = detectProfile(dir);
+    expect(p.format).toBe("ruff format");
+  });
+
+  it("detects black for Python without ruff", () => {
+    const dir = makeProject("fmt-py-black", { "pyproject.toml": "" });
+    const p = detectProfile(dir);
+    expect(p.format).toBe("black");
+  });
+
+  it("detects uv run ruff format for Python with uv + ruff", () => {
+    const dir = makeProject("fmt-py-uv-ruff", { "pyproject.toml": "", "uv.lock": "", "ruff.toml": "" });
+    const p = detectProfile(dir);
+    expect(p.format).toBe("uv run ruff format");
+  });
+
+  it("detects dart format for Flutter", () => {
+    const dir = makeProject("fmt-flutter", { "pubspec.yaml": "" });
+    const p = detectProfile(dir);
+    expect(p.format).toBe("dart format");
+  });
+
+  it("detects mix format for Elixir", () => {
+    const dir = makeProject("fmt-elixir", { "mix.exs": "" });
+    const p = detectProfile(dir);
+    expect(p.format).toBe("mix format");
+  });
+
+  it("detects rubocop format for Ruby", () => {
+    const dir = makeProject("fmt-ruby", { "Gemfile": "" });
+    const p = detectProfile(dir);
+    expect(p.format).toBe("bundle exec rubocop -a --fail-level error");
+  });
+
+  it("detects swiftformat for Swift", () => {
+    const dir = makeProject("fmt-swift", { "Package.swift": "", ".swiftformat": "" });
+    const p = detectProfile(dir);
+    expect(p.format).toBe("swiftformat");
+  });
+
+  it("no format for Swift without swiftformat config", () => {
+    const dir = makeProject("fmt-swift-none", { "Package.swift": "" });
+    const p = detectProfile(dir);
+    expect(p.format).toBeNull();
+  });
+
+  it("detects zig fmt", () => {
+    const dir = makeProject("fmt-zig", { "build.zig": "" });
+    const p = detectProfile(dir);
+    expect(p.format).toBe("zig fmt");
+  });
+
+  it("no format for Gradle (spotless not supported per-file)", () => {
+    const dir = makeProject("fmt-gradle", { "build.gradle.kts": "" });
+    const p = detectProfile(dir);
+    expect(p.format).toBeNull();
+  });
+
+  it("no JS formatter when no config file exists", () => {
+    const dir = makeProject("fmt-js-none", {
+      "bun.lock": "",
+      "package.json": JSON.stringify({ scripts: {} }),
+    });
+    const p = detectProfile(dir);
+    expect(p.format).toBeNull();
   });
 });
