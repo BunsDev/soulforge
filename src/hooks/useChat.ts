@@ -6,7 +6,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StreamSegment } from "../components/StreamSegmentList.js";
 import type { LiveToolCall } from "../components/ToolCallDisplay.js";
 import { createForgeAgent } from "../core/agents/index.js";
-import { ReadTracker } from "../core/agents/read-tracker.js";
 import { getSmoothStreamOptions } from "../core/agents/stream-options.js";
 import { onAgentStats, onMultiAgentEvent } from "../core/agents/subagent-events.js";
 import type { SharedCacheRef } from "../core/agents/subagent-tools.js";
@@ -454,8 +453,6 @@ export function useChat({
     })(),
   );
 
-  const readTrackerRef = useRef(new ReadTracker());
-
   useEffect(() => {
     return onFileEdited((absPath, content) => sharedCacheRef.current.updateFile(absPath, content));
   }, []);
@@ -874,8 +871,6 @@ export function useChat({
 
         const newMessages = [summaryMsg, ackMsg, ...recentMessages];
         setCoreMessages(newMessages);
-        readTrackerRef.current.clear();
-
         const trackedFiles = contextManager.getTrackedFiles();
         contextManager.resetConversationTracking();
         for (const f of trackedFiles.edited) {
@@ -1454,7 +1449,6 @@ export function useChat({
           cwd,
           sessionId: sessionIdRef.current,
           sharedCacheRef: sharedCacheRef.current,
-          readTracker: readTrackerRef.current,
           agentFeatures: effectiveConfig.agentFeatures,
           planExecution: planExecutionRef.current,
           drainSteering,
@@ -1491,7 +1485,6 @@ export function useChat({
                           codeExecution: effectiveConfig.codeExecution,
                           cwd,
                           sessionId: sessionIdRef.current,
-                          readTracker: readTrackerRef.current,
                           agentFeatures: effectiveConfig.agentFeatures,
                           planExecution: planExecutionRef.current,
                         });
@@ -2176,13 +2169,7 @@ export function useChat({
                     return ` You are executing plan "${planSnapshot.title}" — ${String(done)}/${String(total)} steps done.${active ? ` Currently on step [${active.id}]: ${active.label}.` : ""}`;
                   })()
                 : "";
-              setTimeout(
-                () =>
-                  handleSubmitRef.current(
-                    `Continue.${planHint}`,
-                  ),
-                0,
-              );
+              setTimeout(() => handleSubmitRef.current(`Continue.${planHint}`), 0);
             })
             .catch(() => {});
         }

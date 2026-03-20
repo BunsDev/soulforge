@@ -211,24 +211,7 @@ function semanticPrune(messages: ModelMessage[], pathMap?: Map<string, string>):
     }
   }
 
-  // Build a map of file path → index of LAST read (for re-read stubbing)
-  const lastReadIdx = new Map<string, number>();
-  if (pathMap) {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i];
-      if (!msg || msg.role !== "tool" || typeof msg.content === "string") continue;
-      if (!Array.isArray(msg.content)) continue;
-      for (const part of msg.content) {
-        if (part.type !== "tool-result") continue;
-        if (part.toolName !== "read_file" && part.toolName !== "read_code") continue;
-        const filePath = pathMap.get(part.toolCallId);
-        if (filePath && !lastReadIdx.has(filePath)) lastReadIdx.set(filePath, i);
-      }
-    }
-  }
-
-  if (firstEditIdx.size === 0 && lastReadIdx.size === 0 && !messages.some((m) => m.role === "tool"))
-    return messages;
+  if (firstEditIdx.size === 0 && !messages.some((m) => m.role === "tool")) return messages;
 
   return messages.map((msg, idx) => {
     if (msg.role !== "tool" || typeof msg.content === "string") return msg;
@@ -250,19 +233,6 @@ function semanticPrune(messages: ModelMessage[], pathMap?: Map<string, string>):
               return {
                 ...part,
                 output: { type: "text" as const, value: "[pruned — file edited since this read]" },
-              };
-            }
-          }
-
-          // 2. Prune read results for files that were LATER re-read (keep latest only)
-          const lastIdx = lastReadIdx.get(filePath);
-          if (lastIdx !== undefined && idx < lastIdx) {
-            const text = extractText(part.output);
-            if (text.length > 200) {
-              changed = true;
-              return {
-                ...part,
-                output: { type: "text" as const, value: "[re-read]" },
               };
             }
           }
@@ -335,7 +305,6 @@ function stripOldEditArgs(messages: ModelMessage[], cutoff: number): ModelMessag
 // It was previously wired into buildPrepareStep but was removed.
 // The main agent relies on v1/v2 compaction for context management.
 // Subagents use semanticPrune + stripOldEditArgs instead (above).
-// ReadTracker (read-tracker.ts) handles re-read prevention at tool execution time.
 // Exported for tests and potential future reactivation.
 
 function compactOldToolResults(

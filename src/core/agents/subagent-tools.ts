@@ -43,7 +43,6 @@ interface SubagentModels {
   sharedCacheRef?: SharedCacheRef;
   agentFeatures?: AgentFeatures;
   skills?: Array<{ name: string; content: string }>;
-  onDispatchReads?: (reads: FileReadRecord[]) => void;
 }
 
 function formatToolArgs(toolCall: { toolName: string; input?: unknown }): string {
@@ -1786,7 +1785,6 @@ export function buildSubagentTools(models: SubagentModels) {
 
             const postParts = [desloppifyResult, verifyResult].filter(Boolean);
             const reads = bus.getFileReadRecords(task.agentId);
-            models.onDispatchReads?.(reads);
             return {
               reads,
               filesEdited: edited,
@@ -1983,7 +1981,6 @@ export function buildSubagentTools(models: SubagentModels) {
           );
 
           const allReads = bus.getFileReadRecords();
-          models.onDispatchReads?.(allReads);
           return {
             reads: allReads,
             filesEdited: editedPaths,
@@ -2075,7 +2072,6 @@ export function buildSubagentTools(models: SubagentModels) {
         if (typeof dispatch !== "string") {
           compact.push(
             "\n---\n**Next step: act on these results.** You have the dispatch output above — plan your implementation, write code, or respond to the user. " +
-              "Reading files that dispatch already returned wastes a tool call (the cache will block the re-read). " +
               "If you need a specific symbol from a large file, use read_file with target + name.",
           );
         }

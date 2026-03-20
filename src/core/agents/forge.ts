@@ -10,7 +10,6 @@ import type {
 } from "../../types/index.js";
 import type { ContextManager } from "../context/manager.js";
 import { EPHEMERAL_CACHE, isAnthropicNative } from "../llm/provider-options.js";
-import { onFileEdited } from "../tools/file-events.js";
 import {
   buildInteractiveTools,
   buildTools,
@@ -20,10 +19,8 @@ import {
 import { readFileTool } from "../tools/read-file.js";
 import { renderTaskList } from "../tools/task-list.js";
 import { normalizePath } from "./agent-bus.js";
-import type { ReadTracker } from "./read-tracker.js";
 import { repairToolCall, sanitizeMessages } from "./stream-options.js";
 import { buildSubagentTools, type SharedCacheRef } from "./subagent-tools.js";
-import { wrapToolsWithReadTracker } from "./tracker-wrap.js";
 
 const RESTRICTED_MODES = new Set<ForgeMode>(["architect", "socratic", "challenge", "plan"]);
 
@@ -103,8 +100,7 @@ function countReadsAfterLastDispatch(messages: ModelMessage[]): number {
   return count;
 }
 
-// No step-level tool result pruning — main agent relies on v1/v2 compaction for context
-// management and ReadTracker for re-read prevention at tool execution time.
+// No step-level tool result pruning — main agent relies on v1/v2 compaction for context management.
 function buildForgePrepareStep(
   isPlanMode: boolean,
   drainSteering?: () => string | null,
@@ -162,9 +158,7 @@ function buildForgePrepareStep(
       const readsAfterDispatch = countReadsAfterLastDispatch(messages);
       if (hasDispatch && readsAfterDispatch >= 2) {
         const hint =
-          readsAfterDispatch >= 4
-            ? "You are re-reading files the dispatch already returned. Stop reading — synthesize what you have and act: edit code, propose a plan, or respond to the user."
-            : "You have dispatch results. Proceed to implementation or respond — additional reads are likely redundant.";
+          "You have dispatch results. Proceed to implementation or respond — additional reads are likely redundant.";
         result.system = result.system ? `${result.system}\n\n${hint}` : hint;
       }
 
@@ -279,7 +273,6 @@ interface ForgeAgentOptions {
   cwd?: string;
   sessionId?: string;
   sharedCacheRef?: SharedCacheRef;
-  readTracker?: ReadTracker;
   agentFeatures?: AgentFeatures;
   planExecution?: boolean;
   drainSteering?: () => string | null;
@@ -314,7 +307,6 @@ export function createForgeAgent({
   cwd,
   sessionId,
   sharedCacheRef,
-  readTracker,
   agentFeatures,
   planExecution,
   drainSteering,
@@ -338,11 +330,6 @@ export function createForgeAgent({
     onApproveDestructive,
   });
 
-  const dispatchReadsCb = readTracker
-    ? (reads: import("./agent-bus.js").FileReadRecord[]) =>
-        readTracker.registerSubagentReads(reads, 0)
-    : undefined;
-
   const subagentTools = isRestricted
     ? {
         dispatch: buildSubagentTools({
@@ -358,7 +345,6 @@ export function createForgeAgent({
           sharedCacheRef,
           agentFeatures,
           skills,
-          onDispatchReads: dispatchReadsCb,
         }).dispatch,
       }
     : buildSubagentTools({
@@ -377,7 +363,6 @@ export function createForgeAgent({
         sharedCacheRef,
         agentFeatures,
         skills,
-        onDispatchReads: dispatchReadsCb,
       });
 
   const cachedReadFile =
@@ -391,11 +376,6 @@ export function createForgeAgent({
     ...subagentTools,
     ...(interactive ? buildInteractiveTools(interactive, { cwd, sessionId }) : {}),
   };
-
-  if (readTracker) {
-    wrapToolsWithReadTracker(allTools, readTracker);
-    onFileEdited((absPath) => readTracker.invalidateFile(absPath));
-  }
 
   const allToolNames = Object.keys(allTools) as (keyof typeof allTools)[];
   const restrictedSet = new Set(RESTRICTED_TOOL_NAMES);
