@@ -869,8 +869,10 @@ export function buildSubagentTools(models: SubagentModels) {
             const done = r.result.startsWith("[done]");
             const status = r.success ? (done ? "✓" : "⚠") : "✗";
             const doneTag = done ? " [done]" : " [no-done]";
+            // Truncate task to first line — main agent already knows what it dispatched
+            const taskSummary = r.task.split("\n")[0]?.slice(0, 200) ?? r.task.slice(0, 200);
             sections.push(
-              `\n### ${status} Agent: ${r.agentId} (${r.role})${doneTag}\nTask: ${r.task}\n\n${r.result}\n\n---`,
+              `\n### ${status} Agent: ${r.agentId} (${r.role})${doneTag}\nTask: ${taskSummary}\n\n${r.result}\n\n---`,
             );
           }
 

@@ -32,6 +32,7 @@ type AgentResult = {
 
 const DONE_RESULT_CAP = 8000;
 const PER_FILE_CONTENT_CAP = 2000;
+const PER_FINDING_DISPLAY_CAP = 500;
 const TEXT_TRUNCATION_CAP = 6000;
 const SYNTHESIS_BUDGET = 8000;
 const SUMMARY_MAX_LEN = 500;
@@ -249,9 +250,14 @@ export function formatDoneResult(done: DoneToolResult): string {
   if (done.keyFindings && done.keyFindings.length > 0) {
     parts.push(
       "\nKey findings:",
-      ...done.keyFindings.map(
-        (f) => `  ${f.file}${f.lineNumbers ? `:${f.lineNumbers}` : ""}: ${f.detail}`,
-      ),
+      ...done.keyFindings.map((f) => {
+        const loc = f.lineNumbers ? `:${f.lineNumbers}` : "";
+        const detail =
+          f.detail.length > PER_FINDING_DISPLAY_CAP
+            ? `${f.detail.slice(0, PER_FINDING_DISPLAY_CAP)} [${String(f.detail.length - PER_FINDING_DISPLAY_CAP)} chars omitted — use read_file for full content]`
+            : f.detail;
+        return `  ${f.file}${loc}: ${detail}`;
+      }),
     );
   }
   if (done.gaps && done.gaps.length > 0) {
