@@ -31,8 +31,6 @@ function getProxyState(): { state: ProxyState; error: string | null } {
   return { state: currentState, error: lastError };
 }
 
-
-
 function ensureConfig(): void {
   if (existsSync(PROXY_CONFIG_PATH)) return;
   mkdirSync(PROXY_CONFIG_DIR, { recursive: true });

@@ -294,7 +294,6 @@ export function isAnthropicNative(modelId: string): boolean {
   return provider === "anthropic" || provider === "proxy";
 }
 
-
 function supportsAnthropicOptions(modelId: string): boolean {
   return getEffectiveCaps(modelId).anthropicOptions;
 }

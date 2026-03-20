@@ -6,10 +6,8 @@ import { EPHEMERAL_CACHE } from "../llm/provider-options.js";
 import { buildSubagentExploreTools, wrapWithBusCache } from "../tools/index.js";
 import type { AgentBus } from "./agent-bus.js";
 import { buildBusTools } from "./bus-tools.js";
-import { ReadTracker } from "./read-tracker.js";
 import { buildPrepareStep, buildSymbolLookup } from "./step-utils.js";
 import { repairToolCall } from "./stream-options.js";
-import { wrapToolsWithReadTracker } from "./tracker-wrap.js";
 
 function exploreBase(): string {
   return [
@@ -19,7 +17,7 @@ function exploreBase(): string {
     "Ask what question you need answered, then pick the RIGHT tool: Where is X defined? = navigate definition. Who calls X? = navigate references. Read one symbol = read_file(target, name). What's in this file? = read_file (once). How widespread? = soul_grep count. What breaks if I change X? = soul_impact. FORBIDDEN: using grep when navigate answers it, reading full files when read_file(target) gives the symbol.",
     "EXTRACTION (paths given): read_file(target, name) for symbols, read_file for config. DISCOVERY (keywords only): one navigate workspace_symbols then read_file(target, name). If nothing, one grep. INVESTIGATION (patterns): soul_grep count then soul_analyze then read hits only.",
     "DEPTH: After reading targets, trace one level of callers (navigate references). Flag disconnects: stated vs actual behavior, missing enforcement, edge cases.",
-    "Re-reads are blocked — if you already read a file or symbol, the result is in your context. Use read_file with target + name for specific symbols instead of re-reading full files.",
+    "Use read_file with target + name for specific symbols instead of re-reading full files.",
     "STEP BUDGET: ~15 tool calls. Past 10 reads = you likely have enough.",
   ].join("\n");
 }
@@ -59,7 +57,6 @@ const exploreOutput = Output.object({
   schema: exploreOutputSchema,
 });
 
-
 interface ExploreAgentOptions {
   bus?: AgentBus;
   agentId?: string;
@@ -93,9 +90,6 @@ export function createExploreAgent(model: LanguageModel, options?: ExploreAgentO
     ...tools,
     ...busTools,
   };
-
-  const tracker = new ReadTracker("subagent");
-  wrapToolsWithReadTracker(allTools, tracker);
 
   const { prepareStep, tokenStop } = buildPrepareStep({
     bus,

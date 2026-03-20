@@ -245,4 +245,3 @@ export function getInstallCommands(name: string): string[] {
 export function getMissingRequired(): PrerequisiteStatus[] {
   return checkPrerequisites().filter((s) => !s.installed && s.prerequisite.required);
 }
-

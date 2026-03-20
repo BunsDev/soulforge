@@ -197,7 +197,6 @@ export async function downloadRegistry(): Promise<MasonPackage[]> {
   }
 }
 
-
 // ─── Package Status ───
 
 function getBinaries(pkg: MasonPackage): string[] {

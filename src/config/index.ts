@@ -197,7 +197,6 @@ export function removeGlobalConfigKeys(keys: string[]): void {
   } catch {}
 }
 
-
 const NESTED_KEYS = [
   "editor",
   "theme",

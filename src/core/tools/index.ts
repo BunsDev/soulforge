@@ -823,7 +823,6 @@ export function planFileName(sessionId?: string): string {
   return sessionId ? `plan-${sessionId}.md` : "plan.md";
 }
 
-
 /** Full code tools for code subagent */
 export function buildCodeTools(
   cwd?: string,

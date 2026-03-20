@@ -9,7 +9,6 @@ export interface ProviderStatus {
   envVar: string;
 }
 
-
 /**
  * Check which providers have API keys configured.
  * Providers with a `checkAvailability` method (e.g. Ollama) are probed async.

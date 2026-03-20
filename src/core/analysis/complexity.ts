@@ -26,4 +26,3 @@ export function analyzeFile(content: string): ComplexityMetrics {
     functionCount,
   };
 }
-
