@@ -37,13 +37,6 @@ export interface ToolResult {
   outlineOnly?: boolean;
 }
 
-export interface ToolDefinition {
-  name: string;
-  description: string;
-  parameters: Record<string, unknown>;
-  execute: (args: Record<string, unknown>) => Promise<ToolResult>;
-}
-
 // ─── Plan / Interactive Types ───
 
 export type PlanStepStatus = "pending" | "active" | "done" | "skipped";
@@ -298,14 +291,6 @@ export type ForgeMode = "default" | "architect" | "socratic" | "challenge" | "pl
 export type ChatStyle = "accent" | "bubble";
 
 export type EditorMode = "chat" | "editor" | "split";
-
-export interface EditorState {
-  mode: EditorMode;
-  currentFile: string | null;
-  cursorLine: number;
-  cursorCol: number;
-  modified: boolean;
-}
 
 export interface EditorIntegration {
   diagnostics: boolean;

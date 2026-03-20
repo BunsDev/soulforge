@@ -1,6 +1,5 @@
 export const BRAND_PURPLE = "#9B30FF";
 export const BRAND_RED = "#FF0040";
-export const BRAND_DIM_PURPLE = "#4a1a6b";
 
 export const WORDMARK = [
   "┌─┐┌─┐┬ ┬┬  ┌─┐┌─┐┬─┐┌─┐┌─┐",
@@ -31,5 +30,3 @@ export const BRAND_SEGMENTS: BrandSegment[] = [
   { text: "Soul", color: BRAND_RED },
   { text: ".com", color: "#555555" },
 ];
-
-export const BRAND_TEXT = BRAND_SEGMENTS.map((s) => s.text).join("");
