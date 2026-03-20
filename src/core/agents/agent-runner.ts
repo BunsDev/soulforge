@@ -206,7 +206,12 @@ export async function runAgentTask(
     tier: taskTier,
   });
   if (task.taskId != null) {
-    taskListTool.execute({ action: "update", id: task.taskId, status: "in-progress" });
+    taskListTool.execute({
+      action: "update",
+      id: task.taskId,
+      status: "in-progress",
+      tabId: task.tabId,
+    });
   }
 
   const peerFindings = bus.summarizeFindings(task.agentId);
@@ -445,7 +450,12 @@ export async function runAgentTask(
         calledDone,
       });
       if (task.taskId != null) {
-        taskListTool.execute({ action: "update", id: task.taskId, status: "done" });
+        taskListTool.execute({
+          action: "update",
+          id: task.taskId,
+          status: "done",
+          tabId: task.tabId,
+        });
       }
       return { doneResult, resultText, callbacks, result: agentResult };
     } catch (error) {
@@ -513,6 +523,7 @@ export async function runAgentTask(
       action: "update",
       id: task.taskId,
       status: salvaged ? "done" : "blocked",
+      tabId: task.tabId,
     });
   }
 

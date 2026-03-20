@@ -11,6 +11,7 @@ import { clearTabSessionPatterns } from "../../core/security/forbidden.js";
 import type { SessionManager } from "../../core/sessions/manager.js";
 import type { PrerequisiteStatus } from "../../core/setup/prerequisites.js";
 import { planFileName } from "../../core/tools/index.js";
+import { disposeTaskScope, setActiveTaskTab } from "../../core/tools/task-list.js";
 import {
   type ChatInstance,
   type TabState,
@@ -121,6 +122,15 @@ export const TabInstance = memo(function TabInstance({
     contextManager.setTabLabel(tabLabel);
   }, [tabId, tabLabel, contextManager]);
 
+  // Set active task tab when this tab becomes visible
+  useEffect(() => {
+    if (visible) setActiveTaskTab(tabId);
+  }, [tabId, visible]);
+
+  // Dispose task scope only on unmount (tab close), not on hide
+  // biome-ignore lint/correctness/useExhaustiveDependencies: cleanup-only on unmount
+  useEffect(() => () => disposeTaskScope(tabId), []);
+
   // Sync shared state into per-tab ContextManager
   useEffect(() => {
     contextManager.setForgeMode(forgeMode);
@@ -169,6 +179,7 @@ export const TabInstance = memo(function TabInstance({
     contextManager,
     sessionManager,
     cwd,
+    tabId,
     openEditorWithFile,
     openEditor,
     onSuspend,
@@ -279,7 +290,7 @@ export const TabInstance = memo(function TabInstance({
   );
 
   const showPlanProgress = !!chat.activePlan;
-  const tasks = useTaskList();
+  const tasks = useTaskList(tabId);
 
   const hasChangedFiles = useMemo(() => {
     for (let i = chat.messages.length - 1; i >= 0; i--) {

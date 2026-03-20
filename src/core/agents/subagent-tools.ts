@@ -6,6 +6,7 @@ import { logBackgroundError } from "../../stores/errors.js";
 import type { AgentFeatures } from "../../types/index.js";
 import type { RepoMap } from "../intelligence/repo-map.js";
 import { getModelContextWindow } from "../llm/models.js";
+import { getActiveTaskTab } from "../tools/task-list.js";
 import { AgentBus, type AgentTask, normalizePath, type SharedCache } from "./agent-bus.js";
 import type { DispatchOutput, DoneToolResult } from "./agent-results.js";
 import {
@@ -676,6 +677,7 @@ export function buildSubagentTools(models: SubagentModels) {
               returnFormat: t.returnFormat,
               dependsOn: t.dependsOn,
               taskId: t.taskId,
+              tabId: getActiveTaskTab() ?? undefined,
             };
           });
 
@@ -1029,19 +1031,19 @@ export function buildSubagentTools(models: SubagentModels) {
           if (dispatch.filesEdited.length > 0) {
             header.push(`Files edited: ${dispatch.filesEdited.join(", ")}`);
           }
-          header.push("Use read_file on specific files if you need full content.\n");
+          header.push("These files are already in context. Do NOT re-read them.\n");
           compact.unshift(...header);
         }
 
         if (truncatedLines > 0) {
           compact.push(
-            `\n[${String(truncatedLines)} lines compacted — use read_file on specific files if you need full content]`,
+            `\n[${String(truncatedLines)} lines compacted — act on these results, do not re-read dispatched files]`,
           );
         }
 
         if (typeof dispatch !== "string") {
           compact.push(
-            "\n---\n**Next step: act on these results.** If you need a specific symbol from a large file, use read_file with target + name.",
+            "\n---\n**Next step: act on these results.** FORBIDDEN: re-reading files that agents already examined. The findings above contain the code you need.",
           );
         }
 

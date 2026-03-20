@@ -49,6 +49,7 @@ export interface AgentTask {
   timeoutMs?: number;
   tier?: TaskTier;
   taskId?: number;
+  tabId?: string;
 }
 
 export interface AgentResult {

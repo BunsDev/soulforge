@@ -10,9 +10,6 @@ export interface Task {
   updated: number;
 }
 
-let nextId = 1;
-const tasks = new Map<number, Task>();
-
 type TaskListAction = "add" | "update" | "remove" | "list" | "clear";
 
 interface TaskListArgs {
@@ -21,23 +18,53 @@ interface TaskListArgs {
   titles?: string[];
   id?: number;
   status?: TaskStatus;
+  tabId?: string;
 }
 
 type TaskChangeListener = (tasks: Task[]) => void;
-const listeners = new Set<TaskChangeListener>();
 
-export function onTaskChange(fn: TaskChangeListener): () => void {
-  listeners.add(fn);
-  return () => listeners.delete(fn);
+interface TaskScope {
+  tasks: Map<number, Task>;
+  nextId: number;
+  listeners: Set<TaskChangeListener>;
 }
 
-function notify(): void {
-  const snapshot = Array.from(tasks.values());
-  for (const fn of listeners) fn(snapshot);
+const scopes = new Map<string, TaskScope>();
+
+let activeTabId: string | null = null;
+
+export function setActiveTaskTab(tabId: string): void {
+  activeTabId = tabId;
 }
 
-export function renderTaskList(): string | null {
-  if (tasks.size === 0) return null;
+export function getActiveTaskTab(): string | null {
+  return activeTabId;
+}
+
+function getScope(tabId?: string): TaskScope {
+  const id = tabId ?? activeTabId ?? "_default";
+  let scope = scopes.get(id);
+  if (!scope) {
+    scope = { tasks: new Map(), nextId: 1, listeners: new Set() };
+    scopes.set(id, scope);
+  }
+  return scope;
+}
+
+function notify(scope: TaskScope): void {
+  const snapshot = Array.from(scope.tasks.values());
+  for (const fn of scope.listeners) fn(snapshot);
+}
+
+export function onTaskChange(fn: TaskChangeListener, tabId?: string): () => void {
+  const scope = getScope(tabId);
+  scope.listeners.add(fn);
+  return () => scope.listeners.delete(fn);
+}
+
+export function renderTaskList(tabId?: string): string | null {
+  const scope = getScope(tabId);
+  if (scope.tasks.size === 0) return null;
 
   const statusIcon: Record<TaskStatus, string> = {
     pending: "○",
@@ -47,46 +74,59 @@ export function renderTaskList(): string | null {
   };
 
   const lines = ["## Active Tasks"];
-  for (const t of tasks.values()) {
+  for (const t of scope.tasks.values()) {
     lines.push(`${statusIcon[t.status]} [${String(t.id)}] ${t.title} (${t.status})`);
   }
   return lines.join("\n");
 }
 
-export function clearTasks(): void {
-  tasks.clear();
-  nextId = 1;
-  notify();
+export function clearTasks(tabId?: string): void {
+  const scope = getScope(tabId);
+  scope.tasks.clear();
+  scope.nextId = 1;
+  notify(scope);
 }
 
-export function resetInProgressTasks(): void {
+export function resetInProgressTasks(tabId?: string): void {
+  const scope = getScope(tabId);
   let changed = false;
-  for (const task of tasks.values()) {
+  for (const task of scope.tasks.values()) {
     if (task.status === "in-progress") {
       task.status = "pending";
       task.updated = Date.now();
       changed = true;
     }
   }
-  if (changed) notify();
+  if (changed) notify(scope);
 }
 
-export function completeInProgressTasks(): void {
+export function completeInProgressTasks(tabId?: string): void {
+  const scope = getScope(tabId);
   let changed = false;
-  for (const task of tasks.values()) {
+  for (const task of scope.tasks.values()) {
     if (task.status === "in-progress") {
       task.status = "done";
       task.updated = Date.now();
       changed = true;
     }
   }
-  if (changed) notify();
+  if (changed) notify(scope);
+}
+
+export function disposeTaskScope(tabId: string): void {
+  const scope = scopes.get(tabId);
+  if (scope) {
+    scope.tasks.clear();
+    scope.listeners.clear();
+    scopes.delete(tabId);
+  }
 }
 
 export const taskListTool = {
   name: "task_list",
   description: "Session task scratchpad. Actions: add, update, remove, list, clear.",
   execute: async (args: TaskListArgs): Promise<ToolResult> => {
+    const scope = getScope(args.tabId);
     try {
       switch (args.action) {
         case "add": {
@@ -101,8 +141,8 @@ export const taskListTool = {
           const added: string[] = [];
           const now = Date.now();
           for (const title of titlesToAdd) {
-            const id = nextId++;
-            tasks.set(id, {
+            const id = scope.nextId++;
+            scope.tasks.set(id, {
               id,
               title,
               status: args.status ?? "pending",
@@ -111,7 +151,7 @@ export const taskListTool = {
             });
             added.push(`#${String(id)} ${title}`);
           }
-          notify();
+          notify(scope);
           return {
             success: true,
             output:
@@ -125,7 +165,7 @@ export const taskListTool = {
           if (!args.id) {
             return { success: false, output: "id is required for update", error: "missing id" };
           }
-          const task = tasks.get(args.id);
+          const task = scope.tasks.get(args.id);
           if (!task) {
             return {
               success: false,
@@ -136,7 +176,7 @@ export const taskListTool = {
           if (args.status) task.status = args.status;
           if (args.title) task.title = args.title;
           task.updated = Date.now();
-          notify();
+          notify(scope);
           return {
             success: true,
             output: `Task #${String(task.id)}: ${task.title} → ${task.status}`,
@@ -147,7 +187,7 @@ export const taskListTool = {
           if (!args.id) {
             return { success: false, output: "id is required for remove", error: "missing id" };
           }
-          const existed = tasks.delete(args.id);
+          const existed = scope.tasks.delete(args.id);
           if (!existed) {
             return {
               success: false,
@@ -155,25 +195,25 @@ export const taskListTool = {
               error: "not found",
             };
           }
-          notify();
+          notify(scope);
           return { success: true, output: `Task #${String(args.id)} removed` };
         }
 
         case "list": {
-          if (tasks.size === 0) {
+          if (scope.tasks.size === 0) {
             return { success: true, output: "No tasks." };
           }
           const lines: string[] = [];
-          for (const t of tasks.values()) {
+          for (const t of scope.tasks.values()) {
             lines.push(`#${String(t.id)} [${t.status}] ${t.title}`);
           }
           return { success: true, output: lines.join("\n") };
         }
 
         case "clear": {
-          const count = tasks.size;
-          tasks.clear();
-          notify();
+          const count = scope.tasks.size;
+          scope.tasks.clear();
+          notify(scope);
           return { success: true, output: `Cleared ${String(count)} task(s).` };
         }
 

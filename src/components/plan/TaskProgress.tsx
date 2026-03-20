@@ -128,8 +128,8 @@ export function TaskProgress() {
   return <TaskList tasks={tasks} />;
 }
 
-export function useTaskList(): Task[] {
+export function useTaskList(tabId?: string): Task[] {
   const [tasks, setTasks] = useState<Task[]>([]);
-  useEffect(() => onTaskChange(setTasks), []);
+  useEffect(() => onTaskChange(setTasks, tabId), [tabId]);
   return tasks;
 }

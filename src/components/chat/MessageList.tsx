@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { TextAttributes } from "@opentui/core";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, type ReactNode, useEffect, useMemo, useState } from "react";
 import { icon } from "../../core/icons.js";
 import {
   CATEGORY_COLORS,
@@ -393,6 +393,31 @@ function WritePlanCall({ tc }: { tc: ToolCall }) {
   );
 }
 
+const TRUNCATE_THRESHOLD = 10;
+const TRUNCATE_HEAD = 4;
+const TRUNCATE_TAIL = 4;
+
+function truncateUserContent(content: string, expanded: boolean): ReactNode {
+  const lines = content.split("\n");
+  if (expanded || lines.length <= TRUNCATE_THRESHOLD) {
+    return <text>{content}</text>;
+  }
+  const head = lines.slice(0, TRUNCATE_HEAD).join("\n");
+  const tail = lines.slice(-TRUNCATE_TAIL).join("\n");
+  const hidden = lines.length - TRUNCATE_HEAD - TRUNCATE_TAIL;
+  return (
+    <box flexDirection="column">
+      <text>{head}</text>
+      <text fg="#555">
+        {"// <+"}
+        {String(hidden)}
+        {" lines> //"}
+      </text>
+      <text>{tail}</text>
+    </box>
+  );
+}
+
 function isPlanExecution(content: string): boolean {
   return content.startsWith("Execute this plan.");
 }
@@ -468,7 +493,7 @@ const UserMessageAccent = memo(function UserMessageAccent({ msg }: { msg: ChatMe
           )}
         </text>
       ) : (
-        <text>{msg.content}</text>
+        truncateUserContent(msg.content, expanded)
       )}
     </box>
   );
@@ -476,6 +501,7 @@ const UserMessageAccent = memo(function UserMessageAccent({ msg }: { msg: ChatMe
 
 const UserMessageBubble = memo(function UserMessageBubble({ msg }: { msg: ChatMessage }) {
   const time = formatTime(msg.timestamp);
+  const expanded = useUIStore((s) => s.reasoningExpanded);
 
   return (
     <box flexDirection="column" alignItems="flex-end" marginBottom={1}>
@@ -487,7 +513,7 @@ const UserMessageBubble = memo(function UserMessageBubble({ msg }: { msg: ChatMe
         paddingY={1}
         backgroundColor="#0a1218"
       >
-        <text>{msg.content}</text>
+        {truncateUserContent(msg.content, expanded)}
       </box>
       <text fg="#555"> You · {time}</text>
     </box>

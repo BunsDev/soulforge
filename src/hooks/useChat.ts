@@ -95,6 +95,7 @@ export interface UseChatOptions {
   contextManager: ContextManager;
   sessionManager: SessionManager;
   cwd: string;
+  tabId: string;
   openEditorWithFile: (file: string) => void;
   openEditor: () => void;
   onSuspend: (opts: { command: string; args?: string[]; noAltScreen?: boolean }) => void;
@@ -153,6 +154,7 @@ export function useChat({
   contextManager,
   sessionManager,
   cwd,
+  tabId,
   openEditorWithFile,
   openEditor,
   initialState,
@@ -1858,7 +1860,7 @@ export function useChat({
         setStreamingChars(0);
         setStreamSegments([]);
         setLiveToolCalls([]);
-        completeInProgressTasks();
+        completeInProgressTasks(tabId);
       } catch (err: unknown) {
         if (flushTimerRef.current) {
           clearInterval(flushTimerRef.current);
@@ -1968,7 +1970,7 @@ export function useChat({
         setStreamingChars(0);
         setStreamSegments([]);
         setLiveToolCalls([]);
-        resetInProgressTasks();
+        resetInProgressTasks(tabId);
       } finally {
         unsubAgentStats();
         unsubMultiAgent();
@@ -2124,6 +2126,7 @@ export function useChat({
       syncV2Slots,
       promptOutsideCwd,
       promptDestructive,
+      tabId,
     ],
   );
   handleSubmitRef.current = handleSubmit;
@@ -2170,7 +2173,7 @@ export function useChat({
       abortRef.current.abort();
       abortRef.current = null;
       setIsLoading(false);
-      resetInProgressTasks();
+      resetInProgressTasks(tabId);
       setLiveToolCalls([]);
       setStreamSegments([]);
       messageQueueRef.current = [];
@@ -2183,7 +2186,7 @@ export function useChat({
       segmentsDirty.current = false;
       toolCallsDirty.current = false;
     }
-  }, [setActivePlan]);
+  }, [setActivePlan, tabId]);
 
   // Snapshot current state for tab switching
   const snapshot = useCallback(
