@@ -89,11 +89,14 @@ Supports installation via npm, pip, cargo, go, and GitHub binaries.
 | `/memory` | Memory system — title-only memories searchable by FTS5 |
 | `/compact-v2-logs` | View compaction event history with token breakdowns |
 
-## Sessions & Tabs
+## Sessions & Export
 
 | Command | Description |
 |---------|-------------|
 | `/sessions` | Browse and restore past sessions (fuzzy search, metadata, size) |
+| `/export` | Export current tab to markdown file |
+| `/export json` | Export current tab as JSON file |
+| `/export clipboard` | Copy current tab to clipboard (markdown) |
 | `/new-tab` | Open a new tab |
 | `/close-tab` | Close current tab |
 | `/rename` | Rename current tab |

@@ -1,7 +1,15 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { TextAttributes } from "@opentui/core";
-import { memo, type ReactNode, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  memo,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { icon } from "../../core/icons.js";
 import {
   CATEGORY_COLORS,
@@ -10,7 +18,6 @@ import {
   TOOL_LABELS,
   type ToolCategory,
 } from "../../core/tool-display.js";
-import { useUIStore } from "../../stores/ui.js";
 import type {
   ChatMessage,
   ChatStyle,
@@ -22,6 +29,12 @@ import { StructuredPlanView } from "../plan/StructuredPlanView.js";
 import { DiffView } from "./DiffView.js";
 import { Markdown, useCodeExpanded } from "./Markdown.js";
 import { ReasoningBlock } from "./ReasoningBlock.js";
+
+const ReasoningExpandedContext = createContext(false);
+export const ReasoningExpandedProvider = ReasoningExpandedContext.Provider;
+function useReasoningExpanded(): boolean {
+  return useContext(ReasoningExpandedContext);
+}
 
 const REVEAL_INTERVAL = 30;
 const MAX_REVEAL_STEPS = 15;
@@ -230,7 +243,7 @@ function cleanErrorForDisplay(error: string): string {
 }
 
 function ToolCallRow({ tc }: { tc: ToolCall }) {
-  const errorsExpanded = useUIStore((s) => s.reasoningExpanded);
+  const errorsExpanded = useReasoningExpanded();
   const { icon, iconColor, label, category: staticCategory } = resolveToolDisplay(tc.name);
   const backend = parseBackend(tc.result);
   const category = backend ?? staticCategory;
@@ -445,7 +458,7 @@ function parsePlanTitle(content: string): string {
 
 const UserMessageAccent = memo(function UserMessageAccent({ msg }: { msg: ChatMessage }) {
   const time = formatTime(msg.timestamp);
-  const expanded = useUIStore((s) => s.reasoningExpanded);
+  const expanded = useReasoningExpanded();
   const isPlan = isPlanExecution(msg.content);
   const borderColor = USER_COLOR;
 
@@ -517,7 +530,7 @@ const UserMessageAccent = memo(function UserMessageAccent({ msg }: { msg: ChatMe
 
 const UserMessageBubble = memo(function UserMessageBubble({ msg }: { msg: ChatMessage }) {
   const time = formatTime(msg.timestamp);
-  const expanded = useUIStore((s) => s.reasoningExpanded);
+  const expanded = useReasoningExpanded();
 
   return (
     <box flexDirection="column" alignItems="flex-end" marginBottom={1}>

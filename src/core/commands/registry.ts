@@ -103,6 +103,7 @@ const COMMAND_DEFS: CommandDef[] = [
   { cmd: "/errors", ic: "error", desc: "Browse error log" },
   { cmd: "/export", ic: "changes", desc: "Export chat to markdown" },
   { cmd: "/export json", ic: "changes", desc: "Export chat as JSON" },
+  { cmd: "/export clipboard", ic: "changes", desc: "Copy chat to clipboard (markdown)" },
   { cmd: "/force-claim", ic: "lock", desc: "Steal a file claim from another tab" },
   { cmd: "/font", ic: "pencil", desc: "Show/set terminal font" },
   { cmd: "/git", ic: "git", desc: "Git menu" },

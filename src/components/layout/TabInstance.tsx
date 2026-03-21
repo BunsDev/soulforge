@@ -24,7 +24,7 @@ import { useUIStore } from "../../stores/ui.js";
 import type { AppConfig, ChatMessage, EditorIntegration } from "../../types/index.js";
 import { InputBox } from "../chat/InputBox.js";
 import { CodeExpandedProvider } from "../chat/Markdown.js";
-import { RAIL_BORDER, StaticMessage } from "../chat/MessageList.js";
+import { RAIL_BORDER, ReasoningExpandedProvider, StaticMessage } from "../chat/MessageList.js";
 import { StreamSegmentList } from "../chat/StreamSegmentList.js";
 import { PlanProgress } from "../plan/PlanProgress.js";
 import { PlanReviewPrompt } from "../plan/PlanReviewPrompt.js";
@@ -272,22 +272,24 @@ export const TabInstance = memo(function TabInstance({
   const hasContent = nonSystemCount > 0 || isStreaming;
 
   const {
-    codeExpanded,
+    codeExpandedMap,
     changesExpanded,
     chatStyle,
     editorSplit,
     showReasoning,
-    reasoningExpanded,
+    reasoningExpandedMap,
   } = useUIStore(
     useShallow((s) => ({
-      codeExpanded: s.codeExpanded,
+      codeExpandedMap: s.codeExpanded,
       changesExpanded: s.changesExpanded,
       chatStyle: s.chatStyle,
       editorSplit: s.editorSplit,
       showReasoning: s.showReasoning,
-      reasoningExpanded: s.reasoningExpanded,
+      reasoningExpandedMap: s.reasoningExpanded,
     })),
   );
+  const codeExpanded = !!codeExpandedMap[tabId];
+  const reasoningExpanded = !!reasoningExpandedMap[tabId];
 
   const showPlanProgress = !!chat.activePlan;
   const tasks = useTaskList(tabId);
@@ -417,48 +419,50 @@ export const TabInstance = memo(function TabInstance({
               style={SCROLLBOX_STYLE}
             >
               <CodeExpandedProvider value={codeExpanded}>
-                {hiddenCount > 0 && (
-                  <box paddingX={1} marginBottom={1}>
-                    <text fg="#444">
-                      ── {String(hiddenCount)} earlier message{hiddenCount > 1 ? "s" : ""} ──
-                    </text>
-                  </box>
-                )}
-                {visibleMessages.map((msg) => (
-                  <StaticMessage
-                    key={msg.id}
-                    msg={msg}
-                    chatStyle={chatStyle}
-                    diffStyle={effectiveConfig.diffStyle}
-                    showReasoning={showReasoning}
-                    reasoningExpanded={reasoningExpanded}
-                    animate={false}
-                  />
-                ))}
-                {isStreaming && (
-                  <box paddingX={1} flexShrink={0} marginBottom={1}>
-                    <box
-                      flexDirection="column"
-                      border={["left"]}
-                      borderColor="#9B30FF"
-                      customBorderChars={RAIL_BORDER}
-                      paddingLeft={2}
-                    >
-                      <box>
-                        <text fg="#9B30FF">{icon("ai")} Forge</text>
-                      </box>
-                      <StreamSegmentList
-                        segments={chat.streamSegments}
-                        toolCalls={chat.liveToolCalls}
-                        streaming={chat.isLoading}
-                        verbose={effectiveConfig.verbose === true}
-                        diffStyle={effectiveConfig.diffStyle}
-                        showReasoning={showReasoning}
-                        reasoningExpanded={reasoningExpanded}
-                      />
+                <ReasoningExpandedProvider value={reasoningExpanded}>
+                  {hiddenCount > 0 && (
+                    <box paddingX={1} marginBottom={1}>
+                      <text fg="#444">
+                        ── {String(hiddenCount)} earlier message{hiddenCount > 1 ? "s" : ""} ──
+                      </text>
                     </box>
-                  </box>
-                )}
+                  )}
+                  {visibleMessages.map((msg) => (
+                    <StaticMessage
+                      key={msg.id}
+                      msg={msg}
+                      chatStyle={chatStyle}
+                      diffStyle={effectiveConfig.diffStyle}
+                      showReasoning={showReasoning}
+                      reasoningExpanded={reasoningExpanded}
+                      animate={false}
+                    />
+                  ))}
+                  {isStreaming && (
+                    <box paddingX={1} flexShrink={0} marginBottom={1}>
+                      <box
+                        flexDirection="column"
+                        border={["left"]}
+                        borderColor="#9B30FF"
+                        customBorderChars={RAIL_BORDER}
+                        paddingLeft={2}
+                      >
+                        <box>
+                          <text fg="#9B30FF">{icon("ai")} Forge</text>
+                        </box>
+                        <StreamSegmentList
+                          segments={chat.streamSegments}
+                          toolCalls={chat.liveToolCalls}
+                          streaming={chat.isLoading}
+                          verbose={effectiveConfig.verbose === true}
+                          diffStyle={effectiveConfig.diffStyle}
+                          showReasoning={showReasoning}
+                          reasoningExpanded={reasoningExpanded}
+                        />
+                      </box>
+                    </box>
+                  )}
+                </ReasoningExpandedProvider>
               </CodeExpandedProvider>
               <LoadingStatus
                 isLoading={chat.isLoading}

@@ -5,6 +5,15 @@ import { sysMsg } from "./utils.js";
 async function handleExport(input: string, ctx: CommandContext): Promise<void> {
   const trimmed = input.trim();
   const arg = trimmed.slice(7).trim();
+
+  if (arg === "clipboard" || arg === "clip") {
+    const { exportToClipboard } = await import("../sessions/export.js");
+    const tabLabel = ctx.tabMgr.activeTab?.label ?? "chat";
+    const result = exportToClipboard(ctx.chat.messages, tabLabel);
+    sysMsg(ctx, `Copied ${String(result.messageCount)} messages to clipboard (${result.format})`);
+    return;
+  }
+
   const format = arg === "json" ? "json" : "markdown";
   const outPath = arg && arg !== "json" && arg !== "md" && arg !== "markdown" ? arg : undefined;
   const { exportChat } = await import("../sessions/export.js");

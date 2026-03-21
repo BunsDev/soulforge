@@ -55,11 +55,11 @@ interface UIState {
   commandPickerConfig: CommandPickerConfig | null;
   infoPopupConfig: InfoPopupConfig | null;
 
-  codeExpanded: boolean;
+  codeExpanded: Record<string, boolean>;
   changesExpanded: boolean;
   chatStyle: ChatStyle;
   showReasoning: boolean;
-  reasoningExpanded: boolean;
+  reasoningExpanded: Record<string, boolean>;
   suspended: boolean;
   editorSplit: number;
 
@@ -74,15 +74,15 @@ interface UIState {
   openInfoPopup: (config: InfoPopupConfig) => void;
   closeInfoPopup: () => void;
 
-  toggleCodeExpanded: () => void;
-  setCodeExpanded: (v: boolean) => void;
+  toggleCodeExpanded: (tabId: string) => void;
+  setCodeExpanded: (tabId: string, v: boolean) => void;
   toggleChangesExpanded: () => void;
   setChangesExpanded: (v: boolean) => void;
   setChatStyle: (style: ChatStyle) => void;
   setShowReasoning: (v: boolean) => void;
   toggleShowReasoning: () => void;
-  toggleReasoningExpanded: () => void;
-  toggleAllExpanded: () => void;
+  toggleReasoningExpanded: (tabId: string) => void;
+  toggleAllExpanded: (tabId: string) => void;
   setSuspended: (v: boolean) => void;
   cycleEditorSplit: () => void;
 }
@@ -94,11 +94,11 @@ export const useUIStore = create<UIState>()(
     commandPickerConfig: null,
     infoPopupConfig: null,
 
-    codeExpanded: false,
+    codeExpanded: {},
     changesExpanded: false,
     chatStyle: "accent",
     showReasoning: true,
-    reasoningExpanded: false,
+    reasoningExpanded: {},
     suspended: false,
     editorSplit: 60,
 
@@ -139,19 +139,26 @@ export const useUIStore = create<UIState>()(
         modals: { ...s.modals, infoPopup: false },
       })),
 
-    toggleCodeExpanded: () => set((s) => ({ codeExpanded: !s.codeExpanded })),
-    setCodeExpanded: (v) => set({ codeExpanded: v }),
+    toggleCodeExpanded: (tabId) =>
+      set((s) => ({ codeExpanded: { ...s.codeExpanded, [tabId]: !s.codeExpanded[tabId] } })),
+    setCodeExpanded: (tabId, v) =>
+      set((s) => ({ codeExpanded: { ...s.codeExpanded, [tabId]: v } })),
     toggleChangesExpanded: () => set((s) => ({ changesExpanded: !s.changesExpanded })),
     setChangesExpanded: (v) => set({ changesExpanded: v }),
     setChatStyle: (style) => set({ chatStyle: style }),
     setShowReasoning: (v) => set({ showReasoning: v }),
     toggleShowReasoning: () => set((s) => ({ showReasoning: !s.showReasoning })),
-    toggleReasoningExpanded: () => set((s) => ({ reasoningExpanded: !s.reasoningExpanded })),
-    toggleAllExpanded: () =>
+    toggleReasoningExpanded: (tabId) =>
+      set((s) => ({
+        reasoningExpanded: { ...s.reasoningExpanded, [tabId]: !s.reasoningExpanded[tabId] },
+      })),
+    toggleAllExpanded: (tabId) =>
       set((s) => {
-        // If anything is expanded, collapse all. Otherwise expand all.
-        const anyExpanded = s.codeExpanded || s.reasoningExpanded;
-        return { codeExpanded: !anyExpanded, reasoningExpanded: !anyExpanded };
+        const anyExpanded = !!s.codeExpanded[tabId] || !!s.reasoningExpanded[tabId];
+        return {
+          codeExpanded: { ...s.codeExpanded, [tabId]: !anyExpanded },
+          reasoningExpanded: { ...s.reasoningExpanded, [tabId]: !anyExpanded },
+        };
       }),
     setSuspended: (v) => set({ suspended: v }),
     cycleEditorSplit: () =>
@@ -171,11 +178,11 @@ export function resetUIStore(): void {
     routerSlotPicking: null,
     commandPickerConfig: null,
     infoPopupConfig: null,
-    codeExpanded: false,
+    codeExpanded: {},
     changesExpanded: false,
     chatStyle: "accent",
     showReasoning: true,
-    reasoningExpanded: false,
+    reasoningExpanded: {},
     suspended: false,
   });
 }

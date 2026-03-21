@@ -156,6 +156,33 @@ interface ExportResult {
   format: "markdown" | "json";
 }
 
+interface ClipboardResult {
+  messageCount: number;
+  format: "markdown";
+}
+
+export function exportToClipboard(messages: ChatMessage[], title?: string): ClipboardResult {
+  const label = title ?? "Chat Export";
+  const content = exportToMarkdown(messages, label);
+
+  // Write to system clipboard via pbcopy/xclip/xsel
+  const platform = process.platform;
+  const cmd =
+    platform === "darwin"
+      ? ["pbcopy"]
+      : platform === "win32"
+        ? ["clip"]
+        : ["xclip", "-selection", "clipboard"];
+
+  const proc = Bun.spawnSync(cmd, { stdin: new TextEncoder().encode(content) });
+  if (proc.exitCode !== 0) {
+    throw new Error(`Failed to copy to clipboard: ${proc.stderr?.toString() ?? "unknown error"}`);
+  }
+
+  const visible = messages.filter((m) => m.role !== "system" || m.showInChat).length;
+  return { messageCount: visible, format: "markdown" };
+}
+
 export function exportChat(
   messages: ChatMessage[],
   opts: { format?: "markdown" | "json"; outPath?: string; title?: string; cwd: string },

@@ -57,7 +57,7 @@ export function useGlobalKeyboard({
       return;
     }
     if (evt.ctrl && evt.name === "o")
-      return consume(() => useUIStore.getState().toggleAllExpanded());
+      return consume(() => useUIStore.getState().toggleAllExpanded(tabMgr.activeTabId));
 
     // Copy must be checked BEFORE snap-scroll (scroll can invalidate selection)
     if ((evt.ctrl || evt.super) && evt.name === "c") {

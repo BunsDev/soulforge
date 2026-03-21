@@ -98,6 +98,7 @@ export const InputBox = memo(function InputBox({
   const lineCountRef = useRef(1);
   // Guard: when true, handleContentChange skips historyIdx reset (programmatic setText)
   const isNavigatingHistory = useRef(false);
+  const pendingCursorEnd = useRef(false);
   // Visual line count (after char-wrapping) for textarea height
   const [visualLines, setVisualLines] = useState(1);
   // Paste blocks: collapsed pasted text regions
@@ -332,6 +333,18 @@ export const InputBox = memo(function InputBox({
     cursorLineRef.current = event.line;
   }, []);
 
+  // After fuzzy history selection, the textarea remounts — move cursor to end
+  useEffect(() => {
+    if (!fuzzyMode && pendingCursorEnd.current) {
+      pendingCursorEnd.current = false;
+      // Small delay to let the textarea mount and set initialValue
+      const t = setTimeout(() => {
+        textareaRef.current?.gotoBufferEnd();
+      }, 0);
+      return () => clearTimeout(t);
+    }
+  }, [fuzzyMode]);
+
   // Recalculate visual lines on terminal width change
   useEffect(() => {
     setVisualLines(calcVisualLines(valueRef.current));
@@ -402,8 +415,7 @@ export const InputBox = memo(function InputBox({
         if (selected) {
           isNavigatingHistory.current = true;
           setValue(selected.entry);
-          textareaRef.current?.setText(selected.entry);
-          textareaRef.current?.gotoBufferEnd();
+          pendingCursorEnd.current = true;
           lineCountRef.current = (selected.entry.match(/\n/g)?.length ?? 0) + 1;
           cursorLineRef.current = 0;
         }
