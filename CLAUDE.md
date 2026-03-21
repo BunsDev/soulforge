@@ -6,7 +6,7 @@ AI-Powered Terminal IDE by proxySoul.
 
 - **Runtime**: Bun (not Node.js)
 - **Language**: TypeScript (strict mode)
-- **TUI**: Ink (React for CLIs)
+- **TUI**: OpenTUI (React for terminal UIs)
 - **LLM**: Vercel AI SDK (multi-provider)
 - **Editor**: Neovim (embedded via msgpack-RPC)
 - **Linter/Formatter**: Biome

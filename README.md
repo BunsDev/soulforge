@@ -9,7 +9,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-BSL%201.1-blue.svg" alt="License" /></a>
   <a href="#"><img src="https://img.shields.io/badge/version-1.0.0-brightgreen.svg" alt="Version" /></a>
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-strict-blue.svg" alt="TypeScript" /></a>
-  <a href="#testing"><img src="https://img.shields.io/badge/tests-1262%20passing-brightgreen.svg" alt="Tests" /></a>
+  <a href="#testing"><img src="https://img.shields.io/badge/tests-1922%20passing-brightgreen.svg" alt="Tests" /></a>
   <a href="https://bun.sh"><img src="https://img.shields.io/badge/runtime-Bun-f472b6.svg" alt="Bun" /></a>
 </p>
 
@@ -103,8 +103,14 @@ Type messages while the agent is working — they queue up and inject into the n
 <tr>
 <td>
 
+### Cross-Tab Coordination
+Up to 5 concurrent tabs with advisory file claims. Agents see what other tabs are editing, get warnings on contested files, and git operations are blocked during active dispatch. `/claims` to inspect, `/force-claim` to override.
+
+</td>
+<td>
+
 ### Project Toolchain
-Auto-detects lint, typecheck, test, and build commands across 16 ecosystems from config files. Pre-commit gate blocks `git commit` on lint/type errors. Monorepo package discovery. [Deep dive →](docs/project-tool.md)
+Auto-detects lint, typecheck, test, and build commands across 22 ecosystems from config files. Pre-commit gate blocks `git commit` on lint/type errors. Monorepo package discovery. [Deep dive →](docs/project-tool.md)
 
 </td>
 <td>
@@ -277,7 +283,7 @@ soulforge --version                          # Version info
 
 ### Slash Commands
 
-60 commands available — press `/` or `Ctrl+K` to browse. Key ones by category:
+73 commands available — press `/` or `Ctrl+K` to browse. Key ones by category:
 
 **Models & Providers**
 `/model` `/router` `/provider` `/model-scope`
@@ -298,7 +304,10 @@ soulforge --version                          # Version info
 `/compact` `/context` `/memory` `/compaction` `/instructions`
 
 **Sessions & Tabs**
-`/sessions` `/new-tab` `/close-tab` `/rename` `/tabs`
+`/sessions` `/new-tab` `/close-tab` `/rename` `/tabs` `/claims` `/unclaim-all` `/force-claim`
+
+**Files & Changes**
+`/changes` `/files` `/open <file>`
 
 **System**
 `/setup` `/skills` `/privacy` `/storage` `/errors` `/status` `/proxy`
@@ -310,6 +319,7 @@ soulforge --version                          # Version info
 | Mode | Description |
 |------|-------------|
 | **default** | Full agent — reads and writes code |
+| **auto** | Full tool access, executes immediately, minimal questions |
 | **architect** | Read-only design and architecture |
 | **socratic** | Questions first, then suggestions |
 | **challenge** | Adversarial review, finds flaws |
@@ -345,7 +355,7 @@ SoulForge ships 30+ tools organized by capability:
 
 | Tool | What it does |
 |------|-------------|
-| `project` | Auto-detected lint, test, build, typecheck across [16 ecosystems](#project-toolchain-detection) |
+| `project` | Auto-detected lint, format, test, build, typecheck across [22 ecosystems](#project-toolchain-detection) |
 | `project(list)` | Discover monorepo packages with per-package capabilities |
 | `dispatch` | Parallel multi-agent execution (up to 8 agents, 3 concurrent) |
 | `git` | Structured git operations with auto co-author tracking |
@@ -580,7 +590,7 @@ See [GETTING_STARTED.md](GETTING_STARTED.md) for the full reference.
 ## Testing
 
 ```bash
-bun test              # 1262 tests across 27 files
+bun test              # 1922 tests across 39 files
 bun run typecheck     # tsc --noEmit
 bun run lint          # biome check (lint + format)
 bun run lint:fix      # auto-fix
@@ -592,7 +602,7 @@ bun run lint:fix      # auto-fix
 
 | Document | Description |
 |----------|-------------|
-| **[Command Reference](docs/commands-reference.md)** | All 60 slash commands by category |
+| **[Command Reference](docs/commands-reference.md)** | All 73 slash commands by category |
 | **[Headless Mode](docs/headless.md)** | Non-interactive CLI for CI/CD, scripting, automation |
 | **[Architecture](docs/architecture.md)** | System overview, data flow, component lifecycle |
 | **[Repo Map](docs/repo-map.md)** | PageRank, cochange, blast radius, clone detection |
@@ -635,7 +645,6 @@ SoulForge TUI              Full experience (what you're looking at now)
 **Planned:**
 - **Monorepo graph support** — cross-package dependency tracking for pnpm/npm/yarn workspaces, Cargo workspaces, Go workspaces (`go.work`), Nx/Turborepo, and Bazel/Buck. Currently the repo map treats each workspace root as an isolated unit — cross-package imports resolve as external dependencies instead of internal edges. This means PageRank, blast radius, and unused export detection don't span package boundaries.
 - **Benchmarks** — side-by-side comparisons: tool calls, edit accuracy, token efficiency on large codebases
-- **Multi-tab coordination** — worktree isolation + shared awareness board across concurrent sessions
 - **Orchestrated workflows** — sequential agent handoffs (planner → TDD → reviewer → security)
 
 ---

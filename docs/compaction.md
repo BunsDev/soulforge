@@ -4,7 +4,7 @@ SoulForge supports two compaction strategies for managing long conversations. Wh
 
 ## Strategies
 
-### V1 — LLM Batch Summarization (default)
+### V1 — LLM Batch Summarization
 
 The original approach. When compaction triggers:
 
@@ -15,7 +15,7 @@ The original approach. When compaction triggers:
 
 **Cost**: One LLM call processing potentially 100k+ chars, outputting up to 8192 tokens.
 
-### V2 — Incremental Structured Extraction
+### V2 — Incremental Structured Extraction (default)
 
 Maintains a `WorkingStateManager` that extracts structured state **as the conversation happens**, not in a batch at compaction time.
 
@@ -42,7 +42,7 @@ Maintains a `WorkingStateManager` that extracts structured state **as the conver
 // ~/.soulforge/config.json (global) or .soulforge/config.json (project)
 {
   "compaction": {
-    "strategy": "v2",           // "v1" (default) | "v2"
+    "strategy": "v2",           // "v2" (default) | "v1"
     "triggerThreshold": 0.7,    // auto-compact at 70% context usage
     "resetThreshold": 0.4,      // hysteresis reset to prevent oscillation
     "keepRecent": 4,            // verbatim recent messages to preserve
@@ -52,7 +52,7 @@ Maintains a `WorkingStateManager` that extracts structured state **as the conver
 }
 ```
 
-All fields are optional. Omitting `compaction` or `strategy` defaults to v1 with no behavior change.
+All fields are optional. Omitting `compaction` or `strategy` defaults to v2.
 
 ### Live toggle
 
