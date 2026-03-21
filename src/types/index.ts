@@ -31,6 +31,8 @@ export interface ToolResult {
   backend?: string;
   /** True when read_file returned only an outline (large file) — tracker should not cache this as a full read */
   outlineOnly?: boolean;
+  /** Files edited by dispatch tool — used by /changes panel to track per-tab edits */
+  filesEdited?: string[];
 }
 
 export type PlanStepStatus = "pending" | "active" | "done" | "skipped";
@@ -204,7 +206,7 @@ export interface CompactionConfig {
 }
 
 export interface AgentFeatures {
-  /** Run a cleanup agent after code agents to remove sloppy patterns. Default: true (when desloppify model is set in /router) */
+  /** Run a cleanup agent after code agents to remove sloppy patterns. Default: false — enable via /agent-features or config */
   desloppify?: boolean;
   /** Auto-classify tasks as trivial and route to cheaper models. Default: true (when trivial model is set in /router) */
   tierRouting?: boolean;
@@ -212,7 +214,7 @@ export interface AgentFeatures {
   dispatchCache?: boolean;
   /** Require targetFiles on dispatch tasks — reject vague instructions. Default: true */
   targetFileValidation?: boolean;
-  /** Run a verification agent after code agents to adversarially review changes. Default: true (when exploration model is set) */
+  /** Run a verification agent after code agents to adversarially review changes. Default: false — enable via /agent-features or config */
   verifyEdits?: boolean;
 }
 

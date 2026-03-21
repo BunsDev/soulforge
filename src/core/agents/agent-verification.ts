@@ -33,7 +33,7 @@ export async function runDesloppify(
   parentToolCallId: string,
   abortSignal?: AbortSignal,
 ): Promise<string | null> {
-  if (models.agentFeatures?.desloppify === false) return null;
+  if (models.agentFeatures?.desloppify !== true) return null;
   const codeAgents = tasks.filter((t) => t.role === "code");
   if (codeAgents.length === 0) return null;
   if (!models.desloppifyModel) return null;
@@ -181,7 +181,7 @@ export async function runVerifier(
   parentToolCallId: string,
   abortSignal?: AbortSignal,
 ): Promise<string | null> {
-  if (models.agentFeatures?.verifyEdits === false) return null;
+  if (models.agentFeatures?.verifyEdits !== true) return null;
   const codeAgents = tasks.filter((t) => t.role === "code");
   if (codeAgents.length === 0) return null;
 

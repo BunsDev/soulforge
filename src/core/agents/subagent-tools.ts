@@ -469,6 +469,14 @@ export function buildSubagentTools(models: SubagentModels) {
             }
           }
 
+          if (rawArgs.tasks.length < 2 && !rawArgs.force) {
+            return (
+              "⛔ dispatch [rejected → single task]\n" +
+              "Only 1 task — do it yourself instead of dispatching. " +
+              "Dispatch is for 2+ parallel tasks. Read the files directly and make the edits."
+            );
+          }
+
           if (models.agentFeatures?.targetFileValidation !== false) {
             for (const t of rawArgs.tasks) {
               const isWebTask =

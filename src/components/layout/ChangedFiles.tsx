@@ -9,6 +9,16 @@ interface FileEntry {
   created: boolean;
 }
 
+function addFile(fileMap: Map<string, FileEntry>, path: string, created = false) {
+  const existing = fileMap.get(path);
+  if (existing) {
+    existing.editCount++;
+    if (created) existing.created = true;
+  } else {
+    fileMap.set(path, { path, editCount: 1, created });
+  }
+}
+
 function useChangedFiles(messages: ChatMessage[]) {
   return useMemo(() => {
     const fileMap = new Map<string, FileEntry>();
@@ -17,14 +27,15 @@ function useChangedFiles(messages: ChatMessage[]) {
       if (msg.role !== "assistant" || !msg.toolCalls) continue;
       for (const tc of msg.toolCalls) {
         if (tc.name === "edit_file" && typeof tc.args.path === "string" && tc.result?.success) {
-          const path = tc.args.path as string;
-          const existing = fileMap.get(path);
           const isCreate = typeof tc.args.oldString === "string" && tc.args.oldString === "";
-          if (existing) {
-            existing.editCount++;
-            if (isCreate) existing.created = true;
-          } else {
-            fileMap.set(path, { path, editCount: 1, created: isCreate });
+          addFile(fileMap, tc.args.path as string, isCreate);
+        }
+        if (tc.name === "multi_edit" && typeof tc.args.path === "string" && tc.result?.success) {
+          addFile(fileMap, tc.args.path as string);
+        }
+        if (tc.name === "dispatch" && tc.result?.filesEdited) {
+          for (const f of tc.result.filesEdited) {
+            addFile(fileMap, f);
           }
         }
       }
