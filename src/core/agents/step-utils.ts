@@ -513,8 +513,33 @@ export function buildPrepareStep({
     if (stepNumber >= stepNudgeAt) {
       const remaining = maxSteps - stepNumber;
       const existing = result.system ?? "";
-      if (remaining <= 2) {
-        // Final warning — restrict to edit/done tools only
+      if (remaining <= 1) {
+        // LAST STEP — force text-only response so Output.object() can parse it.
+        // Without toolChoice:"none", the model may emit finishReason:'tool-calls'
+        // with garbage text (e.g. "."), causing NoObjectGeneratedError.
+        const hint = isExplore
+          ? 'Produce your JSON output NOW: {"summary":"...","filesExamined":[...],"keyFindings":[{"file":"...","detail":"paste code"}]}. No more tool calls.'
+          : 'Apply edits with multi_edit NOW then produce JSON output: {"summary":"...","filesEdited":[{"file":"...","changes":"..."}]}. Last chance.';
+        result.system = `${existing}\n\n🛑 FINAL STEP. ${hint}`.trim();
+        // Force text-only response for ALL agent types on the last step
+        result.toolChoice = "none";
+        result.activeTools = [];
+        // Inject a user message to further steer the model toward JSON output
+        const msgs = result.messages ?? messages;
+        result.messages = [
+          ...msgs,
+          {
+            role: "user" as const,
+            content: [
+              {
+                type: "text" as const,
+                text: `This is your FINAL step. Do not call any tools. Respond ONLY with a JSON object: ${isExplore ? '{"summary":"...","filesExamined":[...],"keyFindings":[{"file":"...","detail":"paste code"}]}' : '{"summary":"...","filesEdited":[{"file":"...","changes":"..."}],"verified":true}'}`,
+              },
+            ],
+          },
+        ];
+      } else if (remaining <= 2) {
+        // Penultimate step — strong nudge + restrict tools for code agents
         const hint = isExplore
           ? 'Produce your JSON output NOW: {"summary":"...","filesExamined":[...],"keyFindings":[{"file":"...","detail":"paste code"}]}. No more tool calls.'
           : 'Apply edits with multi_edit NOW then produce JSON output: {"summary":"...","filesEdited":[{"file":"...","changes":"..."}]}. Last chance.';

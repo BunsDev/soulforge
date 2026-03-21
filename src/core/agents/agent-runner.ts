@@ -30,6 +30,49 @@ export const MAX_CONCURRENT_AGENTS = 3;
 const AGENT_TIMEOUT_MS = 300_000;
 const RETRY_JITTER_MS = 1000;
 
+/**
+ * Attempt to salvage a valid JSON object from error text.
+ * Models sometimes wrap JSON in markdown fences (```json ... ```) or prepend/append junk.
+ * Returns the parsed object if it has a 'summary' field (our output schemas all require it),
+ * or undefined if unsalvageable.
+ */
+function salvageJsonFromText(text: string | undefined): Record<string, unknown> | undefined {
+  if (!text || text.length < 10) return undefined;
+
+  // Strategy 1: try raw parse (handles cases where SDK's parse failed on validation, not syntax)
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (typeof parsed === "object" && parsed !== null && "summary" in parsed) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {}
+
+  // Strategy 2: strip markdown code fences (```json ... ``` or ``` ... ```)
+  const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+  if (fenceMatch?.[1]) {
+    try {
+      const parsed = JSON.parse(fenceMatch[1]) as unknown;
+      if (typeof parsed === "object" && parsed !== null && "summary" in parsed) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {}
+  }
+
+  // Strategy 3: find first { to last } (greedy brace extraction)
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    try {
+      const parsed = JSON.parse(text.slice(firstBrace, lastBrace + 1)) as unknown;
+      if (typeof parsed === "object" && parsed !== null && "summary" in parsed) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {}
+  }
+
+  return undefined;
+}
+
 const RETURN_FORMAT_INSTRUCTIONS: Record<import("./agent-bus.js").ReturnFormat, string> = {
   summary:
     "Return concise findings and reasoning. No code blocks or raw file content. " +
@@ -327,24 +370,31 @@ export async function runAgentTask(
             finishReason?: string;
             usage?: { inputTokens?: number; outputTokens?: number };
           };
+
+          // Attempt to salvage structured output from the error text.
+          // Models sometimes wrap JSON in markdown fences or prepend/append junk.
+          const salvagedOutput = salvageJsonFromText(errObj.text);
+
           result = {
             text: errObj.text ?? "",
-            output: undefined,
+            output: salvagedOutput,
             steps: recoveredSteps,
             totalUsage: {
               inputTokens: errObj.usage?.inputTokens ?? callbacks._acc.input,
               outputTokens: errObj.usage?.outputTokens ?? callbacks._acc.output,
             },
           };
-          const diagParts = [
-            `Output schema failed (${String(recoveredSteps.length)} steps recovered): ${genErr instanceof Error ? genErr.message : String(genErr)}`,
-          ];
-          if (errObj.finishReason) diagParts.push(`finishReason: ${errObj.finishReason}`);
-          if (errObj.cause)
-            diagParts.push(
-              `cause: ${errObj.cause instanceof Error ? errObj.cause.message : String(errObj.cause)}`,
-            );
-          logBackgroundError(task.agentId, diagParts.join("\n"));
+          if (!salvagedOutput) {
+            const diagParts = [
+              `Output schema failed (${String(recoveredSteps.length)} steps recovered): ${genErr instanceof Error ? genErr.message : String(genErr)}`,
+            ];
+            if (errObj.finishReason) diagParts.push(`finishReason: ${errObj.finishReason}`);
+            if (errObj.cause)
+              diagParts.push(
+                `cause: ${errObj.cause instanceof Error ? errObj.cause.message : String(errObj.cause)}`,
+              );
+            logBackgroundError(task.agentId, diagParts.join("\n"));
+          }
         } else {
           throw genErr;
         }
