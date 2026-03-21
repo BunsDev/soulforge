@@ -19,7 +19,7 @@ import { editFileTool } from "./edit-file";
 import { undoEditTool } from "./edit-stack.js";
 import { editorTool } from "./editor";
 import { fetchPageTool } from "./fetch-page.js";
-import { onFileEdited } from "./file-events.js";
+import { onCacheReset, onFileEdited } from "./file-events.js";
 import { gitTool } from "./git.js";
 import { globTool } from "./glob";
 import { grepTool } from "./grep";
@@ -114,6 +114,12 @@ export function buildTools(
   onFileEdited((absPath) => {
     fullReadCache.delete(absPath);
   });
+  onCacheReset(() => {
+    fullReadCache.clear();
+  });
+  const resetReadCache = () => {
+    fullReadCache.clear();
+  };
 
   async function gateOutsideCwd(
     toolName: string,
@@ -395,6 +401,7 @@ export function buildTools(
       execute: async (args, { abortSignal }) => {
         await new Promise<void>((r) => setTimeout(r, 0));
         resetReadCounter();
+        resetReadCache(); // Shell commands can modify any file
         if (args.cwd) {
           const gate = await gateOutsideCwd("shell", resolve(args.cwd));
           if (gate.blocked) return gate.result;
@@ -787,7 +794,11 @@ export function buildTools(
         amend: z.boolean().optional().describe("For commit: amend the last commit"),
         ref: z.string().optional().describe("For show: commit hash or ref (default: HEAD)"),
       }),
-      execute: deferExecute((args) => gitTool.execute(args)),
+      execute: deferExecute(async (args) => {
+        const mutating = ['pull', 'stash', 'restore', 'branch'].includes(args.action);
+        if (mutating) resetReadCache();
+        return gitTool.execute(args);
+      }),
     }),
 
     ...(opts?.codeExecution

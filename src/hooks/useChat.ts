@@ -29,7 +29,7 @@ import {
 import { detectTaskType, resolveTaskModel } from "../core/llm/task-router.js";
 import { SessionManager } from "../core/sessions/manager.js";
 import { createThinkingParser } from "../core/thinking-parser.js";
-import { onFileEdited } from "../core/tools/file-events.js";
+import { emitCacheReset, onFileEdited } from "../core/tools/file-events.js";
 import { planFileName } from "../core/tools/index.js";
 import { setShellCoAuthorEnabled } from "../core/tools/shell.js";
 import { completeInProgressTasks, resetInProgressTasks } from "../core/tools/task-list.js";
@@ -800,6 +800,7 @@ export function useChat({
 
         const newMessages = [summaryMsg, ackMsg, ...recentMessages];
         setCoreMessages(newMessages);
+        emitCacheReset(); // Old read results are gone — allow re-reads
         const trackedFiles = contextManager.getTrackedFiles();
         contextManager.resetConversationTracking();
         for (const f of trackedFiles.edited) {
