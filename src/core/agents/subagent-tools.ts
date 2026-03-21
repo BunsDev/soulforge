@@ -650,6 +650,66 @@ export function buildSubagentTools(models: SubagentModels) {
             }
           }
 
+          // Auto-split: code tasks with many numbered items targeting 1 file get split
+          // into 2 serial sub-tasks to improve reliability (agents choke on 10+ edits)
+          const TASK_ITEM_SPLIT_THRESHOLD = 8;
+          const countTaskItems = (taskText: string): number => {
+            const matches = taskText.match(/^\d+\./gm);
+            return matches ? matches.length : 0;
+          };
+
+          const expandedTasks: typeof args.tasks = [];
+          for (const t of args.tasks) {
+            const itemCount = countTaskItems(t.task);
+            const isSingleFileCode =
+              t.role === "code" &&
+              t.targetFiles.length === 1 &&
+              t.targetFiles[0]?.toLowerCase() !== WEB_MARKER;
+
+            if (itemCount > TASK_ITEM_SPLIT_THRESHOLD && isSingleFileCode) {
+              // Split numbered items into two halves
+              const lines = t.task.split("\n");
+              const numberedLineIndices: number[] = [];
+              for (let li = 0; li < lines.length; li++) {
+                if (/^\d+\./.test(lines[li] ?? "")) {
+                  numberedLineIndices.push(li);
+                }
+              }
+              const midpoint = Math.ceil(numberedLineIndices.length / 2);
+              const splitLineIdx = numberedLineIndices[midpoint] ?? Math.ceil(lines.length / 2);
+
+              // Extract preamble (text before first numbered item)
+              const firstItemIdx = numberedLineIndices[0] ?? 0;
+              const preamble = lines.slice(0, firstItemIdx).join("\n");
+
+              const firstHalf = lines.slice(0, splitLineIdx).join("\n");
+              const secondHalf =
+                (preamble ? preamble + "\n" : "") +
+                `Continue from where part 1 left off. Read the file first (it was modified by part 1).\n` +
+                lines.slice(splitLineIdx).join("\n");
+
+              const baseId = t.id ?? `agent-${String(expandedTasks.length + 1)}`;
+              const firstId = `${baseId}-part1`;
+              const secondId = `${baseId}-part2`;
+
+              expandedTasks.push({
+                ...t,
+                id: firstId,
+                task: firstHalf,
+                dependsOn: t.dependsOn,
+              });
+              expandedTasks.push({
+                ...t,
+                id: secondId,
+                task: secondHalf,
+                dependsOn: [...(t.dependsOn ?? []), firstId],
+              });
+            } else {
+              expandedTasks.push(t);
+            }
+          }
+          args = { ...args, tasks: expandedTasks };
+
           const tasks: AgentTask[] = args.tasks.map((t, i) => {
             const isWebTask =
               t.targetFiles.length === 1 && t.targetFiles[0]?.toLowerCase() === WEB_MARKER;
@@ -711,6 +771,26 @@ export function buildSubagentTools(models: SubagentModels) {
                   }
                 }
                 lastEditor.set(f, task.agentId);
+              }
+            }
+          }
+
+          // Emit warnings for complex tasks that weren't auto-split
+          // (e.g. multi-file tasks with many items — can't split those safely)
+          for (const t of args.tasks) {
+            const itemCount = countTaskItems(t.task);
+            if (itemCount > TASK_ITEM_SPLIT_THRESHOLD && t.role === "code") {
+              const wasSplit = tasks.some((tk) => tk.agentId.endsWith("-part1"));
+              if (!wasSplit) {
+                emitMultiAgentEvent({
+                  parentToolCallId: toolCallId,
+                  type: "agent-warning",
+                  agentId: t.id ?? "unknown",
+                  role: t.role,
+                  task: t.task.slice(0, 200),
+                  warning: `High complexity: ${String(itemCount)} numbered items in a single task. Consider breaking this into smaller tasks.`,
+                  totalAgents: tasks.length,
+                });
               }
             }
           }

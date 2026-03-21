@@ -21,6 +21,8 @@ export interface MultiAgentEvent {
     | "agent-start"
     | "agent-done"
     | "agent-error"
+    | "agent-retry"
+    | "agent-warning"
     | "dispatch-done"
     | "dispatch-eval";
   agentId?: string;
@@ -45,6 +47,10 @@ export interface MultiAgentEvent {
   resultChars?: number;
   /** Whether the agent called the done tool (vs hitting step/token limit) */
   calledDone?: boolean;
+  /** Warning message for complexity or verification issues */
+  warning?: string;
+  /** Whether this agent was auto-retried */
+  retried?: boolean;
 }
 
 export interface AgentStatsEvent {
