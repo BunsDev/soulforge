@@ -16,7 +16,7 @@ function readSafe(path: string): string {
   }
 }
 
-type ProjectAction = "test" | "build" | "lint" | "typecheck" | "run" | "list";
+type ProjectAction = "test" | "build" | "lint" | "format" | "typecheck" | "run" | "list";
 
 interface ProjectArgs {
   action: ProjectAction;
@@ -661,7 +661,7 @@ function applyFixFlag(command: string): string {
 export const projectTool = {
   name: "project",
   description:
-    "Run project commands (test, build, lint, typecheck, list) with auto-detected toolchain.",
+    "Run project commands (test, build, lint, format, typecheck, list) with auto-detected toolchain. Use format to auto-fix lint/style issues.",
   execute: async (args: ProjectArgs): Promise<ToolResult> => {
     const cwd = args.cwd ? join(process.cwd(), args.cwd) : process.cwd();
 
@@ -685,9 +685,10 @@ export const projectTool = {
       case "build":
         command = profile.build;
         break;
+      case "format":
       case "lint": {
         command = profile.lint;
-        if (command && args.fix && !args.raw) {
+        if (command && (args.action === "format" || args.fix) && !args.raw) {
           command = applyFixFlag(command);
         }
         if (command && args.file) {

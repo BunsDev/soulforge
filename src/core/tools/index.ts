@@ -900,8 +900,10 @@ export function buildTools(
       description: projectTool.description,
       inputSchema: z.object({
         action: z
-          .enum(["test", "build", "lint", "typecheck", "run", "list"])
-          .describe("Project action (list discovers monorepo packages)"),
+          .enum(["test", "build", "lint", "format", "typecheck", "run", "list"])
+          .describe(
+            "Project action. format = auto-fix lint/style issues. list discovers monorepo packages.",
+          ),
         file: z.string().optional().describe("Target file (for test/lint)"),
         fix: z.boolean().optional().describe("Auto-fix lint issues"),
         script: z.string().optional().describe("Named script to run (for run action)"),
@@ -1276,7 +1278,7 @@ export function buildSubagentExploreTools(opts?: {
       : {}),
 
     project: tool({
-      description: `${projectTool.description} Read-only actions only: test, build, lint, typecheck.`,
+      description: `${projectTool.description} Read-only: test, build, lint, typecheck (no format/run).`,
       inputSchema: z.object({
         action: z.enum(["test", "build", "lint", "typecheck"]).describe("Read-only project action"),
         file: z.string().optional().describe("Target file or directory"),
