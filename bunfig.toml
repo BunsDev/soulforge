@@ -1,1 +1,4 @@
 preload = ["./plugins/react-compiler.ts"]
+
+[test]
+coverageSkipTestFiles = true

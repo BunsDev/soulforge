@@ -52,3 +52,4 @@ benchmarks/results-*.json
 
 # Audit logs
 audit_issue.json
+coverage/

@@ -1,6 +1,6 @@
+import { resolve } from "node:path";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { tool } from "ai";
-import { resolve } from "node:path";
 import { z } from "zod";
 import type { EditorIntegration } from "../../types/index.js";
 import { checkAndClaim, prependWarning } from "../coordination/tool-wrapper.js";
