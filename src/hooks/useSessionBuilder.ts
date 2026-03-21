@@ -35,6 +35,7 @@ export function buildSessionMeta({
       planMode: tabState.planMode,
       planRequest: tabState.planRequest,
       coAuthorCommits: tabState.coAuthorCommits,
+      forgeMode: tabState.forgeMode,
       tokenUsage: tabState.tokenUsage,
       messageRange: { startLine: 0, endLine: msgs.length },
     });
@@ -43,6 +44,7 @@ export function buildSessionMeta({
   const allMsgs = [...tabMessages.values()].flat();
   const startedAt = allMsgs[0]?.timestamp ?? Date.now();
 
+  const activeTabState = snapshot.tabStates.find((t) => t.id === snapshot.activeTabId);
   const meta: SessionMeta = {
     id: sessionId,
     title,
@@ -50,7 +52,7 @@ export function buildSessionMeta({
     startedAt,
     updatedAt: Date.now(),
     activeTabId: snapshot.activeTabId,
-    forgeMode: snapshot.forgeMode,
+    forgeMode: activeTabState?.forgeMode ?? "default",
     tabs,
   };
 

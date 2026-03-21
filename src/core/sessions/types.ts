@@ -8,6 +8,7 @@ export interface TabMeta {
   planMode: boolean;
   planRequest: string | null;
   coAuthorCommits: boolean;
+  forgeMode?: ForgeMode;
   tokenUsage: {
     prompt: number;
     completion: number;

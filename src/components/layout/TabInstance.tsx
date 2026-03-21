@@ -61,7 +61,6 @@ interface TabInstanceProps {
   bootPrereqs: PrerequisiteStatus[];
   getWorkspaceSnapshot: () => WorkspaceSnapshot;
   editorIntegration?: EditorIntegration;
-  forgeMode: import("../../types/index.js").ForgeMode;
   editorOpen: boolean;
   editorFile: string | null;
   editorModeName: string;
@@ -99,7 +98,6 @@ export const TabInstance = memo(function TabInstance({
   bootPrereqs,
   getWorkspaceSnapshot,
   editorIntegration,
-  forgeMode,
   editorOpen,
   editorFile,
   editorModeName,
@@ -130,11 +128,6 @@ export const TabInstance = memo(function TabInstance({
   // Dispose task scope only on unmount (tab close), not on hide
   // biome-ignore lint/correctness/useExhaustiveDependencies: cleanup-only on unmount
   useEffect(() => () => disposeTaskScope(tabId), []);
-
-  // Sync shared state into per-tab ContextManager
-  useEffect(() => {
-    contextManager.setForgeMode(forgeMode);
-  }, [forgeMode, contextManager]);
 
   useEffect(() => {
     if (editorIntegration) contextManager.setEditorIntegration(editorIntegration);

@@ -1,13 +1,11 @@
 import { useEffect } from "react";
 import type { ContextManager } from "../core/context/manager.js";
 import { useUIStore } from "../stores/ui.js";
-import type { AppConfig, ForgeMode } from "../types/index.js";
+import type { AppConfig } from "../types/index.js";
 
 interface ConfigSyncParams {
   effectiveConfig: AppConfig;
   contextManager: ContextManager;
-  forgeMode: ForgeMode;
-  setForgeMode: (mode: ForgeMode) => void;
   cwd: string;
   editorOpen: boolean;
   editorFile: string | null;
@@ -20,8 +18,6 @@ interface ConfigSyncParams {
 export function useConfigSync({
   effectiveConfig,
   contextManager,
-  forgeMode,
-  setForgeMode,
   cwd,
   editorOpen,
   editorFile,
@@ -30,15 +26,6 @@ export function useConfigSync({
   cursorCol,
   visualSelection,
 }: ConfigSyncParams): void {
-  useEffect(() => {
-    contextManager.setForgeMode(forgeMode);
-  }, [forgeMode, contextManager]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: one-time init from config
-  useEffect(() => {
-    if (effectiveConfig.defaultForgeMode) setForgeMode(effectiveConfig.defaultForgeMode);
-  }, []);
-
   useEffect(() => {
     contextManager.setEditorState(
       editorOpen,

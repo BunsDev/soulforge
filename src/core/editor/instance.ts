@@ -28,7 +28,27 @@ export async function requestEditor(file?: string): Promise<NvimInstance | null>
   return null;
 }
 
-const NVIM_READ_TIMEOUT = 3000;
+const NVIM_TIMEOUT = 3000;
+const NVIM_READ_TIMEOUT = NVIM_TIMEOUT;
+
+/** Reload a file in the nvim buffer with a timeout. Silently swallows failures. */
+export async function reloadBuffer(filePath: string, line?: number): Promise<boolean> {
+  const nvim = instance;
+  if (!nvim) return false;
+  try {
+    const lua = line
+      ? "local p, l = ...; vim.cmd.edit({args={vim.fn.fnameescape(p)}, bang=true}); vim.api.nvim_win_set_cursor(0, {l, 0})"
+      : "vim.cmd.edit({args={vim.fn.fnameescape(...)}, bang=true})";
+    const args = line ? [filePath, line] : [filePath];
+    await Promise.race([
+      nvim.api.executeLua(lua, args),
+      new Promise<null>((r) => setTimeout(() => r(null), NVIM_TIMEOUT)),
+    ]);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export async function readBufferContent(filePath: string): Promise<string> {
   const nvim = instance as

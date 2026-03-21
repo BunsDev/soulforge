@@ -1,13 +1,16 @@
 import { TextAttributes } from "@opentui/core";
 import { useEffect, useState } from "react";
 import { icon } from "../../core/icons.js";
+import { getModeColor, getModeLabel } from "../../hooks/useForgeMode.js";
 import type { Tab, TabActivity } from "../../hooks/useTabs.js";
+import type { ForgeMode } from "../../types/index.js";
 
 interface TabBarProps {
   tabs: Tab[];
   activeTabId: string;
   onSwitch: (id: string) => void;
   getActivity: (id: string) => TabActivity;
+  getMode: (id: string) => ForgeMode;
 }
 
 function truncateLabel(str: string, max: number): string {
@@ -16,7 +19,13 @@ function truncateLabel(str: string, max: number): string {
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-export function TabBar({ tabs, activeTabId, onSwitch: _onSwitch, getActivity }: TabBarProps) {
+export function TabBar({
+  tabs,
+  activeTabId,
+  onSwitch: _onSwitch,
+  getActivity,
+  getMode,
+}: TabBarProps) {
   const [spinFrame, setSpinFrame] = useState(0);
 
   const activities = new Map(tabs.map((t) => [t.id, getActivity(t.id)]));
@@ -39,8 +48,11 @@ export function TabBar({ tabs, activeTabId, onSwitch: _onSwitch, getActivity }: 
         const isActive = tab.id === activeTabId;
         const num = String(i + 1);
         const activity = activities.get(tab.id);
-        const isDefault = /^Tab \d+$/.test(tab.label);
-        const label = isDefault ? " New tab" : ` ${truncateLabel(tab.label, 20)}`;
+        const isDefaultLabel = /^Tab \d+$/.test(tab.label);
+        const label = isDefaultLabel ? " New tab" : ` ${truncateLabel(tab.label, 20)}`;
+        const tabMode = getMode(tab.id);
+        const tabModeLabel = getModeLabel(tabMode);
+        const tabModeColor = getModeColor(tabMode);
 
         const isLoading = activity?.isLoading ?? false;
         const hasError = activity?.hasError ?? false;
@@ -79,16 +91,24 @@ export function TabBar({ tabs, activeTabId, onSwitch: _onSwitch, getActivity }: 
               {num}
             </text>
             <text fg={bracketColor}>]</text>
+            <text fg={isActive ? tabModeColor : "#555"}>[</text>
+            <text fg={tabModeColor} attributes={isActive ? TextAttributes.BOLD : undefined}>
+              {tabModeLabel}
+            </text>
+            <text fg={isActive ? tabModeColor : "#555"}>]</text>
+            {(activity?.editedFileCount ?? 0) > 0 && (
+              <>
+                <text fg={isActive ? "#4a7" : "#333"}>[</text>
+                <text fg="#4a7">
+                  {icon("lock")}
+                  {String(activity?.editedFileCount ?? 0)}
+                </text>
+                <text fg={isActive ? "#4a7" : "#333"}>]</text>
+              </>
+            )}
             {label && (
               <text fg={labelColor} attributes={isActive ? TextAttributes.BOLD : undefined}>
                 {label}
-              </text>
-            )}
-            {(activity?.editedFileCount ?? 0) > 0 && (
-              <text fg="#4a7">
-                {" "}
-                {icon("lock")}
-                {String(activity?.editedFileCount ?? 0)}
               </text>
             )}
             {hasUnread && !isLoading && !needsAttention && <text fg="#b87333"> ●</text>}

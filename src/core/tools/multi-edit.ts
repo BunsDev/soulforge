@@ -3,7 +3,7 @@ import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { ToolResult } from "../../types/index.js";
 import { analyzeFile } from "../analysis/complexity.js";
-import { getNvimInstance, readBufferContent } from "../editor/instance.js";
+import { readBufferContent, reloadBuffer } from "../editor/instance.js";
 import { isForbidden } from "../security/forbidden.js";
 import { buildRichEditError, fuzzyWhitespaceMatch } from "./edit-file.js";
 import { pushEdit } from "./edit-stack.js";
@@ -110,17 +110,7 @@ export const multiEditTool = {
       await writeFile(filePath, content, "utf-8");
       emitFileEdited(filePath, content);
 
-      // Reload in editor
-      const nvim = getNvimInstance();
-      if (nvim) {
-        try {
-          await nvim.api.executeLua("vim.cmd.edit({args={vim.fn.fnameescape(...)}, bang=true})", [
-            filePath,
-          ]);
-        } catch {
-          // Editor not available
-        }
-      }
+      await reloadBuffer(filePath);
 
       // Build output
       const lineDelta = afterMetrics.lineCount - beforeMetrics.lineCount;

@@ -3,7 +3,7 @@ import { writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import type { ToolResult } from "../../types";
 import { analyzeFile } from "../analysis/complexity";
-import { getNvimInstance, readBufferContent } from "../editor/instance";
+import { readBufferContent, reloadBuffer } from "../editor/instance";
 import { isForbidden } from "../security/forbidden.js";
 import { pushEdit } from "./edit-stack.js";
 import { emitFileEdited } from "./file-events.js";
@@ -117,16 +117,7 @@ export const editFileTool = {
         mkdirSync(dir, { recursive: true });
         await writeFile(filePath, newStr, "utf-8");
         emitFileEdited(filePath, newStr);
-        let openedInEditor = false;
-        const nvim = getNvimInstance();
-        if (nvim) {
-          try {
-            await nvim.api.executeLua("vim.cmd.edit(vim.fn.fnameescape(...))", [filePath]);
-            openedInEditor = true;
-          } catch {
-            // Editor not available
-          }
-        }
+        const openedInEditor = await reloadBuffer(filePath);
         const metrics = analyzeFile(newStr);
         let out = `Created ${filePath} (lines: ${String(metrics.lineCount)}, imports: ${String(metrics.importCount)})`;
         if (dirCreated) out += ` [directory created: ${dir}]`;
@@ -191,20 +182,7 @@ export const editFileTool = {
       await writeFile(filePath, updated, "utf-8");
       emitFileEdited(filePath, updated);
 
-      // Reload or open file in editor so buffer matches disk
-      let openedInEditor = false;
-      const nvim = getNvimInstance();
-      if (nvim) {
-        try {
-          await nvim.api.executeLua(
-            "local p, l = ...; vim.cmd.edit({args={vim.fn.fnameescape(p)}, bang=true}); vim.api.nvim_win_set_cursor(0, {l, 0})",
-            [filePath, editLine],
-          );
-          openedInEditor = true;
-        } catch {
-          // Editor not available
-        }
-      }
+      const openedInEditor = await reloadBuffer(filePath, editLine);
 
       // Build output with metrics
       const deltas = [

@@ -45,7 +45,7 @@ function adaptiveChunking(): (buffer: string) => string | null {
 // biome-ignore lint/suspicious/noExplicitAny: generic tool types vary per agent
 export function getSmoothStreamOptions(): { experimental_transform: any } {
   return {
-    experimental_transform: smoothStream({ delayInMs: 15, chunking: adaptiveChunking() }),
+    experimental_transform: smoothStream({ delayInMs: 20, chunking: adaptiveChunking() }),
   };
 }
 

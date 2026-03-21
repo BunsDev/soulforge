@@ -49,6 +49,7 @@ import type {
   QueuedMessage,
 } from "../types/index.js";
 import { reprimeContextFromMessages, safeParseArgs } from "./chat/message-processing.js";
+import { cycleForgeMode } from "./useForgeMode.js";
 import { buildSessionMeta } from "./useSessionBuilder.js";
 
 export interface TabState {
@@ -64,6 +65,7 @@ export interface TabState {
   sessionId: string;
   planMode: boolean;
   planRequest: string | null;
+  forgeMode: import("../types/index.js").ForgeMode;
 }
 
 export interface TokenUsage {
@@ -85,7 +87,6 @@ const ZERO_USAGE: TokenUsage = {
 };
 
 export interface WorkspaceSnapshot {
-  forgeMode: import("../types/index.js").ForgeMode;
   tabStates: TabState[];
   activeTabId: string;
 }
@@ -147,6 +148,9 @@ export interface ChatInstance {
   setPendingPlanReview: React.Dispatch<React.SetStateAction<PendingPlanReview | null>>;
   snapshot: (label: string) => TabState;
   contextManager: ContextManager;
+  forgeMode: import("../types/index.js").ForgeMode;
+  setForgeMode: (mode: import("../types/index.js").ForgeMode) => void;
+  cycleMode: () => void;
 }
 
 export function useChat({
@@ -273,8 +277,8 @@ export function useChat({
   const flushMicrotaskQueued = useRef(false);
   const flushMicrotaskTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastFlushTime = useRef(0);
-  /** Minimum ms between microtask-triggered flushes — coalesces rapid word deliveries. */
-  const MIN_FLUSH_INTERVAL_MS = 30;
+  /** Minimum ms between microtask-triggered flushes — align with renderer frame rate. */
+  const MIN_FLUSH_INTERVAL_MS = 16;
   const queueMicrotaskFlush = useCallback(() => {
     if (flushMicrotaskQueued.current) return;
     flushMicrotaskQueued.current = true;
@@ -337,6 +341,31 @@ export function useChat({
     initialState?.activeModel ?? effectiveConfig.defaultModel,
   );
   const [coAuthorCommits, setCoAuthorCommits] = useState(initialState?.coAuthorCommits ?? true);
+
+  const [forgeMode, setForgeModeState] = useState<import("../types/index.js").ForgeMode>(
+    initialState?.forgeMode ?? effectiveConfig.defaultForgeMode ?? "default",
+  );
+  const forgeModeRef = useRef(forgeMode);
+  forgeModeRef.current = forgeMode;
+
+  const setForgeMode = useCallback(
+    (mode: import("../types/index.js").ForgeMode) => {
+      setForgeModeState(mode);
+      forgeModeRef.current = mode;
+      contextManager.setForgeMode(mode);
+    },
+    [contextManager],
+  );
+
+  const cycleModeFn = useCallback(() => {
+    const next = cycleForgeMode(forgeModeRef.current);
+    setForgeMode(next);
+  }, [setForgeMode]);
+
+  // Sync forgeMode to contextManager when tab becomes visible (tab switch)
+  useEffect(() => {
+    if (visible) contextManager.setForgeMode(forgeMode);
+  }, [visible, forgeMode, contextManager]);
 
   // Sync co-author flag with git module + shell interceptor
   useEffect(() => {
@@ -1515,7 +1544,7 @@ export function useChat({
           }
         };
 
-        flushTimerRef.current = setInterval(flushStreamState, 50);
+        flushTimerRef.current = setInterval(flushStreamState, 32);
 
         let streamEventCount = 0;
         for await (const part of result.fullStream) {
@@ -2207,8 +2236,18 @@ export function useChat({
       sessionId: sessionIdRef.current,
       planMode: planModeRef.current,
       planRequest: planRequestRef.current,
+      forgeMode,
     }),
-    [messages, coreMessages, activeModel, activePlan, sidebarPlan, tokenUsage, coAuthorCommits],
+    [
+      messages,
+      coreMessages,
+      activeModel,
+      activePlan,
+      sidebarPlan,
+      tokenUsage,
+      coAuthorCommits,
+      forgeMode,
+    ],
   );
 
   const setPlanMode = useCallback((on: boolean) => {
@@ -2277,5 +2316,8 @@ export function useChat({
     setPendingPlanReview,
     snapshot,
     contextManager,
+    forgeMode,
+    setForgeMode,
+    cycleMode: cycleModeFn,
   };
 }

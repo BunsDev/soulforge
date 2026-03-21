@@ -107,21 +107,24 @@ export const InputBox = memo(function InputBox({
   >([]);
   const pasteIdCounter = useRef(0);
 
+  const showBusy = isLoading || isCompacting;
+
+  // textarea width = terminal - border(2) - paddingX(2) - prompt(2) = termWidth - 6
+  // When busy hint is shown, subtract its width too
+  const hintWidth = showBusy ? 8 : 0; // " ^X stop" = 8 chars
+  const textareaWidth = Math.max(10, termWidth - 6 - hintWidth);
+
   // Calculate visual lines manually (virtualLineCount is viewport-constrained — chicken-and-egg)
   const calcVisualLines = useCallback(
     (text: string) => {
-      // textarea width ≈ terminal - border(2) - paddingX(2) - prompt(2)
-      const w = Math.max(10, termWidth - 6);
       let n = 0;
       for (const line of text.split("\n")) {
-        n += line.length === 0 ? 1 : Math.ceil(line.length / w);
+        n += line.length === 0 ? 1 : Math.ceil(line.length / textareaWidth);
       }
       return n;
     },
-    [termWidth],
+    [textareaWidth],
   );
-
-  const showBusy = isLoading || isCompacting;
 
   const historyDBRef = useRef<HistoryDB | null>(null);
   const historyCacheRef = useRef<string[]>([]);
@@ -345,7 +348,7 @@ export const InputBox = memo(function InputBox({
     return undefined;
   }, [fuzzyMode]);
 
-  // Recalculate visual lines on terminal width change
+  // Recalculate visual lines on terminal width/busy change
   useEffect(() => {
     setVisualLines(calcVisualLines(valueRef.current));
   }, [calcVisualLines]);
@@ -701,15 +704,15 @@ export const InputBox = memo(function InputBox({
                 placeholderColor="#555"
                 focused={focused}
                 wrapMode="char"
+                width={textareaWidth}
                 height={Math.min(maxInputRows, Math.max(1, visualLines))}
-                flexGrow={1}
+                flexShrink={0}
                 backgroundColor="transparent"
                 textColor="#ccc"
               />
               {showBusy && !showAutocomplete ? (
                 <text fg="#555" flexShrink={0}>
-                  {" "}
-                  ^X stop
+                  {" ^X stop"}
                 </text>
               ) : ghost ? (
                 <text fg="#444" flexShrink={0}>

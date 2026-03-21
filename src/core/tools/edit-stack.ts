@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { ToolResult } from "../../types/index.js";
-import { getNvimInstance } from "../editor/instance.js";
+import { reloadBuffer } from "../editor/instance.js";
 import { isForbidden } from "../security/forbidden.js";
 import { emitFileEdited } from "./file-events.js";
 
@@ -78,17 +78,7 @@ export const undoEditTool = {
       await writeFile(filePath, restored, "utf-8");
       emitFileEdited(filePath, restored);
 
-      // Reload in editor
-      const nvim = getNvimInstance();
-      if (nvim) {
-        try {
-          await nvim.api.executeLua("vim.cmd.edit({args={vim.fn.fnameescape(...)}, bang=true})", [
-            filePath,
-          ]);
-        } catch {
-          // Editor not available
-        }
-      }
+      await reloadBuffer(filePath);
 
       const remaining = getEditCount(filePath);
       const lineCount = restored.split("\n").length;

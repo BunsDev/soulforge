@@ -30,7 +30,7 @@ import type { ChatInstance, WorkspaceSnapshot } from "../hooks/useChat.js";
 import { useConfigSync } from "../hooks/useConfigSync.js";
 import { useEditorFocus } from "../hooks/useEditorFocus.js";
 import { useEditorInput } from "../hooks/useEditorInput.js";
-import { useForgeMode } from "../hooks/useForgeMode.js";
+import { cycleForgeMode, getModeColor, getModeLabel } from "../hooks/useForgeMode.js";
 import { useGitStatus } from "../hooks/useGitStatus.js";
 import { useGlobalKeyboard } from "../hooks/useGlobalKeyboard.js";
 import { useNeovim } from "../hooks/useNeovim.js";
@@ -429,19 +429,14 @@ export function App({
   const sessionManager = useMemo(() => new SessionManager(cwd), [cwd]);
 
   const git = useGitStatus(cwd);
-  const {
-    mode: forgeMode,
-    cycleMode,
-    modeLabel,
-    modeColor,
-    setMode: setForgeMode,
-  } = useForgeMode();
+  const [forgeMode, setForgeModeHeader] =
+    useState<import("../types/index.js").ForgeMode>("default");
+  const modeLabel = getModeLabel(forgeMode);
+  const modeColor = getModeColor(forgeMode);
 
   useConfigSync({
     effectiveConfig,
     contextManager,
-    forgeMode,
-    setForgeMode,
     cwd,
     editorOpen,
     editorFile,
@@ -491,7 +486,6 @@ export function App({
 
   const workspaceSnapshotRef = useRef<(() => WorkspaceSnapshot) | null>(null);
   workspaceSnapshotRef.current = () => ({
-    forgeMode,
     tabStates: tabMgr.getAllTabStates(),
     activeTabId: tabMgr.activeTabId,
   });
@@ -499,7 +493,6 @@ export function App({
   const getWorkspaceSnapshot = useCallback(
     (): WorkspaceSnapshot =>
       workspaceSnapshotRef.current?.() ?? {
-        forgeMode: "default" as const,
         tabStates: [],
         activeTabId: "",
       },
@@ -603,7 +596,7 @@ export function App({
     const data = sessionManager.loadSession(fullId);
     if (data) {
       tabMgr.restoreFromMeta(data.meta.tabs, data.meta.activeTabId, data.tabMessages);
-      setForgeMode(data.meta.forgeMode);
+      setForgeModeHeader(data.meta.forgeMode);
       setExitSessionId(data.meta.id);
     }
   }, []);
@@ -616,6 +609,7 @@ export function App({
     activeChatRef.current = chat;
     if (chat) {
       setActiveModelForHeader(chat.activeModel);
+      setForgeModeHeader(chat.forgeMode);
       const hasContent = chat.messages.some(
         (m: ChatMessage) => m.role === "user" || m.role === "assistant",
       );
@@ -693,7 +687,8 @@ export function App({
         if (chat.planMode) {
           chat.setPlanMode(false);
           chat.setPlanRequest(null);
-          setForgeMode("default");
+          chat.setForgeMode("default");
+          setForgeModeHeader("default");
           chat.setPendingPlanReview(null);
           chat.setMessages((prev: ChatMessage[]) => [
             ...prev,
@@ -707,7 +702,8 @@ export function App({
         } else {
           chat.setPlanMode(true);
           chat.setPlanRequest(desc || null);
-          setForgeMode("plan");
+          chat.setForgeMode("plan");
+          setForgeModeHeader("plan");
           chat.setMessages((prev: ChatMessage[]) => [
             ...prev,
             {
@@ -741,9 +737,12 @@ export function App({
           git.refresh();
           contextManager.refreshGitContext();
         },
-        setForgeMode,
-        currentMode: forgeMode,
-        currentModeLabel: modeLabel,
+        setForgeMode: (mode: import("../types/index.js").ForgeMode) => {
+          chat.setForgeMode(mode);
+          setForgeModeHeader(mode);
+        },
+        currentMode: chat.forgeMode,
+        currentModeLabel: getModeLabel(chat.forgeMode),
         contextManager,
         chatStyle: uiState.chatStyle,
         setChatStyle: uiState.setChatStyle,
@@ -785,9 +784,6 @@ export function App({
       handleExit,
       cwd,
       git,
-      forgeMode,
-      modeLabel,
-      setForgeMode,
       contextManager,
       handleSuspend,
       openEditorWithFile,
@@ -828,7 +824,14 @@ export function App({
     renderer,
     copyToClipboard,
     activeChatRef,
-    cycleMode,
+    cycleMode: useCallback(() => {
+      const chat = activeChatRef.current;
+      if (chat) {
+        const next = cycleForgeMode(chat.forgeMode);
+        chat.setForgeMode(next);
+        setForgeModeHeader(next);
+      }
+    }, []),
     tabMgr,
   });
 
@@ -887,7 +890,7 @@ export function App({
               </text>
             </>
           )}
-          {forgeMode !== "default" && (
+          {tabMgr.tabCount <= 1 && (
             <>
               <text fg="#333">·</text>
               <text fg={modeColor} attributes={TextAttributes.BOLD}>
@@ -910,6 +913,7 @@ export function App({
             activeTabId={tabMgr.activeTabId}
             onSwitch={tabMgr.switchTab}
             getActivity={tabMgr.getTabActivity}
+            getMode={(id) => tabMgr.getChat(id)?.forgeMode ?? "default"}
           />
         </box>
       ) : !editorVisible ? (
@@ -959,7 +963,6 @@ export function App({
             bootPrereqs={bootPrereqs}
             getWorkspaceSnapshot={getWorkspaceSnapshot}
             editorIntegration={effectiveConfig.editorIntegration}
-            forgeMode={forgeMode}
             editorOpen={editorOpen}
             editorFile={editorFile}
             editorModeName={nvimMode}
@@ -1022,7 +1025,7 @@ export function App({
           const data = sessionManager.loadSession(sessionId);
           if (data) {
             tabMgr.restoreFromMeta(data.meta.tabs, data.meta.activeTabId, data.tabMessages);
-            setForgeMode(data.meta.forgeMode);
+            setForgeModeHeader(data.meta.forgeMode);
             setExitSessionId(data.meta.id);
           }
         }}

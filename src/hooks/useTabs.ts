@@ -300,6 +300,7 @@ export function useTabs(): UseTabsReturn {
           sessionId: tm.sessionId,
           planMode: tm.planMode,
           planRequest: tm.planRequest,
+          forgeMode: tm.forgeMode ?? "default",
         };
         initialStates.current.set(tm.id, state);
       }

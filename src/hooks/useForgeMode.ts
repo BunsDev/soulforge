@@ -1,9 +1,15 @@
-import { useCallback, useState } from "react";
 import type { ForgeMode } from "../types/index.js";
 
-const MODE_ORDER: ForgeMode[] = ["default", "architect", "socratic", "challenge", "plan", "auto"];
+export const MODE_ORDER: ForgeMode[] = [
+  "default",
+  "architect",
+  "socratic",
+  "challenge",
+  "plan",
+  "auto",
+];
 
-const MODE_LABELS: Record<ForgeMode, string> = {
+export const MODE_LABELS: Record<ForgeMode, string> = {
   default: "Default",
   architect: "Architect",
   socratic: "Socratic",
@@ -12,7 +18,7 @@ const MODE_LABELS: Record<ForgeMode, string> = {
   auto: "Auto",
 };
 
-const MODE_COLORS: Record<ForgeMode, string> = {
+export const MODE_COLORS: Record<ForgeMode, string> = {
   default: "#555",
   architect: "#9B30FF",
   socratic: "#FF8C00",
@@ -21,29 +27,15 @@ const MODE_COLORS: Record<ForgeMode, string> = {
   auto: "#2d5",
 };
 
-interface ForgeModeState {
-  mode: ForgeMode;
-  setMode: (mode: ForgeMode) => void;
-  cycleMode: () => void;
-  modeLabel: string;
-  modeColor: string;
+export function getModeLabel(mode: ForgeMode): string {
+  return MODE_LABELS[mode];
 }
 
-export function useForgeMode(): ForgeModeState {
-  const [mode, setMode] = useState<ForgeMode>("default");
+export function getModeColor(mode: ForgeMode): string {
+  return MODE_COLORS[mode];
+}
 
-  const cycleMode = useCallback(() => {
-    setMode((prev) => {
-      const idx = MODE_ORDER.indexOf(prev);
-      return MODE_ORDER[(idx + 1) % MODE_ORDER.length] ?? "default";
-    });
-  }, []);
-
-  return {
-    mode,
-    setMode,
-    cycleMode,
-    modeLabel: MODE_LABELS[mode],
-    modeColor: MODE_COLORS[mode],
-  };
+export function cycleForgeMode(current: ForgeMode): ForgeMode {
+  const idx = MODE_ORDER.indexOf(current);
+  return MODE_ORDER[(idx + 1) % MODE_ORDER.length] ?? "default";
 }
