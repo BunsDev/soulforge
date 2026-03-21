@@ -323,6 +323,13 @@ export function buildTools(
         }
         const warning = checkAndClaim(opts?.tabId, opts?.tabLabel, resolve(args.path));
         const result = await editFileTool.execute({ ...args, tabId: opts?.tabId });
+        if (!result.success && result.error === "old_string not found" && warning) {
+          return {
+            success: false,
+            output: `CONTENTION: File ${args.path} was modified by another tab. Your edit is based on stale content. Do not retry — inform the user this file is contested.`,
+            error: "contested",
+          };
+        }
         if (warning && typeof result === "string") {
           return prependWarning(result, warning);
         }
@@ -1319,6 +1326,13 @@ export function buildSubagentCodeTools(opts?: {
       execute: deferExecute(async (args) => {
         const warning = checkAndClaim(opts?.tabId, opts?.tabLabel, resolve(args.path));
         const result = await editFileTool.execute({ ...args, tabId: opts?.tabId });
+        if (!result.success && result.error === "old_string not found" && warning) {
+          return {
+            success: false,
+            output: `CONTENTION: File ${args.path} was modified by another tab. Your edit is based on stale content. Do not retry — inform the user this file is contested.`,
+            error: "contested",
+          };
+        }
         return prependWarning(result, warning);
       }),
     }),

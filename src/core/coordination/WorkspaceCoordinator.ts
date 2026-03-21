@@ -7,8 +7,8 @@ import type {
   FileClaim,
 } from "./types.js";
 
-/** Advisory idle timeout — claims released after tab finishes a prompt and goes idle */
-const IDLE_RELEASE_MS = 60_000;
+/** Advisory idle timeout — claims released shortly after tab finishes a prompt */
+const IDLE_RELEASE_MS = 5_000;
 /** Hard stale timeout — claims released regardless of state */
 const STALE_RELEASE_MS = 5 * 60_000;
 /** How often to sweep for stale claims */

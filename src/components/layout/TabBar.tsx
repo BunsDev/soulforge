@@ -101,14 +101,12 @@ export function TabBar({
               </>
             )}
             {(activity?.editedFileCount ?? 0) > 0 && (
-              <>
-                <text fg={isActive ? "#4a7" : "#333"}>[</text>
-                <text fg="#4a7">
-                  {icon("lock")}
-                  {String(activity?.editedFileCount ?? 0)}
-                </text>
-                <text fg={isActive ? "#4a7" : "#333"}>]</text>
-              </>
+              <text fg="#4a7">
+                {" "}
+                {icon("pencil")}
+                {" "}
+                {String(activity?.editedFileCount ?? 0)}
+              </text>
             )}
             {label && (
               <text fg={labelColor} attributes={isActive ? TextAttributes.BOLD : undefined}>
