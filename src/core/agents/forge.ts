@@ -356,8 +356,8 @@ interface ForgeAgentOptions {
  * For restricted modes (architect, socratic, challenge), activeTools limits
  * to read-only tools — the LLM physically cannot call edit/shell/git.
  *
- * Uses prepareCall for auto-recall: user message passed via callOptionsSchema
- * at .stream() time, memory search injected into instructions dynamically.
+ * callOptionsSchema accepts userMessage for future use (e.g. memory recall).
+ * prepareCall currently handles activeTools override only.
  */
 export function createForgeAgent({
   model,
@@ -396,6 +396,8 @@ export function createForgeAgent({
 
   const directTools = buildTools(undefined, editorIntegration, onApproveWebSearch, {
     codeExecution: canUseCodeExecution,
+    contextManager,
+    agentSkills: agentFeatures?.agentSkills,
     webSearchModel,
     repoMap,
     onApproveFetchPage,
@@ -451,7 +453,7 @@ export function createForgeAgent({
     ...directTools,
     read_file: cachedReadFile,
     ...subagentTools,
-    ...(interactive ? buildInteractiveTools(interactive, { cwd, sessionId }) : {}),
+    ...(interactive ? buildInteractiveTools(interactive, { cwd, sessionId, forgeMode }) : {}),
   };
 
   // Mark the last tool with cache_control so the Anthropic API caches

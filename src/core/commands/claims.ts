@@ -1,5 +1,7 @@
 import { relative } from "node:path";
+import type { InfoPopupLine } from "../../components/modals/InfoPopup.js";
 import { getWorkspaceCoordinator } from "../coordination/WorkspaceCoordinator.js";
+import { icon } from "../icons.js";
 import type { CommandContext, CommandHandler } from "./types.js";
 import { sysMsg } from "./utils.js";
 
@@ -26,17 +28,26 @@ function handleClaims(_input: string, ctx: CommandContext): void {
     byTab.set(key, list);
   }
 
-  const lines: string[] = ["📋 Active file claims:"];
+  const lines: InfoPopupLine[] = [];
   for (const [tabKey, files] of byTab) {
-    lines.push(`\n  Tab "${tabKey}"`);
+    if (lines.length > 0) lines.push({ type: "spacer" });
+    lines.push({ type: "header", label: tabKey });
+    lines.push({ type: "separator" });
     for (const f of files) {
       const ago = formatTimeAgo(f.lastEditAt);
-      lines.push(`    🔒 ${displayPath(f.path)} (${String(f.editCount)} edits, last ${ago})`);
+      lines.push({
+        type: "entry",
+        label: displayPath(f.path),
+        desc: `${String(f.editCount)} edits, ${ago}`,
+        color: "#c89030",
+        descColor: "#666",
+      });
     }
   }
-  lines.push(`\nTotal: ${String(allClaims.size)} file(s) claimed.`);
+  lines.push({ type: "spacer" });
+  lines.push({ type: "text", label: `${String(allClaims.size)} file(s) claimed`, color: "#555" });
 
-  sysMsg(ctx, lines.join("\n"));
+  ctx.openInfoPopup({ title: "File Claims", icon: icon("lock"), lines, labelWidth: 40 });
 }
 
 function handleUnclaim(input: string, ctx: CommandContext): void {

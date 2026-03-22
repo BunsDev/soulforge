@@ -35,7 +35,7 @@ export interface BusFinding {
   timestamp: number;
 }
 
-export type TaskTier = "trivial" | "standard";
+type TaskTier = "trivial" | "standard";
 export type AgentRole = "explore" | "code" | "investigate";
 
 export type ReturnFormat = "summary" | "code" | "files" | "full" | "verdict";
@@ -82,27 +82,27 @@ interface FileCacheEntry {
   lastAccess: number;
 }
 
-export type AcquireResult =
+type AcquireResult =
   | { cached: true; content: string | null }
   | { cached: false; gen: number }
   | { cached: "waiting"; content: Promise<string | null> };
 
-export type CacheEventType = "hit" | "wait" | "store" | "invalidate";
-export type CacheEventCallback = (
+type CacheEventType = "hit" | "wait" | "store" | "invalidate";
+type CacheEventCallback = (
   agentId: string,
   type: CacheEventType,
   path: string,
   sourceAgentId: string,
 ) => void;
 
-export type ToolCacheEventCallback = (
+type ToolCacheEventCallback = (
   agentId: string,
   toolName: string,
   key: string,
   type: "hit" | "store",
 ) => void;
 
-export interface CacheMetrics {
+interface CacheMetrics {
   fileHits: number;
   fileMisses: number;
   fileWaits: number;

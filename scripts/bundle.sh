@@ -44,7 +44,7 @@ mkdir -p "${DEPS_DIR}"
 
 # ── 1. Compile SoulForge ──
 echo "==> Compiling binary..."
-bun build src/boot.tsx --compile --outfile "${STAGE_DIR}/soulforge" --target="${BUN_TARGET}"
+bun scripts/build.ts --compile --outfile="${STAGE_DIR}/soulforge" --target="${BUN_TARGET}"
 echo "    ✓ soulforge binary"
 
 # ── 2. Download native dependencies ──
@@ -395,6 +395,9 @@ if [[ -d "$SOULFORGE_DIR" ]]; then
   (rm -f "${SOULFORGE_DIR}/config.json"
   rmdir "$SOULFORGE_DIR" 2>/dev/null || rm -rf "$SOULFORGE_DIR") &
   spin "Scattering the ashes" $!
+
+  (rm -rf "${HOME}/.local/share/soulforge" "${HOME}/.local/state/soulforge" "${HOME}/.cache/soulforge" "${HOME}/.config/soulforge") &
+  spin "Purging lazy.nvim & mason data" $!
 else
   printf "  ${M}Nothing to remove at ${SOULFORGE_DIR}${RST}\n"
 fi

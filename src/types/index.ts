@@ -1,4 +1,4 @@
-export interface RouterRule {
+interface RouterRule {
   /** glob pattern or keyword to match against the user message */
   match?: string;
   /** model ID in "provider/model" format */
@@ -37,7 +37,7 @@ export interface ToolResult {
 
 export type PlanStepStatus = "pending" | "active" | "done" | "skipped";
 
-export interface PlanStep {
+interface PlanStep {
   id: string;
   label: string;
   status: PlanStepStatus;
@@ -53,7 +53,7 @@ export interface Plan {
   depth: PlanDepth;
 }
 
-export interface PlanSymbolChange {
+interface PlanSymbolChange {
   name: string;
   kind: string;
   action: "add" | "modify" | "remove" | "rename";
@@ -61,7 +61,7 @@ export interface PlanSymbolChange {
   line?: number;
 }
 
-export interface PlanFileChange {
+interface PlanFileChange {
   path: string;
   action: "create" | "modify" | "delete";
   description: string;
@@ -76,7 +76,7 @@ export interface PlanOutput {
   verification: string[];
 }
 
-export interface QuestionOption {
+interface QuestionOption {
   label: string;
   value: string;
   description?: string;
@@ -145,14 +145,14 @@ export interface ToolCall {
 
 export type NvimConfigMode = "default" | "user" | "none";
 
-export interface CodeIntelligenceConfig {
+interface CodeIntelligenceConfig {
   backend?: "auto" | "ts-morph" | "tree-sitter" | "regex";
   language?: string;
 }
 
 export type ThinkingMode = "off" | "adaptive" | "enabled" | "disabled" | "auto";
 
-export interface ThinkingConfig {
+interface ThinkingConfig {
   /** "auto" enables adaptive thinking for Anthropic models. Default: "auto" */
   mode: ThinkingMode;
   /** Budget tokens — only used when mode is "enabled". Min 1024. */
@@ -161,8 +161,8 @@ export interface ThinkingConfig {
 
 export type EffortLevel = "low" | "medium" | "high" | "max";
 
-export type OpenAIReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
-export type ServiceTier = "auto" | "flex" | "priority" | "default";
+type OpenAIReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+type ServiceTier = "auto" | "flex" | "priority" | "default";
 
 export interface PerformanceConfig {
   /** Effort level for model reasoning. "off" = not sent to API. */
@@ -188,7 +188,7 @@ export interface ContextManagementConfig {
   clearThinking?: boolean;
 }
 
-export interface CompactionConfig {
+interface CompactionConfig {
   /** "v1" = LLM batch summarization, "v2" = incremental structured extraction (default), "disabled" = no auto-compaction */
   strategy?: "v1" | "v2" | "disabled";
   /** Threshold (0-1) at which auto-compaction triggers. Default: 0.7 */
@@ -216,6 +216,8 @@ export interface AgentFeatures {
   targetFileValidation?: boolean;
   /** Run a verification agent after code agents to adversarially review changes. Default: false — enable via /agent-features or config */
   verifyEdits?: boolean;
+  /** Allow the agent to search, install, and load skills. Default: true */
+  agentSkills?: boolean;
 }
 
 export interface AppConfig {

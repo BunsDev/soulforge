@@ -376,6 +376,7 @@ function handleAgentFeatures(_input: string, ctx: CommandContext): void {
     tierRouting: "auto-route trivial tasks to cheaper models",
     dispatchCache: "cache file reads across dispatch boundaries",
     targetFileValidation: "require file paths on dispatch tasks",
+    agentSkills: "allow agent to search, install, and load skills from skills.sh",
   };
   const featureLabel: Record<string, string> = {
     desloppify: "De-sloppify",
@@ -383,6 +384,7 @@ function handleAgentFeatures(_input: string, ctx: CommandContext): void {
     tierRouting: "Tier Routing",
     dispatchCache: "Dispatch Cache",
     targetFileValidation: "Target File Validation",
+    agentSkills: "Agent Skills",
   };
   const localState = { ...ctx.agentFeatures };
   const buildOptions = () =>

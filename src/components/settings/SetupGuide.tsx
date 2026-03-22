@@ -17,7 +17,7 @@ import {
 } from "../../core/setup/prerequisites.js";
 import { Overlay, POPUP_BG, POPUP_HL, PopupRow } from "../layout/shared.js";
 
-const MAX_POPUP_WIDTH = 64;
+const MAX_POPUP_WIDTH = 74;
 const CHROME_ROWS = 10;
 
 type Tab = "tools" | "fonts";
@@ -31,9 +31,9 @@ interface Props {
 export function SetupGuide({ visible, onClose, onSystemMessage }: Props) {
   const { width: termCols, height: termRows } = useTerminalDimensions();
   const containerRows = termRows - 2;
-  const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.7));
+  const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.8));
   const innerW = popupWidth - 2;
-  const maxVisible = Math.max(4, Math.floor(containerRows * 0.7) - CHROME_ROWS);
+  const maxVisible = Math.max(4, Math.floor(containerRows * 0.8) - CHROME_ROWS);
   const [statuses, setStatuses] = useState<PrerequisiteStatus[]>(() => checkPrerequisites());
   const [cursor, setCursor] = useState(0);
   const [scrollOffset, setScrollOffset] = useState(0);

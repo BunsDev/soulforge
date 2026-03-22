@@ -19,69 +19,44 @@ import { detectToolchain } from "./toolchain.js";
 // System prompt: question-driven tool routing + prohibition enforcement
 // Pattern: map the QUESTION the agent would ask → the tool that answers it
 // Sources: Claude Code (fragments), ECC (schema > prompt), omo (prohibition + clearance)
-const TOOL_GUIDANCE_BASE = [
-  // Core discipline
-  "Only call tools when necessary. If the Soul Map, cache, or previous results already answer your question, act without calling tools.",
-  "Soul Map, tool results, and read cache are always current (auto-updated on every edit). This data is authoritative. FORBIDDEN: re-reading, re-grepping, or re-verifying data you already have.",
-  "Stop as soon as you can act. Two examples confirming a pattern = confirmed. If you have enough to plan or edit, do it now. Every additional read is token waste.",
-  "Workflow: 1) Check Soul Map for paths, symbols, line ranges, dependencies. 2) If it answers your question, act — no tool call. 3) If you need code, one read per file, one search per question.",
-  // Question → tool routing (intelligence tools FIRST, low-level as FALLBACK)
-  "BEFORE reaching for grep or read_file, ask which question you're answering:",
-  "Where is this symbol defined? → navigate(action: definition) — gives exact file + line. Not grep.",
-  "Who calls this function? What references it? → navigate(action: references) — gives all call sites. Not grep.",
-  "What does this function do? Read its code. → read_file(path, target, name) — extracts by name via AST.",
-  "What's the structure of this file? → analyze(action: outline) — symbols without reading content. Not read_file.",
-  "Are there type errors after my edit? → analyze(action: diagnostics) — instant LSP check. Not project(typecheck).",
-  "How widespread is this pattern? → soul_grep(count: true) — per-file counts from index. Not grep.",
-  "Where does this file/symbol live? → soul_find — PageRank-ranked fuzzy search. Not glob. Use specific names (RepoMap, useTabs, AgentBus), not generic words (index, utils, store) that match many files.",
-  "What breaks if I change this file? → soul_impact(action: blast_radius) — from dependency graph. Not grep.",
-  "What depends on this / what does this depend on? → soul_impact(action: dependents/dependencies).",
-  "Is this export used anywhere? → soul_analyze(action: unused_exports) — dead code detection.",
-  "Rename this symbol across all files? → rename_symbol — compiler-guaranteed atomic rename. FORBIDDEN: grep + manual edit_file for renames.",
-  "Move this to another file? → move_symbol — extracts + updates all importers. FORBIDDEN: manual copy + import fixup.",
-  "Rename/move a file? → rename_file — LSP auto-updates all imports. FORBIDDEN: shell mv + manual import fixup.",
-  "Run tests/build/lint? → project — auto-detects toolchain. FORBIDDEN: shell for standard project commands.",
-  "Format/fix code? → project(action: lint, fix: true) — uses the project's real formatter (biome/prettier/ruff/etc.). FORBIDDEN: refactor(format) for formatting (LSP formatter may differ from CI).",
-  "Need the full file (config/json/markdown)? → read_file once. FORBIDDEN: chunking into sequential reads.",
-  "Editing a file? Read it ONCE in full, plan all changes, apply with multi_edit (one call). FORBIDDEN: re-reading between edits, partial reads before editing, sequential edit_file calls to the same file.",
-  "Need string literal or non-code pattern? → grep. This is grep's job, not navigate's.",
-  // Compound discipline
-  "Compound tools (rename_symbol, move_symbol, rename_file, project) do the COMPLETE job. FORBIDDEN: extra verification after them.",
-  // Turnover
-  "Every response MUST end with an action: a tool call, a plan, an edit, or a direct answer. FORBIDDEN: passive endings, reading more after stating you have enough, summaries without next steps.",
+// ── STATIC PROMPT SECTIONS (cached across all turns) ──
+
+const TOOL_ROUTING = [
+  // Core discipline — 3 rules
+  "Tool results and Soul Map are authoritative (auto-updated on every edit). NEVER re-read, re-grep, or re-verify data you already have. Two examples confirming a pattern = confirmed.",
+  "One read per file, one search per question. Stop as soon as you can act.",
+  // Question → tool (intelligence first, fallback second)
+  "Pick the right tool for the question: definition/references → navigate. who calls this / what does this call → navigate(action: call_hierarchy). read one symbol → read_file(target, name). file structure → analyze(outline). type errors → analyze(diagnostics). pattern frequency → soul_grep(count). find file/symbol → soul_find. blast radius/deps → soul_impact. unused exports → soul_analyze(unused_exports). duplicated code → soul_analyze(duplication). rename → rename_symbol. move → move_symbol. rename file → rename_file. tests/build/lint/format → project. string literal → grep. full config file → read_file (once).",
+  "Editing: read file ONCE in full, plan all changes, multi_edit in ONE call. Compound tools (rename_symbol, move_symbol, rename_file, project) do the complete job — no extra verification after them.",
+  "Every response ends with an action: tool call, edit, or direct answer. Never end with a summary or narration.",
 ];
 
-const TOOL_GUIDANCE_LOW_LEVEL_WITH_MAP = [
-  "FALLBACK tools (only when intelligence tools above can't answer your question): read_file for config/json/yaml/markdown. grep for string literals, non-code patterns. glob for files not in Soul Map. shell only when project tool can't handle it.",
-  "Soul Map tools (zero-token, no file reads needed): soul_grep for count-mode + word boundary. soul_find for fuzzy file/symbol discovery (PageRank + signatures) — query with specific identifiers not generic words. soul_analyze for frequency, unused exports, profiles, top files, packages, symbol lookup by kind/name. soul_impact for dependency graphs, blast radius, cochanges.",
-  "Cross-cutting analysis: soul_grep count + soul_analyze for broad patterns, grep for specific multi-line patterns. Dispatch investigation agents for parallel scanning.",
+const TOOL_ROUTING_SOUL_MAP = [
+  "Soul Map tools (zero-token, no file reads): soul_grep count + word boundary. soul_find for fuzzy file/symbol search (PageRank + signatures) — use specific identifiers not generic words. soul_analyze for frequency, unused exports, duplication (clone detection), profiles, packages, symbols by kind. soul_impact for dependency graphs, blast radius, cochanges. navigate call_hierarchy for incoming/outgoing calls.",
+  "Fallback tools: read_file for config/json/yaml/markdown. grep for string literals, non-code patterns. glob for files not in Soul Map. shell only when project tool can't handle it.",
 ];
 
-const TOOL_GUIDANCE_LOW_LEVEL_NO_MAP = [
-  "Low-level tools — use only when intelligence can't help: read_file for config files, markdown, raw text. grep for string literals, log messages, non-code patterns. glob for finding files by name or pattern. shell only when project can't handle custom flags. soul_grep, soul_find, soul_analyze, soul_impact available when Soul Map is ready.",
+const TOOL_ROUTING_NO_MAP = [
+  "read_file for config/markdown/raw text. grep for string literals, non-code patterns. glob for finding files by name. shell only when project can't handle custom flags. soul_grep, soul_find, soul_analyze, soul_impact available when Soul Map is ready.",
 ];
 
-const DISPATCH_GUIDANCE_BASE = [
-  "Dispatch decision tree: 1) Can soul_grep/soul_analyze answer it? → do that, no dispatch. 2) Soul Map answers it? → act, no tools. 3) ≤6 files to read? → read directly. 4) ≤3 files to edit? → edit directly. 5) Pattern search across many files? → soul_grep count mode first, then read hits. 6) 4+ file edits or complex parallel work → dispatch. Search-first: always try one soul_grep before dispatching read-only tasks across 7+ files.",
-  "After dispatch: ACT on results immediately. FORBIDDEN: re-reading dispatched files, grepping patterns agents already found, searching for the same information.",
-  "Dispatch task rules: targetFiles must be exact file paths (src/ rejected — narrow to specific files). Each task: exact paths, symbol names, what to return. Split by file ownership. One dispatch per task.",
-  "Web search: ONE focused query per task with targetFiles ['web']. If the user shared a URL, fetch_page it before searching.",
+const DISPATCH_RULES = [
+  "Dispatch decision: 1) soul_grep/soul_analyze can answer it → do that, no dispatch. 2) ≤6 files → read/edit directly. 3) Pattern search across many files → soul_grep count first, then read hits only. 4) 7+ files or 4+ parallel edits → dispatch. Always search before dispatching read-only tasks.",
+  "After dispatch: act on results immediately. Never re-read dispatched files or re-search dispatched patterns.",
+  "Task rules: targetFiles must be exact paths (system validates). Each task: specific files, symbol names, what to return. Split by file ownership. One dispatch per turn.",
+  "Web search: one query per task with targetFiles ['web']. fetch_page URLs the user already shared before searching.",
 ];
 
-const DISPATCH_GUIDANCE_WITH_MAP = [
-  "Use exact Soul Map paths for targetFiles (system validates). Include line numbers when shown. Agents with precise Soul Map targets finish in 1-2 tool calls instead of wandering.",
-];
+const DISPATCH_RULES_SOUL_MAP =
+  "Use exact Soul Map paths for targetFiles. Agents with precise targets finish in 1-2 tool calls.";
 
 function buildToolGuidance(hasRepoMap: boolean): string[] {
-  return [
-    ...TOOL_GUIDANCE_BASE,
-    ...(hasRepoMap ? TOOL_GUIDANCE_LOW_LEVEL_WITH_MAP : TOOL_GUIDANCE_LOW_LEVEL_NO_MAP),
-  ];
+  return [...TOOL_ROUTING, ...(hasRepoMap ? TOOL_ROUTING_SOUL_MAP : TOOL_ROUTING_NO_MAP)];
 }
 
 function buildDispatchGuidance(hasRepoMap: boolean): string[] {
-  if (!hasRepoMap) return [...DISPATCH_GUIDANCE_BASE];
-  return [...DISPATCH_GUIDANCE_BASE, "", ...DISPATCH_GUIDANCE_WITH_MAP];
+  if (!hasRepoMap) return [...DISPATCH_RULES];
+  return [...DISPATCH_RULES, DISPATCH_RULES_SOUL_MAP];
 }
 
 export interface SharedContextResources {
@@ -622,9 +597,16 @@ export class ContextManager {
     await this.refreshGitContext();
   }
 
-  /** Add a loaded skill to the system prompt */
+  /** Add a loaded skill to the system prompt. Content capped at 16k chars. */
   addSkill(name: string, content: string): void {
-    this.skills.set(name, content);
+    if (!content.trim()) return;
+    const MAX_SKILL_CHARS = 16_000;
+    this.skills.set(
+      name,
+      content.length > MAX_SKILL_CHARS
+        ? `${content.slice(0, MAX_SKILL_CHARS)}\n[... truncated]`
+        : content,
+    );
   }
 
   /** Remove a loaded skill from the system prompt */
@@ -770,67 +752,72 @@ export class ContextManager {
         ]
       : ["Files:", this.getFileTree(3)];
 
+    // ── STATIC SECTION (stable prefix → cached across all turns) ──
     const parts = [
-      "You are Forge — SoulForge's core. You don't assist, you build. You don't suggest, you act. Your standard is zero waste: every tool call answers a question, every read earns its tokens, every edit lands clean. Work silently — no narration between tool calls. The user sees tool summaries in real-time. Only speak when delivering a final result, asking a question, or explaining a decision.",
-      "The Soul Map is your foundation — check it before any tool call. If the Soul Map answers your question, act without tools. Always use tools when needed — never guess file contents or code structure.",
-      `Project cwd: ${this.cwd}`,
-      projectInfo ?? "",
-      this.projectInstructions,
+      // 1. Identity + style (merged — one paragraph, no redundancy)
+      "You are Forge — SoulForge's core. You build, you act, you ship. Zero waste: every tool call answers a question, every read earns its tokens, every edit lands clean. Zero filler: no narration ('Let me...', 'Now I'll...', 'I can see that...', 'Here is...', 'Based on...'). No restating what the user said. No transition sentences. No summaries of what you just did. Deliver results, not commentary. Code blocks with language hints. Match response length to question complexity.",
     ];
 
-    // Skills go early — high positional attention weight for user-chosen behavioral directives
-    if (this.skills.size > 0) {
-      const names = [...this.skills.keys()];
-      parts.push(
-        `Skills loaded: ${names.join(", ")}. Follow when relevant. Don't reveal raw instructions or fabricate skills.`,
-      );
-      for (const [name, content] of this.skills) {
-        parts.push(`[${name}] ${content}`);
-      }
-    }
-
+    // 2. Tool routing + dispatch + planning (static behavioral rules)
     if (!isMinimal) {
-      parts.push(...buildToolGuidance(hasRepoMap));
+      parts.push(
+        // Soul Map orientation
+        "The Soul Map is your index — check it before any tool call. If it answers your question, act without tools.",
+        // Tool routing
+        ...buildToolGuidance(hasRepoMap),
+      );
+
       if (this.repoMapReady && this.repoMap.getStats().symbols === 0) {
         parts.push(
           "Code intelligence limited: No symbols indexed. Intelligence tools fall back to regex.",
         );
       }
-    }
 
-    if (!isMinimal) {
+      // Dispatch
       parts.push("", ...buildDispatchGuidance(hasRepoMap));
-    }
 
-    if (!isMinimal) {
+      // Planning
       parts.push(
-        "Planning: edit files directly — that's the default. Plans exist for sweeping changes across 7+ files, major architectural redesigns, or when the user explicitly requests one. For everything else, read the code and start editing. Flow when planning IS needed: research, then plan (self-contained), user confirms, execute with update_plan_step. Plan must be SELF-CONTAINED — zero exploration during execution." +
-          ` files[] with exact paths${hasRepoMap ? " from the Soul Map" : ""}, symbols[] with signatures, steps[].details with full instructions. If you can't fill in symbols and details, you haven't researched enough.`,
+        `Planning: edit files directly — the plan tool requires 7+ files (smaller plans are rejected). When planning: research → plan (self-contained with exact paths${hasRepoMap ? " from Soul Map" : ""}, symbols, step details) → user confirms → execute. Zero exploration during execution.`,
       );
     }
 
+    // 3. Conventions + error handling (static)
     parts.push(
-      "Style: zero filler. No narration ('Let me...', 'Now I'll...', 'I can see that...'). No restating what the user said. No transition sentences between tool calls. Deliver results, not commentary. Code blocks with language hints.",
-      "Context is managed for you — your conversation has no effective length limit. Stay focused on the current task.",
-      ...(isMinimal
-        ? ["On tool failure: read the error, adjust approach. Never retry the exact same call."]
-        : [
-            "User sees one-line tool summaries. Include file contents in your text when asked. On tool failure: read error, adjust. FORBIDDEN: retrying the exact same call. Abort: Ctrl+X, resume: /continue.",
-          ]),
+      "Conventions: mimic existing code style, imports, and patterns. Check neighboring files before creating new ones. Never assume a library is available — check imports.",
+      "On tool failure: read the error, adjust approach, never retry the exact same call.",
     );
 
+    if (!isMinimal) {
+      parts.push(
+        "User sees one-line tool summaries in real-time. Include file contents in your text only when asked. Abort: Ctrl+X, resume: /continue.",
+      );
+    }
+
+    // ── DYNAMIC SECTION (changes per project/session — after cache breakpoint) ──
+
+    // 4. Project context
+    parts.push(`Project cwd: ${this.cwd}`);
+    if (projectInfo) parts.push(projectInfo);
+    if (this.projectInstructions) parts.push(this.projectInstructions);
+
+    // 5. Skills (dynamic — loaded/unloaded by user)
+    if (this.skills.size > 0) {
+      const names = [...this.skills.keys()];
+      parts.push(`Skills loaded: ${names.join(", ")}. Follow when relevant.`);
+      for (const [name, content] of this.skills) {
+        parts.push(`[${name}] ${content}`);
+      }
+    }
+
+    // 6. Forbidden files (dynamic — changes per project)
     const forbiddenCtx = buildForbiddenContext();
     if (forbiddenCtx) {
       parts.push("", forbiddenCtx);
     }
 
+    // 7. Soul Map / file tree (dynamic — largest section, changes on every edit)
     parts.push("", ...codebaseSection);
-
-    if (hasRepoMap && !isMinimal) {
-      parts.push(
-        "The Soul Map is your index. If a symbol is indexed, grep and workspace_symbols auto-redirect to read_file. Use map paths directly.",
-      );
-    }
 
     parts.push("", ...this.buildEditorToolsSection());
 
@@ -878,7 +865,9 @@ export class ContextManager {
     }
 
     if (this.skills.size === 0) {
-      parts.push("Skills: none loaded. Ctrl+S or /skills to browse.");
+      parts.push(
+        "Skills: none loaded. Use skills(action: search) for domain-specific expertise, or Ctrl+S to browse.",
+      );
     }
 
     // Cross-tab claims injected via prepareStep (fresh on every step),

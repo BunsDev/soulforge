@@ -1,11 +1,11 @@
 import type { InfoPopupLine } from "../../components/modals/InfoPopup.js";
 import { useRepoMapStore } from "../../stores/repomap.js";
 import { useStatusBarStore } from "../../stores/statusbar.js";
+import { useUIStore } from "../../stores/ui.js";
 import { icon } from "../icons.js";
-import { getIntelligenceStatus, runIntelligenceHealthCheck } from "../intelligence/index.js";
+import { getIntelligenceStatus } from "../intelligence/index.js";
 import { getModelContextInfo, getShortModelLabel } from "../llm/models.js";
 import type { CommandContext, CommandHandler } from "./types.js";
-import { sysMsg } from "./utils.js";
 
 function handleStatus(_input: string, ctx: CommandContext): void {
   const sb = useStatusBarStore.getState();
@@ -138,99 +138,8 @@ function handleStatus(_input: string, ctx: CommandContext): void {
   });
 }
 
-async function handleDiagnose(_input: string, ctx: CommandContext): Promise<void> {
-  sysMsg(ctx, "Running intelligence health check...");
-  const healthResult = await runIntelligenceHealthCheck();
-  if (!healthResult) {
-    sysMsg(ctx, "Intelligence router not initialized yet");
-    return;
-  }
-
-  const lines: InfoPopupLine[] = [
-    { type: "entry", label: "Language", desc: healthResult.language, descColor: "#8B5CF6" },
-    {
-      type: "entry",
-      label: "Probe file",
-      desc: healthResult.probeFile.split("/").pop() ?? healthResult.probeFile,
-      descColor: "#666",
-    },
-    { type: "spacer" },
-  ];
-
-  for (const br of healthResult.backends) {
-    const statusIcon = !br.supports
-      ? "○"
-      : br.initError
-        ? "✗"
-        : br.probes.some((p) => p.status === "pass")
-          ? "●"
-          : "◐";
-    const statusColor = !br.supports
-      ? "#555"
-      : br.initError
-        ? "#FF0040"
-        : br.probes.some((p) => p.status === "pass")
-          ? "#2d5"
-          : "#FF8C00";
-
-    lines.push({
-      type: "header",
-      label: `${statusIcon} ${br.backend} (tier ${String(br.tier)})`,
-      color: statusColor,
-    });
-
-    if (!br.supports) {
-      lines.push({
-        type: "entry",
-        label: "",
-        desc: "does not support this language",
-        descColor: "#555",
-      });
-    } else if (br.initError) {
-      lines.push({
-        type: "entry",
-        label: "init",
-        desc: `✗ ${br.initError.slice(0, 50)}`,
-        descColor: "#FF0040",
-      });
-    } else {
-      for (const probe of br.probes) {
-        const probeIcon =
-          probe.status === "pass"
-            ? "✓"
-            : probe.status === "empty"
-              ? "○"
-              : probe.status === "unsupported"
-                ? "—"
-                : probe.status === "timeout"
-                  ? "⏱"
-                  : "✗";
-        const probeColor =
-          probe.status === "pass"
-            ? "#2d5"
-            : probe.status === "empty"
-              ? "#FF8C00"
-              : probe.status === "unsupported"
-                ? "#555"
-                : "#FF0040";
-        const timing = probe.ms !== undefined ? `${String(probe.ms)}ms` : "";
-        const desc =
-          probe.status === "error"
-            ? `${probeIcon} ${(probe.error ?? "").slice(0, 40)}`
-            : `${probeIcon} ${probe.status} ${timing}`;
-        lines.push({ type: "entry", label: probe.operation, desc, descColor: probeColor });
-      }
-    }
-    lines.push({ type: "spacer" });
-  }
-
-  ctx.openInfoPopup({
-    title: "Intelligence Health Check",
-    icon: icon("brain"),
-    lines,
-    width: 72,
-    labelWidth: 30,
-  });
+function handleDiagnose(_input: string, _ctx: CommandContext): void {
+  useUIStore.getState().openModal("diagnosePopup");
 }
 
 function handleSetup(_input: string, ctx: CommandContext): void {

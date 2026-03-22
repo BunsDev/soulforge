@@ -21,7 +21,7 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
-export function dirSize(dirPath: string): number {
+function dirSize(dirPath: string): number {
   if (!existsSync(dirPath)) return 0;
   let total = 0;
   for (const entry of readdirSync(dirPath)) {

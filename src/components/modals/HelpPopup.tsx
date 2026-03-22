@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { icon } from "../../core/icons.js";
 import { Overlay, POPUP_BG, PopupRow } from "../layout/shared.js";
 
-const MAX_POPUP_WIDTH = 78;
+const MAX_POPUP_WIDTH = 88;
 const CHROME_ROWS = 6;
 
 interface HelpLine {
@@ -74,9 +74,11 @@ const LINES: HelpLine[] = [
   { type: "entry", label: "/privacy add <pat>", desc: "block a pattern (project)" },
   { type: "entry", label: "/provider-settings", desc: "thinking, effort, speed, context mgmt" },
   { type: "entry", label: "/providers", desc: "provider & models" },
-  { type: "entry", label: "/proxy", desc: "show proxy status (installed, running)" },
-  { type: "entry", label: "/proxy install", desc: "manually install CLIProxyAPI" },
-  { type: "entry", label: "/proxy login", desc: "authenticate with Claude (browser OAuth)" },
+  { type: "entry", label: "/proxy", desc: "show proxy status, accounts, models" },
+  { type: "entry", label: "/proxy install", desc: "reinstall CLIProxyAPI" },
+  { type: "entry", label: "/proxy login", desc: "add a provider account (OAuth)" },
+  { type: "entry", label: "/proxy logout", desc: "remove a provider account" },
+  { type: "entry", label: "/proxy upgrade", desc: "upgrade CLIProxyAPI to latest version" },
   { type: "entry", label: "/pull", desc: "pull from remote" },
   { type: "entry", label: "/push", desc: "push to remote" },
   { type: "entry", label: "/quit", desc: "exit soulforge" },
@@ -176,9 +178,9 @@ interface Props {
 export function HelpPopup({ visible, onClose }: Props) {
   const { width: termCols, height: termRows } = useTerminalDimensions();
   const containerRows = termRows - 2;
-  const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.7));
+  const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.8));
   const innerW = popupWidth - 2;
-  const maxVisible = Math.max(6, Math.floor(containerRows * 0.7) - CHROME_ROWS);
+  const maxVisible = Math.max(6, Math.floor(containerRows * 0.8) - CHROME_ROWS);
   const [scrollOffset, setScrollOffset] = useState(0);
 
   useEffect(() => {

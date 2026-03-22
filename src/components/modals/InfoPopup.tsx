@@ -36,10 +36,10 @@ export function InfoPopup({ visible, config, onClose }: Props) {
   const { width: termCols, height: termRows } = useTerminalDimensions();
   const containerRows = termRows - 2;
   const maxWidth = config?.width ?? 68;
-  const popupWidth = Math.min(maxWidth, Math.floor(termCols * 0.7));
+  const popupWidth = Math.min(maxWidth, Math.floor(termCols * 0.8));
   const innerW = popupWidth - 2;
   const labelW = config?.labelWidth ?? 20;
-  const maxVisible = Math.max(6, Math.floor(containerRows * 0.7) - CHROME_ROWS);
+  const maxVisible = Math.max(6, Math.floor(containerRows * 0.8) - CHROME_ROWS);
   const maxTextW = innerW - 4;
   const [scrollOffset, setScrollOffset] = useState(0);
 

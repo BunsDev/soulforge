@@ -19,6 +19,7 @@ import { ContextManager } from "../core/context/manager.js";
 import { getWorkspaceCoordinator } from "../core/coordination/WorkspaceCoordinator.js";
 import { setEditorRequestCallback } from "../core/editor/instance.js";
 import { icon, providerIcon, UI_ICONS } from "../core/icons.js";
+import { runIntelligenceHealthCheck } from "../core/intelligence/index.js";
 import { fetchOpenRouterMetadata } from "../core/llm/models.js";
 import { notifyProviderSwitch } from "../core/llm/provider.js";
 import { initForbidden } from "../core/security/forbidden.js";
@@ -51,6 +52,7 @@ import { TabInstance } from "./layout/TabInstance.js";
 import { TokenDisplay } from "./layout/TokenDisplay.js";
 import { SimpleModalLayer } from "./ModalLayer.js";
 import { CommandPicker } from "./modals/CommandPicker.js";
+import { DiagnosePopup } from "./modals/DiagnosePopup.js";
 import { GitCommitModal } from "./modals/GitCommitModal.js";
 import { GitMenu } from "./modals/GitMenu.js";
 import { InfoPopup } from "./modals/InfoPopup.js";
@@ -273,7 +275,7 @@ export function App({
     sendMouse,
     error: nvimError,
   } = useNeovim(
-    editorOpen,
+    true,
     effectiveConfig.nvimPath,
     effectiveConfig.nvimConfig,
     closeEditor,
@@ -317,10 +319,9 @@ export function App({
   useEffect(() => {
     setEditorRequestCallback((file) => {
       if (file) openEditorWithFile(file);
-      else openEditor();
     });
     return () => setEditorRequestCallback(null);
-  }, [openEditorWithFile, openEditor]);
+  }, [openEditorWithFile]);
 
   useEffect(() => {
     if (editorOpen) setEditorVisible(true);
@@ -372,6 +373,7 @@ export function App({
   const modalRouterSettings = useUIStore((s) => s.modals.routerSettings);
   const modalCommandPicker = useUIStore((s) => s.modals.commandPicker);
   const modalInfoPopup = useUIStore((s) => s.modals.infoPopup);
+  const modalDiagnose = useUIStore((s) => s.modals.diagnosePopup);
   const isModalOpen = useUIStore(selectIsAnyModalOpen);
 
   const closerCache = useRef<Partial<Record<ModalName, () => void>>>({});
@@ -801,8 +803,12 @@ export function App({
   );
 
   const closeLlmSelector = useCallback(() => {
+    const wasPickingSlot = useUIStore.getState().routerSlotPicking != null;
     useUIStore.getState().closeModal("llmSelector");
     useUIStore.getState().setRouterSlotPicking(null);
+    if (wasPickingSlot) {
+      useUIStore.getState().openModal("routerSettings");
+    }
   }, []);
 
   const closeInfoPopup = useCallback(() => {
@@ -987,11 +993,14 @@ export function App({
             const updated = { ...current, [slot]: modelId };
             saveToScope({ taskRouter: updated }, routerScope);
             useUIStore.getState().setRouterSlotPicking(null);
+            useUIStore.getState().closeModal("llmSelector");
+            useUIStore.getState().openModal("routerSettings");
           } else {
             activeChatRef.current?.setActiveModel(modelId);
             notifyProviderSwitch(modelId);
             setActiveModelForHeader(modelId);
             saveToScope({ defaultModel: modelId }, modelScope);
+            useUIStore.getState().closeModal("llmSelector");
           }
         }}
         onClose={closeLlmSelector}
@@ -1034,6 +1043,12 @@ export function App({
       <SkillSearch
         visible={modalSkillSearch}
         contextManager={tabMgr.getActiveChat()?.contextManager ?? contextManager}
+        agentSkillsEnabled={effectiveConfig.agentFeatures?.agentSkills !== false}
+        onToggleAgentSkills={() => {
+          const current = effectiveConfig.agentFeatures?.agentSkills !== false;
+          saveToScope({ agentFeatures: { agentSkills: !current } }, modelScope);
+          addSystemMessage(`Agent skills ${!current ? "enabled" : "disabled"}`);
+        }}
         onClose={getCloser("skillSearch")}
         onSystemMessage={addSystemMessage}
       />
@@ -1096,6 +1111,12 @@ export function App({
       />
 
       <InfoPopup visible={modalInfoPopup} config={infoPopupConfig} onClose={closeInfoPopup} />
+
+      <DiagnosePopup
+        visible={modalDiagnose}
+        onClose={getCloser("diagnosePopup")}
+        runHealthCheck={runIntelligenceHealthCheck}
+      />
 
       <SimpleModalLayer
         messages={activeChatRef.current?.messages ?? []}

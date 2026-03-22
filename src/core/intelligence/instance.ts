@@ -84,9 +84,11 @@ export function getIntelligenceChildPids(): number[] {
 }
 
 /** Run intelligence health check — probes all backends */
-export async function runIntelligenceHealthCheck() {
+export async function runIntelligenceHealthCheck(
+  onProgress?: (partial: import("./router.js").HealthCheckResult) => void,
+) {
   if (!router) return null;
-  return router.runHealthCheck();
+  return router.runHealthCheck(onProgress);
 }
 
 /** Dispose the singleton router and all backends */

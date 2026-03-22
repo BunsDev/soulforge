@@ -6,7 +6,7 @@ import type { EditorIntegration } from "../../types/index.js";
 import type { ConfigScope } from "../layout/shared.js";
 import { CONFIG_SCOPES, Overlay, POPUP_BG, POPUP_HL, PopupRow } from "../layout/shared.js";
 
-const MAX_POPUP_WIDTH = 60;
+const MAX_POPUP_WIDTH = 70;
 const CHROME_ROWS = 8;
 
 interface ToggleItem {
@@ -65,9 +65,9 @@ interface Props {
 export function EditorSettings({ visible, settings, initialScope, onUpdate, onClose }: Props) {
   const { width: termCols, height: termRows } = useTerminalDimensions();
   const containerRows = termRows - 2;
-  const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.7));
+  const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.8));
   const innerW = popupWidth - 2;
-  const maxVisible = Math.max(4, Math.floor(containerRows * 0.7) - CHROME_ROWS);
+  const maxVisible = Math.max(4, Math.floor(containerRows * 0.8) - CHROME_ROWS);
   const { cursor, setCursor, scrollOffset, adjustScroll } = usePopupScroll(maxVisible);
   const [scope, setScope] = useState<ConfigScope>(initialScope ?? "project");
   const current = settings ?? ALL_ON;

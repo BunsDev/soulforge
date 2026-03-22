@@ -240,8 +240,10 @@ function collectSpecifiers(node: TSNode, language: Language, out: string[]): voi
 
   if (language === "typescript" || language === "javascript") {
     if (type === "import_specifier") {
-      const alias = node.childForFieldName("alias");
-      const name = alias ?? node.childForFieldName("name");
+      // Always use the original exported name (not the local alias).
+      // `import { register as registerDebug }` → push "register"
+      // so refs match symbols by their exported name.
+      const name = node.childForFieldName("name");
       if (name) out.push(name.text);
       return;
     }
@@ -258,8 +260,8 @@ function collectSpecifiers(node: TSNode, language: Language, out: string[]): voi
     }
   } else if (language === "python") {
     if (type === "aliased_import") {
-      const alias = node.childForFieldName("alias");
-      const name = alias ?? node.childForFieldName("name");
+      // Use the original name, not the alias, so refs match the source module's symbols
+      const name = node.childForFieldName("name");
       if (name) {
         const text = name.text;
         const last = text.split(".").pop();
@@ -282,9 +284,12 @@ function collectSpecifiers(node: TSNode, language: Language, out: string[]): voi
     }
   } else if (language === "rust") {
     if (type === "use_as_clause") {
-      const alias = node.childForFieldName("alias");
-      if (alias) {
-        out.push(alias.text);
+      // Use the original path name, not the alias, so refs match the source module's symbols
+      // `use foo::Bar as Baz` → push "Bar"
+      const path = node.childForFieldName("path");
+      if (path) {
+        const name = path.childForFieldName("name");
+        out.push(name ? name.text : path.text);
         return;
       }
     }
@@ -902,15 +907,18 @@ export class TreeSitterBackend implements IntelligenceBackend {
                   ? reExportSource.text.replace(/['"]/g, "")
                   : undefined;
                 const specNames: string[] = [];
+                const origNames: string[] = [];
                 for (let ci = 0; ci < clause.namedChildCount; ci++) {
                   const spec = clause.namedChild(ci);
                   if (spec?.type === "export_specifier") {
                     const alias = spec.childForFieldName("alias");
-                    const name = alias ?? spec.childForFieldName("name");
-                    if (name) {
-                      specNames.push(name.text);
+                    const name = spec.childForFieldName("name");
+                    // Export name is the alias (public-facing) or the original name
+                    const exportName = alias ?? name;
+                    if (exportName) {
+                      specNames.push(exportName.text);
                       exports.push({
-                        name: name.text,
+                        name: exportName.text,
                         isDefault: false,
                         kind: "variable",
                         location: {
@@ -920,13 +928,16 @@ export class TreeSitterBackend implements IntelligenceBackend {
                         },
                       });
                     }
+                    // Track original name for import refs back to the source module
+                    if (name) origNames.push(name.text);
                   }
                 }
                 // Re-exports with a source are cross-file references (treat as imports)
-                if (source && specNames.length > 0) {
+                // Use original names (not aliases) so refs match the source module's symbols
+                if (source && origNames.length > 0) {
                   imports.push({
                     source,
-                    specifiers: specNames,
+                    specifiers: origNames,
                     isDefault: false,
                     isNamespace: false,
                     location: {
@@ -981,6 +992,74 @@ export class TreeSitterBackend implements IntelligenceBackend {
         }
       } finally {
         mainQuery.delete();
+      }
+    }
+
+    // Capture dynamic import() expressions for TS/JS
+    // e.g. `const { start } = await import("./index.js")`
+    if (language === "typescript" || language === "javascript") {
+      const dynamicImportQuery = createQuery(
+        tsLang,
+        `(call_expression function: (import) arguments: (arguments (string) @source)) @dynamic_import`,
+      );
+      try {
+        for (const match of dynamicImportQuery.matches(tree.rootNode)) {
+          const sourceCapture = match.captures.find((c: TSQueryCapture) => c.name === "source");
+          if (!sourceCapture) continue;
+          const source = sourceCapture.node.text.replace(/['"`]/g, "");
+          if (!source) continue;
+
+          // Extract destructured names from the variable declaration context
+          // e.g. `const { start } = await import("./index.js")`
+          const importNode = match.captures.find(
+            (c: TSQueryCapture) => c.name === "dynamic_import",
+          );
+          const specifiers: string[] = [];
+          if (importNode) {
+            // Walk up to find destructuring pattern
+            let current: TSNode | null = importNode.node.parent;
+            // Walk up through await_expression, assignment, etc.
+            while (
+              current &&
+              current.type !== "variable_declarator" &&
+              current.type !== "assignment_expression"
+            ) {
+              current = current.parent;
+            }
+            if (current) {
+              const pattern =
+                current.childForFieldName("name") ?? current.childForFieldName("left");
+              if (pattern?.type === "object_pattern") {
+                for (let ci = 0; ci < pattern.namedChildCount; ci++) {
+                  const child = pattern.namedChild(ci);
+                  if (child?.type === "shorthand_property_identifier_pattern") {
+                    specifiers.push(child.text);
+                  } else if (child?.type === "pair_pattern") {
+                    const key = child.childForFieldName("key");
+                    if (key) specifiers.push(key.text);
+                  }
+                }
+              }
+            }
+          }
+
+          // If we couldn't extract specifiers, use wildcard
+          if (specifiers.length === 0) specifiers.push("*");
+
+          imports.push({
+            source,
+            specifiers,
+            isDefault: false,
+            isNamespace: specifiers.length === 1 && specifiers[0] === "*",
+            location: {
+              file: absFile,
+              line: sourceCapture.node.startPosition.row + 1,
+              column: sourceCapture.node.startPosition.column + 1,
+            },
+          });
+        }
+      } finally {
+        dynamicImportQuery.delete();
       }
     }
 

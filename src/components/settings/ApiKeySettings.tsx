@@ -12,7 +12,7 @@ import {
 } from "../../core/secrets.js";
 import { Overlay, POPUP_BG, POPUP_HL, PopupRow } from "../layout/shared.js";
 
-const MAX_POPUP_WIDTH = 62;
+const MAX_POPUP_WIDTH = 72;
 const CHROME_ROWS = 10;
 
 interface KeyInfo {
@@ -107,9 +107,9 @@ interface Props {
 export function ApiKeySettings({ visible, onClose }: Props) {
   const renderer = useRenderer();
   const { width: termCols, height: termRows } = useTerminalDimensions();
-  const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.75));
+  const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.8));
   const innerW = popupWidth - 2;
-  const maxVisible = Math.max(4, Math.floor((termRows - 2) * 0.7) - CHROME_ROWS);
+  const maxVisible = Math.max(4, Math.floor((termRows - 2) * 0.8) - CHROME_ROWS);
 
   const keys = useApiKeyStore((s) => s.keys);
   const refresh = useApiKeyStore((s) => s.refresh);

@@ -1,6 +1,10 @@
-import { relative } from "node:path";
+import { extname, relative } from "node:path";
 import type { ToolResult } from "../../types";
 import type { RepoMap } from "../intelligence/repo-map.js";
+import {
+  IMPORT_TRACKABLE_LANGUAGES,
+  INDEXABLE_EXTENSIONS,
+} from "../intelligence/repo-map-utils.js";
 import { isForbidden } from "../security/forbidden.js";
 
 type AnalyzeAction =
@@ -155,6 +159,13 @@ function unusedExports(repoMap: RepoMap, cwd: string, limit: number | undefined)
     }
   }
 
+  // Helper: can we reliably track imports for this file's language?
+  const canTrackFileImports = (filePath: string): boolean => {
+    const ext = extname(filePath).toLowerCase();
+    const lang = INDEXABLE_EXTENSIONS[ext];
+    return lang != null && IMPORT_TRACKABLE_LANGUAGES.has(lang);
+  };
+
   // Classify files: dead file = ALL exports are dead (none alive)
   const deadFiles: Array<{
     file: string;
@@ -179,7 +190,7 @@ function unusedExports(repoMap: RepoMap, cwd: string, limit: number | undefined)
     const allDead = totalExported > 0 && totalDead >= totalExported;
     const hasDependents = repoMap.getFileDependents(file).length > 0;
 
-    if (allDead && !hasDependents) {
+    if (allDead && !hasDependents && canTrackFileImports(file)) {
       deadFiles.push({
         file,
         symbols: [...entry.dead, ...entry.unnecessary],

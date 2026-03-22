@@ -77,7 +77,7 @@ const NOISE_RE =
 const MAX_STACK_FRAMES = 5;
 const MAX_PASS_LINES = 3;
 
-export interface CompressResult {
+interface CompressResult {
   text: string;
   /** The original uncompressed text, only set when compression removed significant content. */
   original: string | null;

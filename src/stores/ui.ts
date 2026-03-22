@@ -23,7 +23,8 @@ export type ModalName =
   | "apiKeySettings"
   | "lspStatus"
   | "lspInstall"
-  | "compactionLog";
+  | "compactionLog"
+  | "diagnosePopup";
 
 type Modals = Record<ModalName, boolean>;
 
@@ -47,6 +48,7 @@ const INITIAL_MODALS: Modals = {
   lspStatus: false,
   lspInstall: false,
   compactionLog: false,
+  diagnosePopup: false,
 };
 
 interface UIState {

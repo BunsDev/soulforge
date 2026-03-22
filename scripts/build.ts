@@ -5,8 +5,9 @@
  * plugins — only the JS API does.
  *
  * Usage:
- *   bun scripts/build.ts              — build to dist/
- *   bun scripts/build.ts --compile    — build standalone binary
+ *   bun scripts/build.ts                                          — build to dist/
+ *   bun scripts/build.ts --compile                                — build standalone binary
+ *   bun scripts/build.ts --compile --outfile=path --target=bun-darwin-aarch64
  */
 import { type BunPlugin } from "bun";
 
@@ -30,6 +31,15 @@ const reactCompilerPlugin: BunPlugin = {
 // ── Parse args ───────────────────────────────────────────────────────
 const isCompile = process.argv.includes("--compile");
 
+const getFlag = (name: string) => {
+  const prefix = `--${name}=`;
+  const arg = process.argv.find((a) => a.startsWith(prefix));
+  return arg?.slice(prefix.length);
+};
+
+const outfile = getFlag("outfile");
+const compileTarget = getFlag("target");
+
 // ── Build ────────────────────────────────────────────────────────────
 const start = performance.now();
 
@@ -40,6 +50,10 @@ const result = await Bun.build({
   external: ["react-devtools-core"],
   naming: "[dir]/index.[ext]",
   plugins: [reactCompilerPlugin],
+  ...(isCompile && {
+    compile: compileTarget ?? true,
+    ...(outfile && { outfile }),
+  }),
 });
 
 if (!result.success) {

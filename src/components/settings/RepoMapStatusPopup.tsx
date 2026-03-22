@@ -6,7 +6,7 @@ import { type RepoMapStatus, useRepoMapStore } from "../../stores/repomap.js";
 import { Overlay, POPUP_BG, PopupRow, SPINNER_FRAMES } from "../layout/shared.js";
 
 const LABEL_W = 18;
-const POPUP_W = 56;
+const POPUP_W = 66;
 
 function statusColor(status: RepoMapStatus): string {
   switch (status) {
@@ -40,7 +40,7 @@ interface Props {
 
 export function RepoMapStatusPopup({ visible, onClose }: Props) {
   const { width: termCols } = useTerminalDimensions();
-  const popupWidth = Math.min(POPUP_W, Math.floor(termCols * 0.7));
+  const popupWidth = Math.min(POPUP_W, Math.floor(termCols * 0.8));
   const innerW = popupWidth - 2;
 
   const stateRef = useRef(useRepoMapStore.getState());

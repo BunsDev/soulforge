@@ -129,6 +129,16 @@ export function formatArgs(toolName: string, args?: string): string {
       if (parsed.action === "branch") return `branch ${String(parsed.sub_action ?? "list")}`;
       return String(parsed.action);
     }
+    if (toolName === "skills" && parsed.action) {
+      if (parsed.action === "search" && parsed.query) return `search: ${String(parsed.query)}`;
+      if (parsed.action === "load" && parsed.name) return `load: ${String(parsed.name)}`;
+      if (parsed.action === "unload" && parsed.name) return `unload: ${String(parsed.name)}`;
+      if (parsed.action === "install" && parsed.id) {
+        const id = String(parsed.id);
+        return id.length > 50 ? `install: ${id.slice(0, 47)}...` : `install: ${id}`;
+      }
+      return String(parsed.action);
+    }
     if (toolName === "code_execution") {
       if (parsed.code) {
         const code = String(parsed.code);
@@ -166,6 +176,102 @@ export function formatResult(toolName: string, result?: string): string {
       return `${String(lines)} lines [cached]`;
     }
   } catch {}
+  // Soul tools — extract structured counts from output text
+  if (toolName === "soul_impact" || toolName === "soul_analyze") {
+    try {
+      const p = JSON.parse(result);
+      if (p.success && p.output) {
+        const out = String(p.output);
+        const parts: string[] = [];
+        // soul_impact: extract dependency/blast counts
+        const depMatch = out.match(/Dependents \((\d+)\)/);
+        const depsMatch = out.match(/Dependencies \((\d+)\)/);
+        const coMatch = out.match(/Co-changes \((\d+)\)/);
+        const blastMatch = out.match(/Blast radius: (\d+)/);
+        if (depMatch) parts.push(`${depMatch[1]} dependents`);
+        if (depsMatch) parts.push(`${depsMatch[1]} deps`);
+        if (coMatch) parts.push(`${coMatch[1]} cochanges`);
+        if (blastMatch) parts.push(`blast: ${blastMatch[1]}`);
+        // soul_analyze: extract action-specific counts
+        const deadMatch = out.match(/Dead files? \((\d+)\)/i);
+        const unusedMatch = out.match(/(\d+) unused/i);
+        const dupMatch = out.match(/(\d+) (?:exact |near-)?duplicat/i);
+        const topMatch = out.match(/Top (\d+) files/);
+        const pkgMatch = out.match(/(\d+) packages?/i);
+        if (deadMatch) parts.push(`${deadMatch[1]} dead`);
+        if (unusedMatch) parts.push(`${unusedMatch[1]} unused`);
+        if (dupMatch) parts.push(`${dupMatch[1]} duplicates`);
+        if (topMatch) parts.push(`top ${topMatch[1]}`);
+        if (pkgMatch) parts.push(`${pkgMatch[1]} packages`);
+        if (parts.length > 0) return parts.slice(0, 3).join(", ");
+        // Fallback: first line
+        const first = out.split("\n")[0] ?? "";
+        return first.length > 50 ? `${first.slice(0, 47)}...` : first;
+      }
+    } catch {}
+  }
+  if (toolName === "soul_find") {
+    try {
+      const p = JSON.parse(result);
+      if (p.success && p.output) {
+        const out = String(p.output);
+        const countMatch = out.match(/(\d+) results?/);
+        if (countMatch) return `${countMatch[1]} results (ranked)`;
+      }
+    } catch {}
+  }
+  if (toolName === "soul_grep") {
+    try {
+      const p = JSON.parse(result);
+      if (p.success && p.output) {
+        const out = String(p.output);
+        const fileMatch = out.match(/(\d+) files?/);
+        const matchCount = out.match(/(\d+) match/);
+        if (fileMatch) return `${fileMatch[1]} files`;
+        if (matchCount) return `${matchCount[1]} matches`;
+      }
+    } catch {}
+  }
+  if (toolName === "navigate") {
+    try {
+      const p = JSON.parse(result);
+      if (p.success && p.output) {
+        const out = String(p.output);
+        // Call hierarchy
+        const inMatch = out.match(/Incoming calls \((\d+)\)/);
+        const outMatch = out.match(/Outgoing calls \((\d+)\)/);
+        if (inMatch || outMatch) {
+          const parts: string[] = [];
+          if (inMatch) parts.push(`${inMatch[1]} callers`);
+          if (outMatch) parts.push(`${outMatch[1]} callees`);
+          return parts.join(", ");
+        }
+        // References
+        const refMatch = out.match(/(\d+) references?/);
+        if (refMatch) return `${refMatch[1]} references`;
+        // Definition
+        const defMatch = out.match(/defined at (.+)/);
+        if (defMatch?.[1]) return `→ ${defMatch[1].slice(0, 40)}`;
+      }
+      if (p.repoMapHit) {
+        const out = String(p.output ?? "");
+        const match = out.match(/indexed at ([^\s]+)/);
+        return match ? `→ ${match[1]}` : "→ repo map";
+      }
+    } catch {}
+  }
+  if (toolName === "skills") {
+    try {
+      const p = JSON.parse(result);
+      if (p.success && p.output) {
+        const out = String(p.output);
+        const skillMatch = out.match(/Skills matching "[^"]*" \((\d+) total/);
+        if (skillMatch) return `${skillMatch[1]} skills found`;
+        const first = out.split("\n")[0] ?? "";
+        return first.length > 50 ? `${first.slice(0, 47)}...` : first;
+      }
+    } catch {}
+  }
   if (SUBAGENT_NAMES.has(toolName)) {
     try {
       const p = JSON.parse(result);

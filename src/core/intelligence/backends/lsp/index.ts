@@ -924,6 +924,38 @@ export class LspBackend implements IntelligenceBackend {
     await this.getStandaloneClients(file);
   }
 
+  /** Warm up nvim LSP by opening a file and waiting for diagnostics. */
+  async warmupNvim(file: string): Promise<boolean> {
+    if (!nvimBridge.isNvimAvailable()) return false;
+    return nvimBridge.warmupBuffer(file);
+  }
+
+  /**
+   * Probe standalone LSP client directly, bypassing the nvim bridge.
+   * Used by health check to test both paths independently.
+   */
+  async probeStandalone(file: string, op: string): Promise<unknown> {
+    const client = await this.getStandaloneClient(file);
+    if (!client) return null;
+    switch (op) {
+      case "findSymbols":
+        return client.textDocumentDocumentSymbol(file);
+      case "findImports":
+        // findImports is always regex — test it directly
+        return this.findImports(file);
+      case "findExports":
+        return client.textDocumentDocumentSymbol(file);
+      case "getFileOutline":
+        return client.textDocumentDocumentSymbol(file);
+      case "getDiagnostics":
+        return client.getDiagnostics(file);
+      case "readSymbol":
+        return client.textDocumentDocumentSymbol(file);
+      default:
+        return null;
+    }
+  }
+
   /** Get info about active standalone LSP servers */
   getActiveServers(): Array<{ language: string; command: string }> {
     const servers: Array<{ language: string; command: string }> = [];

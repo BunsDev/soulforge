@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { attach } from "neovim";
@@ -36,6 +36,8 @@ export async function launchNeovim(
   rows: number = DEFAULT_ROWS,
   configMode: NvimConfigMode = "default",
 ): Promise<NvimInstance> {
+  killBootstrap();
+
   let effectivePath = nvimPath;
   const args = ["--embed", "-i", "NONE"];
 
@@ -64,9 +66,12 @@ export async function launchNeovim(
     }
   }
 
+  const env = configMode === "user" ? process.env : { ...process.env, NVIM_APPNAME: "soulforge" };
+
   const proc = spawn(effectivePath, args, {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
+    env,
   });
 
   const api = attach({ proc });
@@ -92,7 +97,10 @@ export async function launchNeovim(
  * Open a file in the embedded neovim instance.
  */
 export async function openFile(nvim: NvimInstance, filePath: string): Promise<void> {
-  await nvim.api.executeLua("vim.cmd.edit(vim.fn.fnameescape(...))", [filePath]);
+  await nvim.api.executeLua(
+    "vim.cmd({cmd='edit', args={vim.fn.fnameescape(...)}, mods={silent=true}})",
+    [filePath],
+  );
 }
 
 /**
@@ -151,6 +159,70 @@ export async function getVisualSelection(nvim: NvimInstance): Promise<string | n
   } catch {
     return null;
   }
+}
+
+let _bootstrapProc: ChildProcess | null = null;
+
+/**
+ * Kill the headless bootstrap if it's still running.
+ * Called before launching the embedded editor to prevent concurrent lazy.nvim installs.
+ * Removes partially-cloned plugin dirs so the embedded neovim gets a clean install.
+ */
+function killBootstrap(): void {
+  if (_bootstrapProc) {
+    try {
+      _bootstrapProc.kill();
+    } catch {}
+    _bootstrapProc = null;
+    const lazyDir = join(homedir(), ".local", "share", "soulforge", "lazy");
+    try {
+      rmSync(lazyDir, { recursive: true, force: true });
+    } catch {}
+  }
+}
+
+/**
+ * Bootstrap lazy.nvim plugins + mason LSP servers in a headless neovim.
+ * Fire-and-forget — runs in background so editor is ready when user opens it.
+ * Skips if lazy.nvim data dir already exists (plugins already installed).
+ * If user opens the editor before this finishes, it's killed (launchNeovim calls killBootstrap).
+ */
+export function bootstrapNeovimPlugins(nvimPath: string): void {
+  const isBundled = import.meta.url.includes("$bunfs");
+  const bundledInit = join(homedir(), ".soulforge", "init.lua");
+  const devInit = join(import.meta.dir, "init.lua");
+  const shippedInit = isBundled ? bundledInit : existsSync(devInit) ? devInit : bundledInit;
+
+  if (!existsSync(shippedInit)) return;
+
+  const dataDir = join(homedir(), ".local", "share", "soulforge");
+  const lazyDir = join(dataDir, "lazy");
+  if (existsSync(lazyDir)) return;
+
+  const proc = spawn(
+    nvimPath,
+    [
+      "--headless",
+      "-i",
+      "NONE",
+      "-u",
+      shippedInit,
+      "+Lazy! install",
+      "+MasonToolsInstallSync",
+      "+qa",
+    ],
+    {
+      cwd: process.cwd(),
+      stdio: "ignore",
+      detached: true,
+      env: { ...process.env, NVIM_APPNAME: "soulforge" },
+    },
+  );
+  proc.unref();
+  _bootstrapProc = proc;
+  proc.on("exit", () => {
+    _bootstrapProc = null;
+  });
 }
 
 /**

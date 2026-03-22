@@ -10,6 +10,7 @@ import {
   listInstalledSkills,
   listPopularSkills,
   loadSkill,
+  removeInstalledSkill,
   type SkillSearchResult,
   searchSkills,
 } from "../../core/skills/manager.js";
@@ -17,7 +18,7 @@ import { usePopupScroll } from "../../hooks/usePopupScroll.js";
 
 import { Overlay, POPUP_BG, POPUP_HL, PopupRow } from "../layout/shared.js";
 
-const MAX_POPUP_WIDTH = 90;
+const MAX_POPUP_WIDTH = 100;
 const CHROME_ROWS = 9;
 
 type Tab = "search" | "installed" | "active";
@@ -31,6 +32,8 @@ const TAB_LABELS: Record<Tab, string> = {
 interface Props {
   visible: boolean;
   contextManager: ContextManager;
+  agentSkillsEnabled: boolean;
+  onToggleAgentSkills: () => void;
   onClose: () => void;
   onSystemMessage: (msg: string) => void;
 }
@@ -38,6 +41,8 @@ interface Props {
 export const SkillSearch = memo(function SkillSearch({
   visible,
   contextManager,
+  agentSkillsEnabled,
+  onToggleAgentSkills,
   onClose,
   onSystemMessage,
 }: Props) {
@@ -57,12 +62,13 @@ export const SkillSearch = memo(function SkillSearch({
   const { width: termCols, height: termRows } = useTerminalDimensions();
 
   const containerRows = termRows - 2;
-  const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.7));
-  const maxVisible = Math.max(4, Math.floor(containerRows * 0.7) - CHROME_ROWS);
+  const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.8));
+  const maxVisible = Math.max(4, Math.floor(containerRows * 0.8) - CHROME_ROWS);
   const innerW = popupWidth - 2;
   const { cursor, setCursor, scrollOffset, adjustScroll, resetScroll } = usePopupScroll(maxVisible);
 
   const filterQuery = query.toLowerCase().trim();
+  const installedNames = new Set(installed.map((s) => s.name));
   const filteredInstalled = filterQuery
     ? installed.filter((s) => s.name.toLowerCase().includes(filterQuery))
     : installed;
@@ -198,9 +204,44 @@ export const SkillSearch = memo(function SkillSearch({
       return;
     }
 
+    // Ctrl+D: delete skill from disk (installed tab) or unload (active tab)
+    if (evt.ctrl && evt.name === "d") {
+      if (tab === "installed") {
+        const skill = filteredInstalled[cursor];
+        if (skill) {
+          // Unload from context if active
+          if (activeSkills.includes(skill.name)) {
+            contextManager.removeSkill(skill.name);
+          }
+          if (removeInstalledSkill(skill)) {
+            onSystemMessage(`Skill "${skill.name}" removed.`);
+          } else {
+            onSystemMessage(`Failed to remove "${skill.name}".`);
+          }
+          refreshInstalled();
+          refreshActive();
+          resetScroll();
+        }
+      } else if (tab === "active") {
+        const name = filteredActive[cursor];
+        if (name) {
+          contextManager.removeSkill(name);
+          onSystemMessage(`Skill "${name}" unloaded.`);
+          refreshActive();
+          resetScroll();
+        }
+      }
+      return;
+    }
+
     if (evt.name === "backspace" || evt.name === "delete") {
       setQuery((prev) => prev.slice(0, -1));
       resetScroll();
+      return;
+    }
+
+    if (evt.name === "a" && !evt.ctrl && !evt.meta && !query) {
+      onToggleAgentSkills();
       return;
     }
 
@@ -213,8 +254,14 @@ export const SkillSearch = memo(function SkillSearch({
   const doInstall = (skill: SkillSearchResult, global: boolean) => {
     setInstalling(true);
     installSkill(skill.source, skill.skillId, global)
-      .then(() => {
-        onSystemMessage(`Skill "${skill.name}" installed ${global ? "globally" : "to project"}.`);
+      .then((result) => {
+        if (result.installed) {
+          onSystemMessage(
+            `Skill "${result.name ?? skill.name}" installed ${global ? "globally" : "to project"}.`,
+          );
+        } else {
+          onSystemMessage(`Failed to install "${skill.name}": ${result.error ?? "unknown error"}`);
+        }
         refreshInstalled();
       })
       .catch((err: unknown) => {
@@ -352,11 +399,24 @@ export const SkillSearch = memo(function SkillSearch({
                   const idx = scrollOffset + i;
                   const isActive = idx === cursor;
                   const bg = isActive ? POPUP_HL : POPUP_BG;
+                  const isInstalled =
+                    installedNames.has(skill.skillId) || installedNames.has(skill.name);
+                  const isLoaded =
+                    activeSkills.includes(skill.skillId) || activeSkills.includes(skill.name);
                   return (
                     <PopupRow key={skill.id} bg={bg} w={innerW}>
                       <text bg={bg} fg={isActive ? "#FF0040" : "#555"}>
                         {isActive ? "› " : "  "}
                       </text>
+                      {isLoaded ? (
+                        <text bg={bg} fg="#00FF00">
+                          ●{" "}
+                        </text>
+                      ) : isInstalled ? (
+                        <text bg={bg} fg="#4a7">
+                          ✓{" "}
+                        </text>
+                      ) : null}
                       <text
                         bg={bg}
                         fg={isActive ? "#FF0040" : "#aaa"}
@@ -544,9 +604,22 @@ export const SkillSearch = memo(function SkillSearch({
         </PopupRow>
         <PopupRow w={innerW}>
           <text fg="#555" bg={POPUP_BG}>
+            Agent access:{" "}
+          </text>
+          <text fg={agentSkillsEnabled ? "#00FF00" : "#c55"} bg={POPUP_BG}>
+            {agentSkillsEnabled ? "on" : "off"}
+          </text>
+          <text fg="#444" bg={POPUP_BG}>
+            {" "}
+            (a to toggle)
+          </text>
+        </PopupRow>
+        <PopupRow w={innerW}>
+          <text fg="#555" bg={POPUP_BG}>
             {"↑↓"} nav | {"⏎"}{" "}
-            {tab === "search" ? "install" : tab === "installed" ? "load" : "unload"} | {"⇥"} tab |
-            esc close
+            {tab === "search" ? "install" : tab === "installed" ? "load" : "unload"}
+            {tab === "installed" ? " | ^D remove" : tab === "active" ? " | ^D unload" : ""}
+            {" | ⇥ tab | esc close"}
           </text>
         </PopupRow>
       </box>

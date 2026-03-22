@@ -15,7 +15,7 @@ export type ToolCategory =
   | "execution"
   | "soul-map";
 
-export const TOOL_CATEGORIES: Record<string, ToolCategory> = {
+const TOOL_CATEGORIES: Record<string, ToolCategory> = {
   // File tools
   read_file: "file",
   edit_file: "file",
@@ -52,6 +52,9 @@ export const TOOL_CATEGORIES: Record<string, ToolCategory> = {
 
   // Memory
   memory: "memory",
+
+  // Skills
+  skills: "agent",
 
   // Agent / subagent
   dispatch: "agent",
@@ -146,10 +149,11 @@ const TOOL_ICON_MAP: Record<string, string> = {
   soul_find: "search",
   soul_analyze: "repomap",
   soul_impact: "repomap",
+  skills: "skills",
   _nudge: "lightning",
 };
 
-export function toolIcon(name: string): string {
+function toolIcon(name: string): string {
   const key = TOOL_ICON_MAP[name];
   return key ? icon(key) : icon("wrench");
 }
@@ -173,6 +177,7 @@ export const TOOL_LABELS: Record<string, string> = {
   web_search: "Searching web",
   fetch_page: "Fetching page",
   memory: "Memory",
+  skills: "Skills",
   editor: "Editor",
   git: "Git",
   navigate: "Navigating",
@@ -207,7 +212,7 @@ export function resolveToolDisplay(toolName: string, defaultColor = "#888") {
   };
 }
 
-export const TOOL_ICON_COLORS: Record<string, string> = {
+const TOOL_ICON_COLORS: Record<string, string> = {
   read_file: "#5C9FD6",
   edit_file: "#c89030",
   multi_edit: "#c89030",
@@ -236,6 +241,7 @@ export const TOOL_ICON_COLORS: Record<string, string> = {
   ask_user: "#c89030",
   task_list: "#00BFFF",
   editor_panel: "#5C9FD6",
+  skills: "#9B30FF",
   code_execution: "#c55",
   soul_grep: "#2dd4bf",
   soul_find: "#2dd4bf",

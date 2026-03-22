@@ -33,8 +33,8 @@ export function SessionPicker({ visible, cwd, onClose, onRestore, onSystemMessag
   const { width: termCols, height: termRows } = useTerminalDimensions();
 
   const containerRows = termRows - 2;
-  const popupWidth = Math.min(80, Math.floor(termCols * 0.7));
-  const maxVisible = Math.max(3, Math.floor(containerRows * 0.7) - POPUP_CHROME);
+  const popupWidth = Math.min(90, Math.floor(termCols * 0.8));
+  const maxVisible = Math.max(3, Math.floor(containerRows * 0.8) - POPUP_CHROME);
   const innerW = popupWidth - 2;
   const maxTitleLen = Math.max(15, innerW - 28);
   const { cursor, setCursor, scrollOffset, adjustScroll, resetScroll } = usePopupScroll(maxVisible);

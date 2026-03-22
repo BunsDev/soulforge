@@ -1,10 +1,65 @@
 import { existsSync, statSync } from "node:fs";
 import { extname, resolve } from "node:path";
+import { isBinaryFileSync } from "isbinaryfile";
 import type { ToolResult } from "../../types";
 import { readBufferContent } from "../editor/instance";
 import type { SymbolKind } from "../intelligence/types.js";
 import { isForbidden } from "../security/forbidden.js";
 import { emitFileRead } from "./file-events.js";
+
+const IMAGE_EXTS = new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".bmp",
+  ".ico",
+  ".webp",
+  ".svg",
+  ".tiff",
+  ".avif",
+  ".heic",
+]);
+const DOC_EXTS = new Set([
+  ".pdf",
+  ".doc",
+  ".docx",
+  ".xls",
+  ".xlsx",
+  ".ppt",
+  ".pptx",
+  ".odt",
+  ".ods",
+]);
+const AUDIO_EXTS = new Set([".mp3", ".wav", ".flac", ".ogg", ".aac", ".m4a", ".wma"]);
+const VIDEO_EXTS = new Set([".mp4", ".avi", ".mov", ".mkv", ".webm", ".wmv", ".flv"]);
+const ARCHIVE_EXTS = new Set([
+  ".zip",
+  ".tar",
+  ".gz",
+  ".bz2",
+  ".xz",
+  ".7z",
+  ".rar",
+  ".zst",
+  ".tar.gz",
+]);
+const DB_EXTS = new Set([".db", ".sqlite", ".sqlite3"]);
+
+function binaryHint(ext: string): string {
+  if (IMAGE_EXTS.has(ext))
+    return " This is an image file. Describe what you need from it or ask the user to describe its contents.";
+  if (DOC_EXTS.has(ext))
+    return " This is a document. Use shell to extract text: `pdftotext file.pdf -` for PDFs, or ask the user to paste the relevant content.";
+  if (AUDIO_EXTS.has(ext)) return " This is an audio file. It cannot be processed as text.";
+  if (VIDEO_EXTS.has(ext)) return " This is a video file. It cannot be processed as text.";
+  if (ARCHIVE_EXTS.has(ext))
+    return " This is an archive. Use shell to list contents: `tar tf` / `unzip -l` / `7z l`.";
+  if (DB_EXTS.has(ext)) return " This is a database. Use shell with `sqlite3` to query it.";
+  if (ext === ".wasm")
+    return " This is a WebAssembly binary. Use `wasm-objdump` or `wasm2wat` to inspect.";
+  return " Binary files cannot be read as text. Use shell commands if you need to inspect this file.";
+}
 
 const CODE_EXTENSIONS = new Set([
   ".ts",
@@ -83,6 +138,20 @@ export const readFileTool = {
           success: false,
           output: `Path is a directory: ${filePath}`,
           error: `Path is a directory: ${filePath}`,
+        };
+      }
+
+      if (isBinaryFileSync(filePath)) {
+        const ext = extname(filePath).toLowerCase();
+        const sizeStr =
+          stat.size > 1024 * 1024
+            ? `${(stat.size / (1024 * 1024)).toFixed(1)}MB`
+            : `${(stat.size / 1024).toFixed(0)}KB`;
+        const hint = binaryHint(ext);
+        return {
+          success: false,
+          output: `Cannot read binary file: "${args.path}" (${ext || "no extension"}, ${sizeStr}).${hint}`,
+          error: "binary",
         };
       }
 

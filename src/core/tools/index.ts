@@ -25,7 +25,7 @@ import { undoEditTool } from "./edit-stack.js";
 import { editorTool } from "./editor";
 import { fetchPageTool } from "./fetch-page.js";
 import { onCacheReset, onFileEdited } from "./file-events.js";
-import { gitTool } from "./git.js";
+import { gitTool, resetDiffCache } from "./git.js";
 import { globTool } from "./glob";
 import { grepTool } from "./grep";
 import { listDirTool } from "./list-dir.js";
@@ -45,6 +45,7 @@ import {
   tryInterceptNavigate,
 } from "./repo-map-intercept.js";
 import { shellTool } from "./shell";
+import { createSkillsTool } from "./skills.js";
 import { soulAnalyzeTool } from "./soul-analyze.js";
 import { soulFindTool } from "./soul-find.js";
 import { soulGrepTool } from "./soul-grep.js";
@@ -90,7 +91,7 @@ export function isGitMutatingShellCommand(command: string): boolean {
 }
 
 /** Detect shell commands that write to specific files (sed -i, cp, mv, tee, etc.) */
-export const FILE_WRITE_SHELL_PATTERNS: Array<{
+const FILE_WRITE_SHELL_PATTERNS: Array<{
   re: RegExp;
   extractor: (m: RegExpMatchArray) => string[];
 }> = [
@@ -193,6 +194,8 @@ export function buildTools(
   opts?: {
     codeExecution?: boolean;
     memoryManager?: MemoryManager;
+    contextManager?: import("../context/manager.js").ContextManager;
+    agentSkills?: boolean;
     webSearchModel?: import("ai").LanguageModel;
     repoMap?: RepoMap;
     onApproveFetchPage?: (url: string) => Promise<boolean>;
@@ -205,6 +208,11 @@ export function buildTools(
   const effectiveCwd = cwd ?? process.cwd();
   const mm = opts?.memoryManager ?? new MemoryManager(effectiveCwd);
   const memoryTool = createMemoryTool(mm);
+  const skillsEnabled = opts?.agentSkills !== false;
+  const skillsTool =
+    skillsEnabled && opts?.contextManager
+      ? createSkillsTool(opts.contextManager, opts?.onApproveDestructive)
+      : null;
 
   let sequentialReads = 0;
   const READ_NUDGE_SOFT = 4;
@@ -221,14 +229,22 @@ export function buildTools(
 
   // Mechanical re-read blocking — returns stub if agent already has full content in context
   const fullReadCache = new Set<string>();
+  const readCountPerFile = new Map<string, number>();
+  const MAX_READS_PER_FILE = 3;
   onFileEdited((absPath) => {
     fullReadCache.delete(absPath);
+    readCountPerFile.delete(absPath);
+    resetDiffCache();
   });
   onCacheReset(() => {
     fullReadCache.clear();
+    readCountPerFile.clear();
+    resetDiffCache();
   });
   const resetReadCache = () => {
     fullReadCache.clear();
+    readCountPerFile.clear();
+    resetDiffCache();
   };
 
   async function gateOutsideCwd(
@@ -267,22 +283,38 @@ export function buildTools(
         const normPath = resolve(args.path);
         const isFullRead = args.startLine == null && args.endLine == null && !args.target;
 
-        if (isFullRead && !args.fresh && fullReadCache.has(normPath)) {
-          return {
-            success: true,
-            output: `[Already read — "${args.path}" content is in your context above. Pass fresh=true to re-read if the file has changed.]`,
-          };
+        if (!args.fresh && fullReadCache.has(normPath)) {
+          if (isFullRead) {
+            return {
+              success: true,
+              output: `[Already read — "${args.path}" content is in your context above. Pass fresh=true to re-read if the file has changed.]`,
+            };
+          }
+          if (args.startLine != null && !args.target) {
+            return {
+              success: true,
+              output: `[Already read in full — "${args.path}" content is in your context above. Use the full content instead of reading ranges.]`,
+            };
+          }
+        }
+
+        // Block excessive reads of the same file (chunking pattern)
+        if (!args.fresh) {
+          const count = readCountPerFile.get(normPath) ?? 0;
+          if (count >= MAX_READS_PER_FILE) {
+            return {
+              success: true,
+              output: `[Read ${String(count)} times — "${args.path}" is already in your context. If you need the full file, use read_file without startLine/endLine. Pass fresh=true only if the file changed.]`,
+            };
+          }
         }
 
         const result = await readFileTool.execute(args);
 
-        // Track successful full reads (not outlines — agent still needs the real content)
-        if (
-          isFullRead &&
-          result.success &&
-          !(result as unknown as Record<string, unknown>).outlineOnly
-        ) {
-          fullReadCache.add(normPath);
+        // Track successful reads
+        if (result.success && !(result as unknown as Record<string, unknown>).outlineOnly) {
+          if (isFullRead) fullReadCache.add(normPath);
+          readCountPerFile.set(normPath, (readCountPerFile.get(normPath) ?? 0) + 1);
         }
 
         sequentialReads++;
@@ -308,7 +340,13 @@ export function buildTools(
           .number()
           .optional()
           .describe(
-            "1-indexed line hint from your last read — helps locate the match and shows context on error",
+            "1-indexed line hint from your last read. When paired with lineEnd, enables line-range replacement as fallback when oldString match fails.",
+          ),
+        lineEnd: z
+          .number()
+          .optional()
+          .describe(
+            "1-indexed end line (inclusive). When both lineStart and lineEnd are set, the system replaces by line range if oldString matching fails.",
           ),
       }),
       execute: deferExecute(async (args) => {
@@ -333,6 +371,26 @@ export function buildTools(
         if (warning && typeof result === "string") {
           return prependWarning(result, warning);
         }
+        // Enrich successful edits with blast radius from repo map
+        if (result.success && opts?.repoMap?.isReady) {
+          const rel = args.path.startsWith("/")
+            ? args.path.slice(effectiveCwd.length + 1)
+            : args.path;
+          const blast = opts.repoMap.getFileBlastRadius(rel);
+          const cochanges = opts.repoMap.getFileCoChanges(rel);
+          if (blast > 0 || cochanges.length > 0) {
+            const parts: string[] = [];
+            if (blast > 0) parts.push(`${String(blast)} files depend on this`);
+            if (cochanges.length > 0)
+              parts.push(
+                `cochanges: ${cochanges
+                  .slice(0, 3)
+                  .map((c) => c.path)
+                  .join(", ")}${cochanges.length > 3 ? ` +${String(cochanges.length - 3)}` : ""}`,
+              );
+            result.output += `\n[impact: ${parts.join(" · ")}]`;
+          }
+        }
         return result;
       }),
     }),
@@ -356,6 +414,10 @@ export function buildTools(
               oldString: z.string().describe("Exact string to replace"),
               newString: z.string().describe("Replacement string"),
               lineStart: z.number().optional().describe("Line hint (1-indexed)"),
+              lineEnd: z
+                .number()
+                .optional()
+                .describe("End line (1-indexed, inclusive) for line-range fallback"),
             }),
           )
           .describe("Array of edits to apply atomically"),
@@ -374,6 +436,26 @@ export function buildTools(
         const result = await multiEditTool.execute({ ...args, tabId: opts?.tabId });
         if (warning && typeof result === "string") {
           return prependWarning(result, warning);
+        }
+        // Enrich with blast radius + cochanges (same as edit_file)
+        if (typeof result === "object" && result.success && opts?.repoMap?.isReady) {
+          const rel = args.path.startsWith("/")
+            ? args.path.slice(effectiveCwd.length + 1)
+            : args.path;
+          const blast = opts.repoMap.getFileBlastRadius(rel);
+          const cochanges = opts.repoMap.getFileCoChanges(rel);
+          if (blast > 0 || cochanges.length > 0) {
+            const impactParts: string[] = [];
+            if (blast > 0) impactParts.push(`${String(blast)} files depend on this`);
+            if (cochanges.length > 0)
+              impactParts.push(
+                `cochanges: ${cochanges
+                  .slice(0, 3)
+                  .map((c) => c.path)
+                  .join(", ")}${cochanges.length > 3 ? ` +${String(cochanges.length - 3)}` : ""}`,
+              );
+            result.output += `\n[impact: ${impactParts.join(" · ")}]`;
+          }
         }
         return result;
       }),
@@ -637,6 +719,7 @@ export function buildTools(
     }),
 
     memory: memoryTool,
+    ...(skillsTool ? { skills: skillsTool } : {}),
 
     editor: tool({
       description: editorTool.description,
@@ -657,7 +740,6 @@ export function buildTools(
           "select",
           "goto_cursor",
           "yank",
-          "open_file",
           "highlight",
           "cursor_context",
           "buffers",
@@ -673,7 +755,7 @@ export function buildTools(
           .optional()
           .describe("For read/edit/format/select/highlight: end line (1-indexed)"),
         replacement: z.string().optional().describe("For edit: new content"),
-        file: z.string().optional().describe("For navigate/open_file: file path"),
+        file: z.string().optional().describe("For read/edit/navigate: file path (switches buffer)"),
         line: z
           .number()
           .optional()
@@ -1320,7 +1402,13 @@ export function buildSubagentCodeTools(opts?: {
           .number()
           .optional()
           .describe(
-            "1-indexed line hint from your last read — helps locate the match and shows context on error",
+            "1-indexed line hint from your last read. When paired with lineEnd, enables line-range replacement as fallback when oldString match fails.",
+          ),
+        lineEnd: z
+          .number()
+          .optional()
+          .describe(
+            "1-indexed end line (inclusive). When both lineStart and lineEnd are set, the system replaces by line range if oldString matching fails.",
           ),
       }),
       execute: deferExecute(async (args) => {
@@ -1347,6 +1435,10 @@ export function buildSubagentCodeTools(opts?: {
               oldString: z.string().describe("Exact string to replace"),
               newString: z.string().describe("Replacement string"),
               lineStart: z.number().optional().describe("Line hint (1-indexed)"),
+              lineEnd: z
+                .number()
+                .optional()
+                .describe("End line (1-indexed, inclusive) for line-range fallback"),
             }),
           )
           .describe("Array of edits to apply atomically"),

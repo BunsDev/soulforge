@@ -1,6 +1,6 @@
-import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 export interface SkillSearchResult {
   id: string;
@@ -20,6 +20,9 @@ interface SearchResponse {
   skills: SkillSearchResult[];
   count: number;
 }
+
+const INSTALL_TIMEOUT = 30_000;
+const OUTPUT_CAP = 500;
 
 /** Search skills.sh for available skills */
 export async function searchSkills(query: string): Promise<SkillSearchResult[]> {
@@ -47,28 +50,61 @@ async function detectRunner(): Promise<string> {
   return "npx";
 }
 
-/** Install a skill via bunx (or npx fallback) */
+/** Install a skill via bunx (or npx fallback). Returns the on-disk skill name if found. */
 export async function installSkill(
   source: string,
   skillId: string,
   global = false,
-): Promise<string> {
+): Promise<{ installed: boolean; name?: string; error?: string }> {
   const runner = await detectRunner();
   const args = [runner, "skills", "add", source, "--skill", skillId, "-y"];
   if (global) args.push("-g");
+
   const proc = Bun.spawn(args, {
     stdout: "pipe",
     stderr: "pipe",
   });
 
+  // Timeout
+  const timeout = setTimeout(() => {
+    try {
+      proc.kill();
+    } catch {}
+  }, INSTALL_TIMEOUT);
+
   const exitCode = await proc.exited;
+  clearTimeout(timeout);
+
+  const stderr = await new Response(proc.stderr).text();
+  const stdout = await new Response(proc.stdout).text();
+
   if (exitCode !== 0) {
-    const stderr = await new Response(proc.stderr).text();
-    throw new Error(stderr.trim() || `Install failed with code ${String(exitCode)}`);
+    // Extract useful error, cap output
+    const msg = (stderr || stdout).trim();
+    const clean =
+      msg.length > OUTPUT_CAP
+        ? `${msg.slice(0, OUTPUT_CAP)}...`
+        : msg || `exit code ${String(exitCode)}`;
+    return { installed: false, error: clean };
   }
 
-  const stdout = await new Response(proc.stdout).text();
-  return stdout.trim();
+  // Verify skill actually exists on disk — bunx may "succeed" (exit 0) but not install a SKILL.md
+  const installed = listInstalledSkills();
+  const lastSegment = skillId.split("/").pop() ?? skillId;
+  const match =
+    installed.find((s) => s.name === skillId) ??
+    installed.find((s) => s.name === lastSegment) ??
+    installed.find((s) => s.name.includes(lastSegment) || lastSegment.includes(s.name));
+
+  if (match) {
+    return { installed: true, name: match.name };
+  }
+
+  // Exit 0 but no skill found — common with packages that resolve deps but have no SKILL.md
+  const hint = stdout.includes("Resolving dependencies")
+    ? "Package resolved but no SKILL.md found in it."
+    : (stdout || stderr).trim().slice(0, OUTPUT_CAP) || "No SKILL.md found after install.";
+  return { installed: false, error: hint };
 }
 
 /** Scan known directories for installed SKILL.md files */
@@ -143,4 +179,16 @@ function isDirectorySafe(path: string): boolean {
 /** Read a SKILL.md file and return its content */
 export function loadSkill(path: string): string {
   return readFileSync(path, "utf-8");
+}
+
+/** Remove an installed skill from disk */
+export function removeInstalledSkill(skill: InstalledSkill): boolean {
+  try {
+    const dir = dirname(skill.path);
+    if (existsSync(dir)) {
+      rmSync(dir, { recursive: true });
+      return true;
+    }
+  } catch {}
+  return false;
 }

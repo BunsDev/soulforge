@@ -727,6 +727,52 @@ fn main() {
 `,
   );
 
+  // ── TypeScript: aliased imports ──
+  write(
+    "src/alias-mod/helpers.ts",
+    `export function register() { return "registered"; }
+export function deadAliasHelper() { /* never imported */ }
+`,
+  );
+  write(
+    "src/alias-mod/consumer.ts",
+    `import { register as registerHelpers } from "./helpers";
+registerHelpers();
+`,
+  );
+
+  // ── TypeScript: dynamic import() ──
+  write(
+    "src/dynamic-entry.ts",
+    `export function start() { console.log("started"); }
+export function deadDynamic() { /* never imported */ }
+`,
+  );
+  write(
+    "src/dynamic-loader.ts",
+    `async function boot() {
+  const { start } = await import("./dynamic-entry.js");
+  start();
+}
+boot();
+`,
+  );
+
+  // ── Lua: non-JS file (should not be flagged as dead file) ──
+  write(
+    "src/editor/init.lua",
+    `local function ensure_plugin(name, url)
+  print(name, url)
+end
+
+local function run_pending_clones()
+  ensure_plugin("foo", "https://example.com")
+end
+
+run_pending_clones()
+`,
+  );
+
   repoMap = new RepoMap(TMP);
   await repoMap.scan();
 });
@@ -868,8 +914,10 @@ describe("unused exports — Swift", () => {
 });
 
 describe("unused exports — Elixir", () => {
-  it("detects unused_parse as unused", () => {
-    expect(unusedNames()).toContain("unused_parse");
+  it("does not report elixir exports (no import tracking for elixir)", () => {
+    const unused = getUnused();
+    const elixirUnused = unused.filter((u) => u.path.endsWith(".ex") || u.path.endsWith(".exs"));
+    expect(elixirUnused.length).toBe(0);
   });
 
   it("does not flag parse as unused", () => {
@@ -1167,5 +1215,41 @@ describe("getUnusedExports limit parameter", () => {
   it("default limit is high enough to catch all test fixtures", () => {
     const all = repoMap.getUnusedExports();
     expect(all.length).toBeGreaterThan(10);
+  });
+});
+
+describe("unused exports — aliased imports", () => {
+  it("does not flag register as unused (imported via alias)", () => {
+    const unused = getUnused();
+    const reg = unused.find(
+      (u) => u.name === "register" && u.path.includes("alias-mod/helpers"),
+    );
+    expect(reg).toBeUndefined();
+  });
+
+  it("detects deadAliasHelper as unused", () => {
+    expect(unusedNames()).toContain("deadAliasHelper");
+  });
+});
+
+describe("unused exports — dynamic import()", () => {
+  it("does not flag start as unused (dynamically imported)", () => {
+    const unused = getUnused();
+    const s = unused.find(
+      (u) => u.name === "start" && u.path.includes("dynamic-entry"),
+    );
+    expect(s).toBeUndefined();
+  });
+
+  it("detects deadDynamic as unused", () => {
+    expect(unusedNames()).toContain("deadDynamic");
+  });
+});
+
+describe("unused exports — non-JS files not flagged as dead", () => {
+  it("lua file symbols are not reported as dead exports", () => {
+    const unused = getUnused();
+    const luaDead = unused.filter((u) => u.path.endsWith(".lua"));
+    expect(luaDead.length).toBe(0);
   });
 });

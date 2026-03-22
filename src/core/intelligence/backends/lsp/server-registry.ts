@@ -75,8 +75,8 @@ const SERVER_CANDIDATES: Record<string, ServerCandidate[]> = {
   vue: [{ command: "vue-language-server", args: ["--stdio"] }],
 };
 
-/** Mason installs LSP servers here */
-const MASON_BIN_DIR = join(homedir(), ".local", "share", "nvim", "mason", "bin");
+/** Mason installs LSP servers here (NVIM_APPNAME=soulforge isolates the data dir) */
+const MASON_BIN_DIR = join(homedir(), ".local", "share", "soulforge", "mason", "bin");
 
 /** SoulForge installs LSP servers here via /lsp-install */
 const SOULFORGE_BIN_DIR = join(homedir(), ".soulforge", "lsp-servers");

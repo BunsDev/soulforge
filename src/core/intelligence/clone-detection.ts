@@ -140,7 +140,7 @@ export function jaccardSimilarity(a: Uint32Array, b: Uint32Array): number {
 const FRAGMENT_WINDOW = 12;
 const MIN_FRAGMENT_TOKENS = FRAGMENT_WINDOW + 4;
 
-export interface FragmentHash {
+interface FragmentHash {
   hash: string;
   tokenOffset: number;
 }

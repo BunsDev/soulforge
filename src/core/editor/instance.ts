@@ -12,13 +12,12 @@ export function getNvimInstance(): NvimInstance | null {
   return instance;
 }
 
-/** Register a callback that opens the editor panel. Called by React side on mount. */
+/** Register a callback to open a file in the editor. Called by React side on mount. */
 export function setEditorRequestCallback(cb: ((file?: string) => void) | null): void {
   editorRequestCallback = cb;
 }
 
-/** Request the editor panel to open (optionally with a file), then wait for nvim.
- *  Returns nvim instance or null if panel couldn't start in time. */
+/** Request neovim to open a file. Nvim is always running — this just opens the buffer. */
 export async function requestEditor(file?: string): Promise<NvimInstance | null> {
   if (instance) return instance;
   if (editorRequestCallback) {
@@ -37,8 +36,8 @@ export async function reloadBuffer(filePath: string, line?: number): Promise<boo
   if (!nvim) return false;
   try {
     const lua = line
-      ? "local p, l = ...; vim.cmd.edit({args={vim.fn.fnameescape(p)}, bang=true}); vim.api.nvim_win_set_cursor(0, {l, 0})"
-      : "vim.cmd.edit({args={vim.fn.fnameescape(...)}, bang=true})";
+      ? "local p, l = ...; vim.cmd({cmd='edit', args={vim.fn.fnameescape(p)}, bang=true, mods={silent=true}}); vim.api.nvim_win_set_cursor(0, {l, 0})"
+      : "vim.cmd({cmd='edit', args={vim.fn.fnameescape(...)}, bang=true, mods={silent=true}})";
     const args = line ? [filePath, line] : [filePath];
     await Promise.race([
       nvim.api.executeLua(lua, args),

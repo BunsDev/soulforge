@@ -295,6 +295,11 @@ if (!nvim) {
 }
 if (nvim) {
   config.nvimPath = nvim.path;
+  import("./core/editor/neovim.js")
+    .then(({ bootstrapNeovimPlugins }) => {
+      bootstrapNeovimPlugins(nvim.path);
+    })
+    .catch(() => {});
 }
 
 if (!getVendoredPath("rg")) {

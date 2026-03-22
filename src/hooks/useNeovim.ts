@@ -65,6 +65,7 @@ export function useNeovim(
   const [cursorCol, setCursorCol] = useState(0);
   const [visualSelection, setVisualSelection] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [launchGeneration, setLaunchGeneration] = useState(0);
 
   // Stable ref for onExit so it doesn't re-trigger the launch effect
   const onExitRef = useRef(onExit);
@@ -154,6 +155,7 @@ export function useNeovim(
           setNvimInstance(null);
           if (!mountedRef.current) return;
           setReady(false);
+          setLaunchGeneration((g) => g + 1);
           onExitRef.current?.();
         };
         closeHandlerRef.current = handleClose;
@@ -167,7 +169,8 @@ export function useNeovim(
       .finally(() => {
         launchingRef.current = false;
       });
-  }, [active, nvimPath, nvimConfig, showHints, hasTabBar, splitPct]);
+    // biome-ignore lint/correctness/useExhaustiveDependencies: launchGeneration triggers re-launch after close
+  }, [active, nvimPath, nvimConfig, showHints, hasTabBar, splitPct, launchGeneration]);
 
   // Resize neovim when terminal dimensions change
   useEffect(() => {

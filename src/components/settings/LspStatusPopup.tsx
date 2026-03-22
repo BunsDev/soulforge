@@ -53,9 +53,9 @@ export function LspStatusPopup({ visible, onClose }: Props) {
   const [detailScroll, setDetailScroll] = useState(0);
   const [servers, setServers] = useState<LspServerDetail[]>([]);
   const { width: termCols, height: termRows } = useTerminalDimensions();
-  const popupWidth = Math.max(60, Math.round(termCols * 0.75));
+  const popupWidth = Math.max(60, Math.round(termCols * 0.8));
   const innerW = popupWidth - 2;
-  const popupHeight = Math.max(12, Math.round(termRows * 0.6));
+  const popupHeight = Math.max(12, Math.round(termRows * 0.7));
   const maxListVisible = Math.max(4, popupHeight - CHROME_ROWS);
 
   const bgErrors = useErrorStore((s) => s.errors);

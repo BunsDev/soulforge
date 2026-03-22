@@ -13,7 +13,7 @@ import type {
 import type { ConfigScope } from "../layout/shared.js";
 import { CONFIG_SCOPES, Overlay, POPUP_BG, POPUP_HL, PopupRow } from "../layout/shared.js";
 
-const MAX_POPUP_WIDTH = 68;
+const MAX_POPUP_WIDTH = 78;
 const CHROME_ROWS = 7;
 
 type ItemType = "cycle" | "toggle" | "budget";
@@ -262,9 +262,9 @@ export function ProviderSettings({
 }: Props) {
   const { width: termCols, height: termRows } = useTerminalDimensions();
   const containerRows = termRows - 2;
-  const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.8));
+  const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.85));
   const innerW = popupWidth - 2;
-  const maxVisible = Math.max(4, Math.floor(containerRows * 0.7) - CHROME_ROWS);
+  const maxVisible = Math.max(4, Math.floor(containerRows * 0.8) - CHROME_ROWS);
 
   const [tab, setTab] = useState<ProviderTab>("claude");
   const { cursor, setCursor, scrollOffset, adjustScroll, resetScroll } = usePopupScroll(maxVisible);

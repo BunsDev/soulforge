@@ -80,7 +80,7 @@ export async function buildV2Summary(opts: {
     return structuredState;
   }
 
-  return `${structuredState}\n\n## Additional Context (LLM verification)\n${gapFill.trim()}`;
+  return `${structuredState}\n\n## Additional Details\n${gapFill.trim()}`;
 }
 
 function buildFullConvoText(messages: ModelMessage[], charBudget: number): string {

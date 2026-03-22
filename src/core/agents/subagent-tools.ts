@@ -191,6 +191,7 @@ export function createAgent(
     repoMap: models.repoMap,
     contextWindow,
     disablePruning: detectModelFamily(modelId) === "claude" || models.disablePruning,
+    role: task.role === "investigate" ? ("investigate" as const) : ("explore" as const),
   };
   const agent = useExplore ? createExploreAgent(model, opts) : createCodeAgent(model, opts);
   return { agent, modelId, tier };
@@ -335,6 +336,7 @@ export function buildSubagentTools(models: SubagentModels) {
         const dispatchTabId = getActiveTaskTab();
         if (dispatchTabId) getWorkspaceCoordinator().agentStarted(dispatchTabId);
         let editingDone = false;
+        let dependentWarning = "";
         try {
           const WEB_MARKER = "web";
 
@@ -412,7 +414,7 @@ export function buildSubagentTools(models: SubagentModels) {
               );
             }
 
-            // Completeness check: for code tasks, warn about missing dependents
+            // Completeness check: for code tasks, collect missing dependents as a warning
             // Skip files not in the repo map index — they were likely just created
             if (repoMap) {
               const codeFiles = rawArgs.tasks
@@ -421,7 +423,7 @@ export function buildSubagentTools(models: SubagentModels) {
               if (codeFiles.length > 0) {
                 const missingDeps: string[] = [];
                 for (const f of codeFiles) {
-                  if (!verified.includes(f)) continue; // skip files not in repo map
+                  if (!verified.includes(f)) continue;
                   const importers = repoMap.getFileDependents(f);
                   for (const imp of importers.slice(0, 5)) {
                     if (!contractSet.has(imp.path) && !codeFiles.includes(imp.path)) {
@@ -431,11 +433,7 @@ export function buildSubagentTools(models: SubagentModels) {
                 }
                 if (missingDeps.length > 0) {
                   const depList = [...new Set(missingDeps)].slice(0, 5).join("\n  ");
-                  return (
-                    `⚠️ dispatch [rejected → missing dependents]\n` +
-                    `Code edits may break importers not in your contract:\n  ${depList}\n` +
-                    `Add them to contract.filesNeeded or set force: true if they don't need updates.`
-                  );
+                  dependentWarning = `\n\n⚠️ Files that import your targets (may need updates if exports/signatures changed):\n  ${depList}`;
                 }
               }
             }
@@ -969,10 +967,12 @@ export function buildSubagentTools(models: SubagentModels) {
 
             const postParts = [desloppifyResult, verifyResult].filter(Boolean);
             const reads = bus.getFileReadRecords(task.agentId);
+            const singleOutput =
+              postParts.length > 0 ? `${resultText}\n${postParts.join("\n")}` : resultText;
             return {
               reads,
               filesEdited: edited,
-              output: postParts.length > 0 ? `${resultText}\n${postParts.join("\n")}` : resultText,
+              output: singleOutput + dependentWarning,
             } satisfies DispatchOutput;
           }
 
@@ -1190,7 +1190,7 @@ export function buildSubagentTools(models: SubagentModels) {
           return {
             reads: allReads,
             filesEdited: editedPaths,
-            output: sections.join("\n"),
+            output: sections.join("\n") + dependentWarning,
           } satisfies DispatchOutput;
         } finally {
           if (dispatchTabId && !editingDone) getWorkspaceCoordinator().agentFinished(dispatchTabId);

@@ -568,7 +568,11 @@ export function useChat({
 
   const summarizeConversation = useCallback(
     async (opts?: { skipQueueDrain?: boolean }) => {
-      if (isCompactingRef.current) return;
+      if (isCompactingRef.current) {
+        // Already compacting — don't silently drop, queue for later
+        pendingCompactRef.current = true;
+        return;
+      }
 
       // If a generation is in progress, defer compact until it settles
       if (abortRef.current) {
@@ -585,7 +589,10 @@ export function useChat({
         return;
       }
 
-      const currentCore = coreMessagesRef.current;
+      // Snapshot coreMessages — must be a copy, not a live reference.
+      // Without this, user input during async compaction mutates the array
+      // and causes stale keepStart calculations + lost messages.
+      const currentCore = [...coreMessagesRef.current];
       if (currentCore.length < 4) {
         setMessages((prev) => [
           ...prev,
@@ -768,8 +775,9 @@ export function useChat({
               : {}),
             ...(headers ? { headers } : {}),
             prompt: [
-              "You are compacting the OLDER portion of a coding assistant conversation.",
+              "You are summarizing the older portion of a coding assistant conversation.",
               "The most recent messages will be preserved verbatim — focus on summarizing what came before.",
+              "Output ONLY the structured summary below. Do not include any meta-commentary about the summarization process.",
               "",
               "Create a structured summary with these sections:",
               "",
@@ -797,7 +805,7 @@ export function useChat({
                 ? `\n${planContext}\nINCLUDE the plan progress above VERBATIM in ## Current State so the agent knows which steps are done/active/pending.`
                 : "",
               "",
-              "Be thorough — this summary is the only record of the older conversation.",
+              "Be thorough — preserve specific details (file contents, error messages, code changes).",
               "CRITICAL: Preserve specific details from tool results (file contents, error messages, test output). Generic summaries like 'edited file X' are useless — include WHAT was changed.",
               "",
               "CONVERSATION TO SUMMARIZE:",
@@ -831,7 +839,50 @@ export function useChat({
           content: "Continuing.",
         };
 
-        const newMessages = [summaryMsg, ackMsg, ...recentMessages];
+        // Structural validation of recentMessages.
+        // After compaction, messages may have broken invariants:
+        // 1. Orphaned tool_result at the start (no preceding assistant with tool_use)
+        // 2. Two user messages in a row after ackMsg (assistant) + recentMessages[0] (user skipped, next is user)
+        // 3. tool messages in the middle without their assistant counterpart
+        //
+        // Fix: drop leading tool messages, then ensure alternation is valid.
+        let validStart = 0;
+        for (let i = 0; i < recentMessages.length; i++) {
+          if (recentMessages[i]?.role === "tool") {
+            validStart = i + 1;
+          } else {
+            break;
+          }
+        }
+        // After ackMsg (assistant), next must be user or tool-with-assistant.
+        // If recentMessages starts with assistant, drop it to avoid assistant→assistant.
+        if (
+          validStart < recentMessages.length &&
+          recentMessages[validStart]?.role === "assistant"
+        ) {
+          validStart++;
+        }
+        const validRecent = validStart > 0 ? recentMessages.slice(validStart) : recentMessages;
+
+        // Final pass: strip any remaining orphaned tool messages throughout.
+        // A tool message is valid only if preceded by an assistant message.
+        const sanitized: typeof validRecent = [];
+        for (const msg of validRecent) {
+          if (msg.role === "tool") {
+            const prev = sanitized[sanitized.length - 1];
+            if (!prev || prev.role !== "assistant") continue; // drop orphan
+          }
+          sanitized.push(msg);
+        }
+
+        // If sanitization removed everything, keep at least one recent user message
+        // to maintain valid conversation structure.
+        if (sanitized.length === 0) {
+          const lastUser = recentMessages.findLast((m) => m.role === "user");
+          if (lastUser) sanitized.push(lastUser);
+        }
+
+        const newMessages = [summaryMsg, ackMsg, ...sanitized];
         setCoreMessages(newMessages);
         emitCacheReset(); // Old read results are gone — allow re-reads
         const trackedFiles = contextManager.getTrackedFiles();
@@ -844,7 +895,7 @@ export function useChat({
           }
         }
         for (const f of trackedFiles.mentioned) contextManager.trackMentionedFile(f);
-        reprimeContextFromMessages(contextManager, recentMessages);
+        reprimeContextFromMessages(contextManager, sanitized);
 
         const newCoreChars = newMessages.reduce((sum, m) => {
           if (typeof m.content === "string") return sum + m.content.length;
@@ -902,6 +953,10 @@ export function useChat({
         compactAbortRef.current = null;
         isCompactingRef.current = false;
         setIsCompacting(false);
+        // Always reset WSM — prevents corrupted state from failed compactions
+        // leaking into subsequent conversation extraction.
+        const wsm = workingStateRef.current;
+        if (wsm) wsm.reset();
         if (visibleRef.current) useStatusBarStore.getState().setCompacting(false);
         if (!opts?.skipQueueDrain) {
           setMessageQueue((queue) => {

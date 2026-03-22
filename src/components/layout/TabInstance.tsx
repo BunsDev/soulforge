@@ -496,21 +496,7 @@ export const TabInstance = memo(function TabInstance({
       ) : chat.pendingQuestion ? (
         <>
           <box flexShrink={0} paddingX={1}>
-            <QuestionPrompt
-              question={chat.pendingQuestion}
-              isActive={isFocused}
-              onAnswer={(answer) => {
-                chat.setMessages((prev) => [
-                  ...prev,
-                  {
-                    id: crypto.randomUUID(),
-                    role: "user" as const,
-                    content: answer,
-                    timestamp: Date.now(),
-                  },
-                ]);
-              }}
-            />
+            <QuestionPrompt question={chat.pendingQuestion} isActive={isFocused} />
           </box>
           {showPlanProgress && chat.activePlan && (
             <box flexShrink={0} paddingX={1}>

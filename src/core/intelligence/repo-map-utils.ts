@@ -90,7 +90,34 @@ export const NON_CODE_LANGUAGES: ReadonlySet<Language> = new Set<Language>([
   "dockerfile",
 ]);
 
-export const BARREL_RE = /\/(index\.(ts|js|tsx|mts|mjs)|__init__\.py|mod\.rs)$/;
+/**
+ * Languages where we can reliably track cross-file imports via tree-sitter queries.
+ * Files in other languages should not be classified as "dead" because we can't
+ * determine their usage via import graph analysis alone — they may be loaded
+ * via filesystem, process spawn, runtime include, or other non-import mechanisms.
+ */
+export const IMPORT_TRACKABLE_LANGUAGES: ReadonlySet<Language> = new Set<Language>([
+  "typescript",
+  "javascript",
+  "python",
+  "go",
+  "rust",
+  "java",
+  "c",
+  "cpp",
+  "csharp",
+  "ruby",
+  "php",
+  "swift",
+  "kotlin",
+  "scala",
+  "dart",
+  "ocaml",
+  "objc",
+  "solidity",
+]);
+
+const BARREL_RE = /\/(index\.(ts|js|tsx|mts|mjs)|__init__\.py|mod\.rs)$/;
 
 export function barrelToDir(barrelPath: string): string {
   return barrelPath.replace(BARREL_RE, "");
@@ -252,7 +279,7 @@ export function extractDocComment(lines: string[], symbolLineIdx: number): strin
   return null;
 }
 
-export function trimDocLine(text: string): string | null {
+function trimDocLine(text: string): string | null {
   let s = text.replace(/\s+/g, " ").trim();
   if (!s || s.length < 5) return null;
   if (s.length > 80) s = `${s.slice(0, 77)}...`;
@@ -292,14 +319,14 @@ export async function collectFiles(dir: string, depth = 0): Promise<CollectedFil
   return files;
 }
 
-export interface CollectedFile {
+interface CollectedFile {
   path: string;
   mtimeMs: number;
 }
 
 export const MAX_FILE_SIZE = 500_000;
 
-export const MAX_DEPTH = 10;
+const MAX_DEPTH = 10;
 
 export const MAX_REFS_PER_FILE = 5000;
 

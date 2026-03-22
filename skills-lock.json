@@ -6,6 +6,11 @@
       "sourceType": "github",
       "computedHash": "58ce68f628890c3925aea2b5435a649251ac182057541045c68fc19a27aaa0ec"
     },
+    "bun-development": {
+      "source": "sickn33/antigravity-awesome-skills",
+      "sourceType": "github",
+      "computedHash": "038ce6fe6357843e33d96afa2a900c100066f0c9c2cab2d6562cdb3202ebc7c2"
+    },
     "opentui": {
       "source": "msmps/opentui-skill",
       "sourceType": "github",

@@ -220,8 +220,7 @@ function SystemMessage({ msg, animate = true }: { msg: ChatMessage; animate?: bo
   );
 }
 
-const META_TOOLS = new Set(["plan", "update_plan_step", "ask_user", "editor_panel"]);
-const EDIT_NAMES = new Set(["edit_file", "multi_edit"]);
+import { EDIT_NAMES, groupToolCalls } from "./tool-grouping.js";
 
 function isFailedEditCall(tc: ToolCall): boolean {
   return EDIT_NAMES.has(tc.name) && !!tc.result && !tc.result.success;
@@ -276,6 +275,8 @@ function ToolCallRow({ tc }: { tc: ToolCall }) {
   const fullError = tc.result?.error ?? "";
 
   if (isError && errorsExpanded && fullError.length > 0) {
+    const errorPreview = fullError.length > 120 ? `${fullError.slice(0, 117)}…` : fullError;
+    const hasMore = fullError.length > 120;
     return (
       <box flexDirection="column" flexShrink={0}>
         <box height={1} flexShrink={0}>
@@ -289,8 +290,11 @@ function ToolCallRow({ tc }: { tc: ToolCall }) {
             <span fg={statusColor}>{shortResult}</span>
           </text>
         </box>
-        <box paddingLeft={3} flexShrink={0}>
-          <text fg="#a55">{fullError}</text>
+        <box paddingLeft={3} height={1} flexShrink={0}>
+          <text truncate fg="#a55">
+            {errorPreview}
+            {hasMore ? <span fg="#555"> /errors for full</span> : null}
+          </text>
         </box>
       </box>
     );
@@ -670,35 +674,75 @@ function renderSegments(
     });
     if (calls.length === 0) return null;
 
-    const groups: { type: "normal"; tc: ToolCall }[] | { type: "meta"; calls: ToolCall[] }[] = [];
-    let metaBuf: ToolCall[] = [];
-    const flushMeta = () => {
-      if (metaBuf.length > 0) {
-        (groups as { type: "meta"; calls: ToolCall[] }[]).push({ type: "meta", calls: metaBuf });
-        metaBuf = [];
-      }
-    };
-    for (const tc of calls) {
-      if (META_TOOLS.has(tc.name)) {
-        metaBuf.push(tc);
-      } else {
-        flushMeta();
-        (groups as { type: "normal"; tc: ToolCall }[]).push({ type: "normal", tc });
-      }
-    }
-    flushMeta();
+    const groups = groupToolCalls(calls);
 
     const toolsKey = `tools-${seg.toolCallIds[0] ?? String(i)}`;
-    const typedGroups = groups as (
-      | { type: "normal"; tc: ToolCall }
-      | { type: "meta"; calls: ToolCall[] }
-    )[];
     return (
       <box key={toolsKey} flexDirection="column" marginTop={needsGap ? 1 : 0}>
-        {typedGroups.map((g, gi) => {
+        {groups.map((g, gi) => {
           if (g.type === "meta") {
             return <CollapsedToolGroup key={`meta-${String(gi)}`} calls={g.calls} />;
           }
+          if (g.type === "batch") {
+            const fileCounts = new Map<string, number>();
+            let ok = 0;
+            let fail = 0;
+            let pending = 0;
+            for (const tc of g.calls) {
+              const full = extractPathFromArgs(tc.args) ?? "";
+              const short = full
+                ? full.includes("/")
+                  ? (full.split("/").pop() ?? full)
+                  : full
+                : tc.name;
+              fileCounts.set(short, (fileCounts.get(short) ?? 0) + 1);
+              if (!tc.result) pending++;
+              else if (tc.result.success) ok++;
+              else fail++;
+            }
+            const parts: string[] = [];
+            for (const [file, count] of fileCounts) {
+              parts.push(count > 1 ? `${file} ×${String(count)}` : file);
+            }
+            const label =
+              parts.length <= 3
+                ? parts.join(", ")
+                : `${parts.slice(0, 2).join(", ")} +${String(parts.length - 2)}`;
+            const allDone = pending === 0;
+            const statusIcon = allDone
+              ? fail === 0
+                ? "✓"
+                : fail === g.calls.length
+                  ? "✗"
+                  : "⚠"
+              : "●";
+            const statusColor = allDone
+              ? fail === 0
+                ? "#4a7"
+                : fail === g.calls.length
+                  ? "#f44"
+                  : "#fa0"
+              : "#666";
+            const kindLabel =
+              g.kind === "edits" ? "edit_file" : g.kind === "reads" ? "read_file" : "soul_grep";
+            const { icon: batchIcon, iconColor } = resolveToolDisplay(kindLabel);
+            return (
+              <box key={`batch-${String(gi)}`} height={1} flexShrink={0}>
+                <text truncate>
+                  <span fg={statusColor}>{statusIcon} </span>
+                  <span fg={iconColor}>{batchIcon} </span>
+                  <span fg="#999">{label}</span>
+                  {fail > 0 && ok > 0 ? (
+                    <span fg="#555">
+                      {" "}
+                      ({String(ok)} ok, {String(fail)} failed)
+                    </span>
+                  ) : null}
+                </text>
+              </box>
+            );
+          }
+          if (g.type !== "normal") return null;
           return (
             <box key={g.tc.id} flexDirection="column">
               {g.tc.name === "edit_file" ? (

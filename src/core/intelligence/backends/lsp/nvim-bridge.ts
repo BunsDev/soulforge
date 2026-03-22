@@ -41,17 +41,65 @@ function bufferPreamble(filePath: string): string {
     local filepath = '${escaped}'
     local bufnr = vim.fn.bufadd(filepath)
     vim.fn.bufload(bufnr)
-    -- Force re-read from disk so LSP always sees current content
-     vim.api.nvim_buf_call(bufnr, function() vim.cmd('edit!') end)
-     vim.bo[bufnr].buflisted = false
+    vim.bo[bufnr].buflisted = false
 
-    -- Wait up to 2s for an LSP client to attach
-    local deadline = vim.uv.now() + 2000
-    while #vim.lsp.get_clients({ bufnr = bufnr }) == 0 do
-      if vim.uv.now() >= deadline then return '__NO_LSP__' end
-      vim.wait(50)
+    -- Trigger LSP attach without edit! (which causes swap file dialogs / "Press ENTER").
+    -- Setting filetype fires the FileType autocommand → mason-lspconfig starts the server.
+    local clients = vim.lsp.get_clients({ bufnr = bufnr })
+    if #clients == 0 then
+      local ft = vim.filetype.match({ buf = bufnr, filename = filepath })
+      if ft and vim.bo[bufnr].filetype ~= ft then
+        vim.bo[bufnr].filetype = ft
+      end
+      -- Wait up to 2s for an LSP client to attach
+      local deadline = vim.uv.now() + 2000
+      while #vim.lsp.get_clients({ bufnr = bufnr }) == 0 do
+        if vim.uv.now() >= deadline then return '__NO_LSP__' end
+        vim.wait(50)
+      end
     end
   `;
+}
+
+/**
+ * Load a file in a hidden neovim buffer and trigger LSP attach via filetype detection.
+ * Never uses vim.cmd('edit') — avoids swap file dialogs and "Press ENTER" prompts.
+ */
+export async function warmupBuffer(filePath: string): Promise<boolean> {
+  const nvim = getNvimInstance() as NvimApi | null;
+  if (!nvim) return false;
+
+  const escaped = filePath.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  const lua = `
+    local filepath = '${escaped}'
+    local bufnr = vim.fn.bufadd(filepath)
+    vim.fn.bufload(bufnr)
+    vim.bo[bufnr].buflisted = false
+
+    -- Set filetype to fire FileType autocommand → mason-lspconfig starts the LSP server.
+    -- This avoids edit! which can trigger swap file dialogs and block neovim.
+    local clients = vim.lsp.get_clients({ bufnr = bufnr })
+    if #clients == 0 then
+      local ft = vim.filetype.match({ buf = bufnr, filename = filepath })
+      if ft and vim.bo[bufnr].filetype ~= ft then
+        vim.bo[bufnr].filetype = ft
+      end
+      -- Wait up to 10s for an LSP client to attach
+      local deadline = vim.uv.now() + 10000
+      while #vim.lsp.get_clients({ bufnr = bufnr }) == 0 do
+        if vim.uv.now() >= deadline then return '__NO_LSP__' end
+        vim.wait(50)
+      end
+    end
+
+    -- Prove LSP is responsive
+    local params = { textDocument = { uri = vim.uri_from_fname(filepath) } }
+    local result = vim.lsp.buf_request_sync(bufnr, 'textDocument/documentSymbol', params, 15000)
+    if result then return 'ready' end
+    return 'timeout'
+  `;
+  const result = await executeLua(lua);
+  return result === "ready";
 }
 
 /** Find definition of symbol at line:col in file */
@@ -152,7 +200,15 @@ export async function documentSymbols(filePath: string): Promise<unknown[] | nul
 export async function getDiagnostics(filePath: string): Promise<LspDiagnostic[] | null> {
   const lua = `
     ${bufferPreamble(filePath)}
+    -- Diagnostics are published asynchronously; wait up to 2s for them to arrive
     local diags = vim.diagnostic.get(bufnr)
+    if #diags == 0 then
+      local deadline = vim.uv.now() + 2000
+      while #diags == 0 and vim.uv.now() < deadline do
+        vim.wait(100)
+        diags = vim.diagnostic.get(bufnr)
+      end
+    end
     local result = {}
     for _, d in ipairs(diags) do
       table.insert(result, {

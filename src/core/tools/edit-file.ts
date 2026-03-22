@@ -13,6 +13,7 @@ interface EditFileArgs {
   oldString: string;
   newString: string;
   lineStart?: number;
+  lineEnd?: number;
   tabId?: string;
 }
 
@@ -30,7 +31,7 @@ export function formatMetricDelta(label: string, before: number, after: number):
  */
 export function buildRichEditError(
   content: string,
-  _oldStr: string,
+  oldStr: string,
   lineHint?: number,
 ): { output: string } {
   const lines = content.split("\n");
@@ -41,9 +42,14 @@ export function buildRichEditError(
     .slice(start, end)
     .map((l, i) => `${String(start + i + 1).padStart(4)} │ ${l}`)
     .join("\n");
-  const readHint = `read_file(path, startLine: ${String(start + 1)}, endLine: ${String(Math.min(end + 20, lines.length))})`;
+  // Detect escape-heavy content — likely JSON escaping corruption
+  const backslashDensity = (oldStr.match(/\\/g) || []).length / Math.max(oldStr.length, 1);
+  const escapeHint =
+    backslashDensity > 0.05
+      ? "\n[Escape-heavy content detected — use lineStart + lineEnd for line-range replacement, or use editor(action: edit, startLine, endLine, replacement)]"
+      : "";
   return {
-    output: `old_string not found in file (re-read performed — content below is current):\n${snippet}\n[Hint: ${readHint} to see more context]`,
+    output: `old_string not found in file (re-read performed — content below is current):\n${snippet}${escapeHint}`,
   };
 }
 
@@ -144,6 +150,72 @@ export const editFileTool = {
         if (fixed) {
           resolvedOld = fixed.oldStr;
           resolvedNew = fixed.newStr;
+        } else if (args.lineStart != null && args.lineEnd != null) {
+          // Line-range fallback: when str_replace fails (e.g. regex-heavy code
+          // where JSON escaping corrupts backslashes), replace by line range instead.
+          // Safety checks prevent accidental code mangling.
+          const lines = content.split("\n");
+          const start = args.lineStart - 1; // convert to 0-indexed
+          const end = args.lineEnd; // lineEnd is inclusive, slice end is exclusive
+          if (start < 0 || end > lines.length || start >= end) {
+            return {
+              success: false,
+              output: `Invalid line range: ${String(args.lineStart)}-${String(args.lineEnd)} (file has ${String(lines.length)} lines)`,
+              error: "invalid line range",
+            };
+          }
+          const oldLines = lines.slice(start, end);
+          const newLines = newStr.split("\n");
+          // Safety: reject if replacing a large range with empty or near-empty content
+          // (protects against accidental deletion)
+          if (oldLines.length > 5 && newLines.length === 0) {
+            return {
+              success: false,
+              output: `Refusing to delete ${String(oldLines.length)} lines with empty replacement. Use oldString match for deletions.`,
+              error: "safety: empty replacement for large range",
+            };
+          }
+          // Apply the line-range replacement
+          const before = lines.slice(0, start);
+          const after = lines.slice(end);
+          const updated = [...before, ...newLines, ...after].join("\n");
+          const beforeMetrics = analyzeFile(content);
+          const afterMetrics = analyzeFile(updated);
+          const editLine = args.lineStart;
+          let beforeDiags: import("../intelligence/types.js").Diagnostic[] = [];
+          let router: import("../intelligence/router.js").CodeIntelligenceRouter | null = null;
+          let language: import("../intelligence/types.js").Language = "unknown";
+          try {
+            const intel = await import("../intelligence/index.js");
+            router = intel.getIntelligenceRouter(process.cwd());
+            language = router.detectLanguage(filePath);
+            const diags = await router.executeWithFallback(language, "getDiagnostics", (b) =>
+              b.getDiagnostics ? b.getDiagnostics(filePath) : Promise.resolve(null),
+            );
+            if (diags) beforeDiags = diags;
+          } catch {}
+          pushEdit(filePath, content, args.tabId);
+          await writeFile(filePath, updated, "utf-8");
+          emitFileEdited(filePath, updated);
+          const openedInEditor = await reloadBuffer(filePath, editLine);
+          const deltas = [
+            formatMetricDelta("lines", beforeMetrics.lineCount, afterMetrics.lineCount),
+            formatMetricDelta("imports", beforeMetrics.importCount, afterMetrics.importCount),
+          ].filter(Boolean);
+          let output = `Edited ${filePath} (line-range ${String(args.lineStart)}-${String(args.lineEnd)})`;
+          if (deltas.length > 0) output += ` (${deltas.join(", ")})`;
+          if (openedInEditor) output += " → opened in editor";
+          if (router) {
+            try {
+              const { formatPostEditResult, postEditDiagnostics } = await import(
+                "../intelligence/post-edit.js"
+              );
+              const diffResult = await postEditDiagnostics(router, filePath, language, beforeDiags);
+              const diffOutput = formatPostEditResult(diffResult);
+              if (diffOutput) output += `\n${diffOutput}`;
+            } catch {}
+          }
+          return { success: true, output };
         } else {
           const rich = buildRichEditError(content, oldStr, args.lineStart);
           return { success: false, output: rich.output, error: "old_string not found" };

@@ -313,33 +313,41 @@ export class CodeIntelligenceRouter {
    * Run a health check — probe every backend with key operations against a real file.
    * Returns timing and pass/fail for each backend × operation combination.
    */
-  async runHealthCheck(): Promise<HealthCheckResult> {
+  async runHealthCheck(
+    onProgress?: (partial: HealthCheckResult) => void,
+  ): Promise<HealthCheckResult> {
     const language = this.detectLanguage();
     const probeFile = this.findProbeFile(language);
     const results: BackendProbeResult[] = [];
+
+    const INIT_TIMEOUT = 10_000;
+    const OP_TIMEOUT = 5_000;
 
     // Discover a real symbol name from the probe file for readSymbol test
     let probeSymbolName = "main";
     if (probeFile) {
       try {
-        // Use the first backend that can find symbols to get a real name
-        // Prefer function/class names, skip anything with <, empty, or weird chars
         const isValidProbeSymbol = (name: string) =>
           name.length > 0 && /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name);
 
         for (const b of this.backends) {
           if (b.supportsLanguage(language) && typeof b.findSymbols === "function") {
             if (!this.initialized.has(b.name)) {
-              await b.initialize?.(this.cwd);
+              const initResult = await Promise.race([
+                b.initialize?.(this.cwd),
+                new Promise<"timeout">((r) => setTimeout(() => r("timeout"), INIT_TIMEOUT)),
+              ]);
+              if (initResult === "timeout") continue;
               this.initialized.add(b.name);
             }
-            const syms = await b.findSymbols(probeFile);
+            const syms = await Promise.race([
+              b.findSymbols(probeFile),
+              new Promise<null>((r) => setTimeout(() => r(null), OP_TIMEOUT)),
+            ]);
             if (syms && syms.length > 0) {
-              // First try to find a function or class with a clean name
               const preferred = syms.find(
                 (s) => (s.kind === "function" || s.kind === "class") && isValidProbeSymbol(s.name),
               );
-              // Fall back to any symbol with a clean name
               const fallback = syms.find((s) => isValidProbeSymbol(s.name));
               const chosen = preferred ?? fallback;
               if (chosen) {
@@ -392,73 +400,186 @@ export class CodeIntelligenceRouter {
       },
     ];
 
+    const probeOp = async (
+      fn: () => Promise<unknown>,
+      label: string,
+      probes: ProbeResult[],
+    ): Promise<void> => {
+      const start = performance.now();
+      try {
+        const result = await Promise.race([
+          fn(),
+          new Promise<"timeout">((r) => setTimeout(() => r("timeout"), OP_TIMEOUT)),
+        ]);
+        const ms = Math.round(performance.now() - start);
+        if (result === "timeout") {
+          probes.push({ operation: label, status: "timeout", ms: OP_TIMEOUT });
+        } else if (result === null || result === undefined) {
+          probes.push({ operation: label, status: "empty", ms });
+        } else {
+          probes.push({ operation: label, status: "pass", ms });
+        }
+      } catch (err) {
+        const ms = Math.round(performance.now() - start);
+        probes.push({
+          operation: label,
+          status: "error",
+          ms,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    };
+
+    // Pre-seed all backends so the UI can show them immediately with spinners
+    const probeFilePath = probeFile ?? "(none)";
     for (const backend of this.backends) {
       const supports = backend.supportsLanguage(language);
-      const probes: ProbeResult[] = [];
+      const hasStandaloneProbe =
+        backend.name === "lsp" &&
+        "probeStandalone" in backend &&
+        typeof (backend as { probeStandalone: unknown }).probeStandalone === "function";
 
-      if (!supports) {
+      if (hasStandaloneProbe && supports) {
         results.push({
-          backend: backend.name,
+          backend: "lsp:nvim",
           tier: backend.tier,
-          supports: false,
+          supports: true,
           initialized: this.initialized.has(backend.name),
           probes: [],
         });
-        continue;
+        results.push({
+          backend: "lsp:standalone",
+          tier: backend.tier,
+          supports: true,
+          initialized: false,
+          probes: [],
+        });
+      } else {
+        results.push({
+          backend: backend.name,
+          tier: backend.tier,
+          supports,
+          initialized: this.initialized.has(backend.name),
+          probes: [],
+        });
       }
+    }
+    onProgress?.({ language, probeFile: probeFilePath, backends: [...results] });
 
-      // Try to initialize
+    // Helper to find and update a backend entry in the results array
+    const updateBackend = (name: string, update: Partial<BackendProbeResult>) => {
+      const idx = results.findIndex((r) => r.backend === name);
+      const entry = results[idx];
+      if (entry) Object.assign(entry, update);
+      onProgress?.({ language, probeFile: probeFilePath, backends: [...results] });
+    };
+
+    for (const backend of this.backends) {
+      const supports = backend.supportsLanguage(language);
+
+      if (!supports) continue;
+
+      // Try to initialize (with timeout to prevent hanging)
       let initMs = 0;
       let initError: string | undefined;
       if (!this.initialized.has(backend.name)) {
         const start = performance.now();
         try {
-          await backend.initialize?.(this.cwd);
-          this.initialized.add(backend.name);
+          const initResult = await Promise.race([
+            backend.initialize?.(this.cwd),
+            new Promise<"timeout">((r) => setTimeout(() => r("timeout"), INIT_TIMEOUT)),
+          ]);
           initMs = Math.round(performance.now() - start);
+          if (initResult === "timeout") {
+            initError = `init timed out (${String(INIT_TIMEOUT / 1000)}s)`;
+          } else {
+            this.initialized.add(backend.name);
+          }
         } catch (err) {
           initMs = Math.round(performance.now() - start);
           initError = err instanceof Error ? err.message : String(err);
         }
       }
 
-      // Probe each operation
+      // For LSP backend: probe nvim bridge and standalone client separately
+      const hasStandaloneProbe =
+        backend.name === "lsp" &&
+        "probeStandalone" in backend &&
+        typeof (backend as { probeStandalone: unknown }).probeStandalone === "function";
+
+      if (hasStandaloneProbe && probeFile && !initError) {
+        const lsp = backend as {
+          probeStandalone: (f: string, op: string) => Promise<unknown>;
+          warmupNvim?: (f: string) => Promise<boolean>;
+        };
+
+        // Warm up nvim LSP — loads probe file in hidden buffer, waits for LSP attach
+        if (lsp.warmupNvim) {
+          try {
+            await Promise.race([
+              lsp.warmupNvim(probeFile),
+              new Promise<false>((r) => setTimeout(() => r(false), 25_000)),
+            ]);
+          } catch {
+            // Non-fatal
+          }
+        }
+
+        // Probe nvim bridge path (what normal usage hits)
+        const nvimProbes: ProbeResult[] = [];
+        for (const { op, label, fn } of fileOps) {
+          if (typeof backend[op] !== "function") {
+            nvimProbes.push({ operation: label, status: "unsupported" });
+            continue;
+          }
+          await probeOp(() => fn(backend, probeFile), label, nvimProbes);
+        }
+        updateBackend("lsp:nvim", {
+          initialized: this.initialized.has(backend.name),
+          initMs,
+          initError,
+          probes: nvimProbes,
+        });
+
+        // Warmup standalone client before probing
+        try {
+          await Promise.race([
+            lsp.probeStandalone(probeFile, "findSymbols"),
+            new Promise<null>((r) => setTimeout(() => r(null), INIT_TIMEOUT)),
+          ]);
+        } catch {
+          // Non-fatal
+        }
+
+        // Probe standalone client path (fallback when nvim unavailable)
+        const standaloneProbes: ProbeResult[] = [];
+        for (const { op, label } of fileOps) {
+          if (typeof backend[op] !== "function") {
+            standaloneProbes.push({ operation: label, status: "unsupported" });
+            continue;
+          }
+          await probeOp(() => lsp.probeStandalone(probeFile, op), label, standaloneProbes);
+        }
+        updateBackend("lsp:standalone", {
+          initialized: true,
+          probes: standaloneProbes,
+        });
+        continue;
+      }
+
+      // Standard probe path for non-LSP backends
+      const probes: ProbeResult[] = [];
       if (probeFile) {
         for (const { op, label, fn } of fileOps) {
           if (typeof backend[op] !== "function") {
             probes.push({ operation: label, status: "unsupported" });
             continue;
           }
-          const start = performance.now();
-          try {
-            const result = await Promise.race([
-              fn(backend, probeFile),
-              new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 10_000)),
-            ]);
-            const ms = Math.round(performance.now() - start);
-            if (result === "timeout") {
-              probes.push({ operation: label, status: "timeout", ms: 10_000 });
-            } else if (result === null || result === undefined) {
-              probes.push({ operation: label, status: "empty", ms });
-            } else {
-              probes.push({ operation: label, status: "pass", ms });
-            }
-          } catch (err) {
-            const ms = Math.round(performance.now() - start);
-            probes.push({
-              operation: label,
-              status: "error",
-              ms,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
+          await probeOp(() => fn(backend, probeFile), label, probes);
         }
       }
 
-      results.push({
-        backend: backend.name,
-        tier: backend.tier,
-        supports: true,
+      updateBackend(backend.name, {
         initialized: this.initialized.has(backend.name),
         initMs,
         initError,

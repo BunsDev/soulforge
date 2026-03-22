@@ -11,19 +11,19 @@ import type { AgentInfo, MultiAgentState } from "./multi-agent-display.js";
 import { applyMultiAgentEvent } from "./multi-agent-display.js";
 import { RENDER_DEBOUNCE } from "./ToolCallDisplay.js";
 
-export interface DispatchDisplayData {
+interface DispatchDisplayData {
   steps: SubagentStep[];
   progress: MultiAgentState | null;
   stats: Map<string, AgentStatsEvent>;
 }
 
-export const EMPTY_DISPATCH: DispatchDisplayData = {
+const EMPTY_DISPATCH: DispatchDisplayData = {
   steps: [],
   progress: null,
   stats: new Map(),
 };
 
-export interface ParsedTask {
+interface ParsedTask {
   agentId: string;
   role?: string;
   task?: string;

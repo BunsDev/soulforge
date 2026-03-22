@@ -254,12 +254,15 @@ export class MemoryDB {
 
   getIndex(): MemoryIndex {
     const total =
-      this.db.query<{ count: number }, []>("SELECT COUNT(*) as count FROM memories").get()?.count ??
-      0;
+      this.db
+        .query<{ count: number }, []>(
+          "SELECT COUNT(*) as count FROM memories WHERE category != 'checkpoint'",
+        )
+        .get()?.count ?? 0;
 
     const cats = this.db
       .query<{ category: string; count: number }, []>(
-        "SELECT category, COUNT(*) as count FROM memories GROUP BY category",
+        "SELECT category, COUNT(*) as count FROM memories WHERE category != 'checkpoint' GROUP BY category",
       )
       .all();
 
@@ -267,7 +270,9 @@ export class MemoryDB {
     for (const c of cats) byCategory[c.category] = c.count;
 
     const recentRows = this.db
-      .query<{ title: string }, []>("SELECT title FROM memories ORDER BY updated_at DESC LIMIT 5")
+      .query<{ title: string }, []>(
+        "SELECT title FROM memories WHERE category != 'checkpoint' ORDER BY updated_at DESC LIMIT 5",
+      )
       .all();
 
     return {

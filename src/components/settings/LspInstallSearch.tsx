@@ -21,7 +21,7 @@ import type { AppConfig } from "../../types/index.js";
 
 import { type ConfigScope, Overlay, POPUP_BG, POPUP_HL, PopupRow } from "../layout/shared.js";
 
-const MAX_POPUP_WIDTH = 100;
+const MAX_POPUP_WIDTH = 110;
 const CHROME_ROWS = 10;
 
 type Tab = "search" | "installed" | "disabled" | "recommended";
@@ -112,8 +112,8 @@ export const LspInstallSearch = memo(function LspInstallSearch({
   const { width: termCols, height: termRows } = useTerminalDimensions();
 
   const containerRows = termRows - 2;
-  const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.8));
-  const maxVisible = Math.max(4, Math.floor(containerRows * 0.7) - CHROME_ROWS);
+  const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.85));
+  const maxVisible = Math.max(4, Math.floor(containerRows * 0.8) - CHROME_ROWS);
   const innerW = popupWidth - 2;
   const { cursor, setCursor, scrollOffset, adjustScroll, resetScroll } = usePopupScroll(maxVisible);
 
@@ -387,8 +387,8 @@ export const LspInstallSearch = memo(function LspInstallSearch({
       return;
     }
 
-    // 'd' key = toggle disable on any tab
-    if (evt.name === "d" && !evt.ctrl && !evt.meta) {
+    // Ctrl+D = toggle disable on any tab
+    if (evt.name === "d" && evt.ctrl) {
       const items = currentItems();
       const item = items[cursor];
       if (!item) return;
@@ -401,8 +401,8 @@ export const LspInstallSearch = memo(function LspInstallSearch({
       return;
     }
 
-    // 'u' key = uninstall soulforge-installed package
-    if (evt.name === "u" && !evt.ctrl && !evt.meta) {
+    // Ctrl+U = uninstall soulforge-installed package
+    if (evt.name === "u" && evt.ctrl) {
       const items = currentItems();
       const item = items[cursor];
       if (!item) return;
@@ -416,7 +416,7 @@ export const LspInstallSearch = memo(function LspInstallSearch({
       return;
     }
 
-    if (evt.name && evt.name.length === 1 && !evt.ctrl && !evt.meta && evt.name !== "d") {
+    if (evt.name && evt.name.length === 1 && !evt.ctrl && !evt.meta) {
       setQuery((prev) => prev + evt.name);
       resetScroll();
     }
@@ -646,7 +646,7 @@ export const LspInstallSearch = memo(function LspInstallSearch({
         <PopupRow w={innerW}>
           <text fg="#555" bg={POPUP_BG}>
             {"↑↓"} nav | {"⏎"} {tab === "installed" || tab === "disabled" ? "toggle" : "install"} |
-            d disable | u uninstall | {"^F"} category | {"⇥"} tab | esc close
+            {"^D"} disable | {"^U"} uninstall | {"^F"} category | {"⇥"} tab | esc close
           </text>
         </PopupRow>
       </box>

@@ -59,6 +59,7 @@ const SUMMARIZABLE_TOOLS = new Set([
   "soul_analyze",
   "soul_impact",
   "memory",
+  "skills",
   "plan",
   "update_plan_step",
   "ask_user",
@@ -170,6 +171,10 @@ function buildSummary(toolName: string, text: string, ctx?: SummaryContext): str
     return `${tag} user: ${firstLine.slice(0, 80)}`;
   }
   if (toolName === "git") {
+    const firstLine = text.split("\n")[0] ?? "";
+    return `${tag} ${firstLine.slice(0, 100)}`;
+  }
+  if (toolName === "skills") {
     const firstLine = text.split("\n")[0] ?? "";
     return `${tag} ${firstLine.slice(0, 100)}`;
   }

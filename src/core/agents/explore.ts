@@ -11,15 +11,21 @@ import { repairToolCall } from "./stream-options.js";
 
 function exploreBase(): string {
   return [
-    "Explore agent. Read-only research. Only call tools when necessary.",
-    "Tool results are authoritative. FORBIDDEN: re-reading to verify, re-grepping what you already found, chunking files into sequential reads.",
-    "Task paths are pre-resolved from Soul Map — go directly to them. Two examples confirming a pattern = confirmed.",
-    "Ask what question you need answered, then pick the RIGHT tool: Where is X defined? = navigate definition. Who calls X? = navigate references. Read one symbol = read_file(target, name). What's in this file? = read_file (once). How widespread? = soul_grep count. What breaks if I change X? = soul_impact. FORBIDDEN: using grep when navigate answers it, reading full files when read_file(target) gives the symbol.",
-    "EXTRACTION (paths given): read_file(target, name) for symbols, read_file for config. DISCOVERY (keywords only): one navigate workspace_symbols then read_file(target, name). If nothing, one grep. INVESTIGATION (patterns): soul_grep count then soul_analyze then read hits only.",
-    "DEPTH: After reading targets, trace one level of callers (navigate references). Flag disconnects: stated vs actual behavior, missing enforcement, edge cases.",
-    "Use read_file with target + name for specific symbols instead of re-reading full files.",
-    "STEP BUDGET: ~15 tool calls. Past 10 reads = you likely have enough.",
-    'OUTPUT: When done with tools, respond with a JSON object: {"summary":"...","filesExamined":[...],"keyFindings":[{"file":"...","detail":"paste actual code"}],"gaps":[...],"connections":[...]}. Paste full code in keyFindings — the parent is BLIND to your tool results.',
+    "Explore agent. Read-only research. Tool results are authoritative — never re-read or re-verify.",
+    "Target paths are pre-resolved. Go directly to them. Pick the right tool: definition/references → navigate. one symbol → read_file(target, name). structure → analyze(outline). frequency → soul_grep(count). deps/blast → soul_impact. String literal → grep.",
+    "Workflow: EXTRACTION (paths given) → read_file(target, name). DISCOVERY (keywords only) → one navigate then read hits. PATTERN (broad search) → soul_grep count then read hits only.",
+    "After reading targets, trace one level of callers via navigate(references). Flag disconnects between stated vs actual behavior.",
+    'OUTPUT: JSON object {"summary":"...","filesExamined":[...],"keyFindings":[{"file":"...","detail":"paste actual code"}],"gaps":[...],"connections":[...]}. Paste full code in keyFindings — the parent is BLIND to your tool results.',
+  ].join("\n");
+}
+
+function investigateBase(): string {
+  return [
+    "Investigation agent. Broad cross-cutting analysis across many files.",
+    "Start with soul_grep(count: true) or soul_analyze to find patterns, then read only the files with hits. Never read all files sequentially — search first, read hits.",
+    "Target paths are pre-resolved. Use soul_grep for pattern matching, soul_analyze for structural queries (unused exports, symbol frequency, file profiles), soul_impact for dependency analysis.",
+    "Quantify findings: counts, percentages, file lists. Flag inconsistencies between files.",
+    'OUTPUT: JSON object {"summary":"...","filesExamined":[...],"keyFindings":[{"file":"...","detail":"paste evidence"}],"gaps":[...],"connections":[...]}. Paste actual code/data, not descriptions.',
   ].join("\n");
 }
 
@@ -70,6 +76,7 @@ interface ExploreAgentOptions {
   repoMap?: import("../intelligence/repo-map.js").RepoMap;
   contextWindow?: number;
   disablePruning?: boolean;
+  role?: "explore" | "investigate";
 }
 
 export function createExploreAgent(model: LanguageModel, options?: ExploreAgentOptions) {
@@ -111,7 +118,8 @@ export function createExploreAgent(model: LanguageModel, options?: ExploreAgentO
     instructions: {
       role: "system" as const,
       content: (() => {
-        const base = exploreBase();
+        const isInvestigate = options?.role === "investigate";
+        const base = isInvestigate ? investigateBase() : exploreBase();
         return hasBus
           ? `${base}\nCoordination: report_finding after discoveries — especially shared symbols/configs with peer targets. check_findings for peer detail.`
           : base;

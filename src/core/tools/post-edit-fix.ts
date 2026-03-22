@@ -14,7 +14,7 @@ import { emitFileEdited } from "./file-events.js";
  *
  * Returns list of actions applied (empty if nothing changed).
  */
-export async function autoFixFile(filePath: string, tabId?: string): Promise<string[]> {
+async function autoFixFile(filePath: string, tabId?: string): Promise<string[]> {
   const absPath = resolve(filePath);
   const router = getIntelligenceRouter(process.cwd());
   const language = router.detectLanguage(absPath);

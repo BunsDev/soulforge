@@ -31,7 +31,7 @@ function keyStatus(envVar: string): { color: string; label: string } | null {
   return { color: "#00FF00", label: "sec" };
 }
 
-const MAX_POPUP_WIDTH = 60;
+const MAX_POPUP_WIDTH = 70;
 
 interface Props {
   visible: boolean;
@@ -56,8 +56,8 @@ export const LlmSelector = memo(function LlmSelector({
 }: Props) {
   const { width: termCols, height: termRows } = useTerminalDimensions();
   const containerRows = termRows - 2;
-  const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.7));
-  const maxVisible = Math.max(4, Math.floor(containerRows * 0.7) - CHROME_ROWS);
+  const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.8));
+  const maxVisible = Math.max(4, Math.floor(containerRows * 0.8) - CHROME_ROWS);
   const [level, setLevel] = useState<Level>("provider");
   const [providerCursor, setProviderCursor] = useState(0);
   const {

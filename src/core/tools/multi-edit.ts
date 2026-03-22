@@ -13,6 +13,7 @@ interface EditEntry {
   oldString: string;
   newString: string;
   lineStart?: number;
+  lineEnd?: number;
 }
 
 interface MultiEditArgs {
@@ -65,6 +66,24 @@ export const multiEditTool = {
           if (fixed) {
             resolvedOld = fixed.oldStr;
             resolvedNew = fixed.newStr;
+          } else if (edit.lineStart != null && edit.lineEnd != null) {
+            // Line-range fallback for escape-heavy code
+            const lines = content.split("\n");
+            const start = edit.lineStart - 1;
+            const end = edit.lineEnd;
+            if (start >= 0 && end <= lines.length && start < end) {
+              const before = lines.slice(0, start);
+              const after = lines.slice(end);
+              const newLines = resolvedNew.split("\n");
+              content = [...before, ...newLines, ...after].join("\n");
+              continue; // skip the normal replace below
+            }
+            const err = buildRichEditError(content, resolvedOld, edit.lineStart);
+            return {
+              success: false,
+              output: `Edit ${String(i + 1)}/${String(args.edits.length)} failed: ${err.output}`,
+              error: `edit ${String(i + 1)} failed`,
+            };
           } else {
             const err = buildRichEditError(content, resolvedOld, edit.lineStart);
             return {

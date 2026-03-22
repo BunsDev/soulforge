@@ -6,7 +6,7 @@ import { icon } from "../../core/icons.js";
 
 import { Overlay, POPUP_BG, POPUP_HL, PopupRow } from "../layout/shared.js";
 
-const MAX_POPUP_WIDTH = 56;
+const MAX_POPUP_WIDTH = 64;
 
 interface Props {
   visible: boolean;
@@ -19,7 +19,7 @@ interface Props {
 
 export function GitCommitModal({ visible, cwd, coAuthor, onClose, onCommitted, onRefresh }: Props) {
   const { width: termCols } = useTerminalDimensions();
-  const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.7));
+  const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.8));
   const innerW = popupWidth - 2;
   const [message, setMessage] = useState("");
   const [stagedFiles, setStagedFiles] = useState<string[]>([]);

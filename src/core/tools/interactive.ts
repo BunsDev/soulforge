@@ -10,20 +10,17 @@ function planFileName(sessionId?: string): string {
 
 export function buildInteractiveTools(
   callbacks: InteractiveCallbacks,
-  opts?: { cwd?: string; sessionId?: string },
+  opts?: { cwd?: string; sessionId?: string; forgeMode?: string },
 ) {
   const cwd = opts?.cwd ?? process.cwd();
+  const forgeMode = opts?.forgeMode;
   const fname = planFileName(opts?.sessionId);
 
   return {
     plan: tool({
       description:
-        "Create an implementation plan. User confirms before execution. " +
-        "Use when changing 7+ files, doing major architectural redesigns, or when the user explicitly requests a plan. " +
-        "For 1-6 file changes, edit directly instead. " +
-        'depth "light": fast checklist — just steps, files, and guidance. No code_snippets or diffs needed. ' +
-        'depth "full": self-contained plan with code_snippets and old→new diffs for Clear & Implement. ' +
-        "Follow the depth guidance in the Forge Mode instructions.",
+        "Create an implementation plan for large changes. Requires 7+ files — the system rejects plans with fewer files (edit directly instead). " +
+        'depth "light": fast checklist (steps + files + guidance). depth "full": self-contained with code_snippets and old→new diffs.',
       inputSchema: z.object({
         depth: z
           .enum(["light", "full"])
@@ -127,6 +124,16 @@ export function buildInteractiveTools(
         const depth = args.depth as PlanDepth;
         const isFull = depth === "full";
         const errors: string[] = [];
+
+        // Gate: reject plans for small changes — edit directly
+        const fileCount = args.files.length;
+        if (fileCount <= 6 && !forgeMode?.startsWith("plan")) {
+          return {
+            output:
+              `Plan rejected — ${String(fileCount)} file${fileCount === 1 ? "" : "s"} doesn't need a plan. ` +
+              "Edit files directly with read_file → multi_edit. Plans are for 7+ files or when the user explicitly asks (/plan mode).",
+          };
+        }
 
         if (isFull) {
           const modifiedFiles = new Set(
@@ -281,22 +288,8 @@ export function buildInteractiveTools(
       },
     }),
 
-    editor_panel: tool({
-      description:
-        "Open the editor panel for the user. " +
-        "Optionally specify a file path to open in the editor. " +
-        "Use this when you want to show the user a file in the embedded neovim editor.",
-      inputSchema: z.object({
-        file: z.string().optional().describe("File path to open in the editor"),
-      }),
-      execute: async (args) => {
-        await callbacks.onOpenEditor(args.file);
-        return {
-          success: true,
-          output: args.file ? `Opened ${args.file} in editor` : "Editor panel opened",
-        };
-      },
-    }),
+    // editor_panel disabled — agent should tell user to open editor (Ctrl+E) instead of forcing it open
+    // editor_panel: tool({ ... }),
 
     ask_user: tool({
       description:

@@ -57,7 +57,7 @@ const GATEWAY_FULL: ProviderConstraints = {
 
 const PROVIDER_CONSTRAINTS: Record<string, ProviderConstraints> = {
   anthropic: ANTHROPIC_FULL,
-  proxy: ANTHROPIC_FULL,
+  proxy: GATEWAY_FULL,
   openai: OPENAI_FULL,
   xai: OPENAI_FULL,
   vercel_gateway: GATEWAY_FULL,
@@ -117,11 +117,11 @@ export function detectModelFamily(modelId: string): ModelFamily {
   const { provider } = parseModelId(modelId);
 
   // Direct providers — no guessing needed
-  if (provider === "anthropic" || provider === "proxy") return "claude";
+  if (provider === "anthropic") return "claude";
   if (provider === "openai" || provider === "xai") return "openai";
   if (provider === "google") return "google";
 
-  // Gateways — inspect model name for the underlying provider
+  // Proxy is multi-provider — inspect model name like gateways
   const base = extractBaseModel(modelId);
   if (base.startsWith("claude")) return "claude";
   if (
@@ -274,8 +274,7 @@ function getEffectiveCaps(modelId: string): EffectiveCaps {
 }
 
 export function isAnthropicNative(modelId: string): boolean {
-  const { provider } = parseModelId(modelId);
-  return provider === "anthropic" || provider === "proxy";
+  return detectModelFamily(modelId) === "claude";
 }
 
 function supportsAnthropicOptions(modelId: string): boolean {

@@ -12,7 +12,7 @@ const NVIM_VERSION = "0.11.1";
 const RG_VERSION = "14.1.1";
 const FD_VERSION = "10.2.0";
 const LAZYGIT_VERSION = "0.44.1";
-const PROXY_VERSION = "6.8.40";
+export const PROXY_VERSION = "6.8.55";
 
 export interface NerdFont {
   id: string;
@@ -247,17 +247,18 @@ export async function installLazygit(): Promise<string> {
   });
 }
 
-export async function installProxy(): Promise<string> {
+export async function installProxy(version?: string): Promise<string> {
+  const v = version ?? PROXY_VERSION;
   return installBinary({
     name: "cliproxyapi",
     binName: "cli-proxy-api",
-    version: PROXY_VERSION,
+    version: v,
     getAsset: (key) => {
       const suffix = PROXY_SUFFIXES[key];
-      const asset = `CLIProxyAPI_${PROXY_VERSION}_${suffix}.tar.gz`;
+      const asset = `CLIProxyAPI_${v}_${suffix}.tar.gz`;
       return {
-        url: `https://github.com/router-for-me/CLIProxyAPI/releases/download/v${PROXY_VERSION}/${asset}`,
-        binPath: join(INSTALLS_DIR, `cliproxyapi-${PROXY_VERSION}`, "cli-proxy-api"),
+        url: `https://github.com/router-for-me/CLIProxyAPI/releases/download/v${v}/${asset}`,
+        binPath: join(INSTALLS_DIR, `cliproxyapi-${v}`, "cli-proxy-api"),
       };
     },
   });

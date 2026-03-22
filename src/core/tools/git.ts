@@ -142,6 +142,17 @@ export const gitTool = {
         };
     }
 
+    // Reset diff cache after any action that changes the working tree
+    if (
+      result.success &&
+      args.action !== "status" &&
+      args.action !== "diff" &&
+      args.action !== "log" &&
+      args.action !== "show"
+    ) {
+      resetDiffCache();
+    }
+
     if (claimWarning && result.success) {
       result = { ...result, output: `${claimWarning}\n\n${result.output}` };
     }
@@ -180,9 +191,23 @@ async function execStatus(): Promise<ToolResult> {
   return { success: true, output: lines.join("\n") };
 }
 
+let lastDiffOutput: string | null = null;
+let lastDiffStaged: boolean | undefined;
+
 async function execDiff(staged?: boolean): Promise<ToolResult> {
   const diff = await getGitDiff(cwd, staged);
-  return { success: true, output: diff || "No changes." };
+  const output = diff || "No changes.";
+  if (output === lastDiffOutput && staged === lastDiffStaged) {
+    return { success: true, output: "No changes since last diff." };
+  }
+  lastDiffOutput = output;
+  lastDiffStaged = staged;
+  return { success: true, output };
+}
+
+export function resetDiffCache(): void {
+  lastDiffOutput = null;
+  lastDiffStaged = undefined;
 }
 
 async function execLog(count?: number): Promise<ToolResult> {

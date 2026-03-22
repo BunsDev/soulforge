@@ -11,13 +11,13 @@ export interface WorkingState {
   assistantNotes: string[];
 }
 
-export interface PlanSlot {
+interface PlanSlot {
   id: string;
   label: string;
   status: "pending" | "active" | "done" | "skipped";
 }
 
-export interface FileSlot {
+interface FileSlot {
   path: string;
   actions: FileAction[];
 }
@@ -28,7 +28,7 @@ export type FileAction =
   | { type: "create"; detail: string }
   | { type: "delete" };
 
-export interface ToolResultSlot {
+interface ToolResultSlot {
   tool: string;
   summary: string;
   timestamp: number;

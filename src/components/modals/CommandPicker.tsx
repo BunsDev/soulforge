@@ -5,7 +5,7 @@ import { usePopupScroll } from "../../hooks/usePopupScroll.js";
 import type { ConfigScope } from "../layout/shared.js";
 import { CONFIG_SCOPES, Overlay, POPUP_BG, POPUP_HL, PopupRow } from "../layout/shared.js";
 
-const MAX_POPUP_WIDTH = 52;
+const MAX_POPUP_WIDTH = 60;
 const CHROME_ROWS = 7;
 
 export interface CommandPickerOption {
@@ -40,9 +40,9 @@ export function CommandPicker({ visible, config, onClose }: Props) {
   const { width: termCols, height: termRows } = useTerminalDimensions();
   const containerRows = termRows - 2;
   const maxW = config?.maxWidth ?? MAX_POPUP_WIDTH;
-  const popupWidth = Math.min(maxW, Math.floor(termCols * 0.7));
+  const popupWidth = Math.min(maxW, Math.floor(termCols * 0.8));
   const innerW = popupWidth - 2;
-  const maxVisible = Math.max(4, Math.floor(containerRows * 0.7) - CHROME_ROWS);
+  const maxVisible = Math.max(4, Math.floor(containerRows * 0.8) - CHROME_ROWS);
   const { cursor, setCursor, scrollOffset, setScrollOffset, adjustScroll } =
     usePopupScroll(maxVisible);
   const [scope, setScope] = useState<ConfigScope>("project");

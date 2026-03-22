@@ -1,8 +1,14 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
+import { createOpenAI } from "@ai-sdk/openai";
 import { ensureProxy, stopProxy } from "../../proxy/lifecycle.js";
 import type { ProviderDefinition, ProviderModelInfo } from "./types.js";
 
 const baseURL = process.env.PROXY_API_URL || "http://127.0.0.1:8317/v1";
+const apiKey = process.env.PROXY_API_KEY || "soulforge";
+
+function isAnthropicModel(modelId: string): boolean {
+  return modelId.toLowerCase().startsWith("claude");
+}
 
 export const proxy: ProviderDefinition = {
   id: "proxy",
@@ -12,14 +18,15 @@ export const proxy: ProviderDefinition = {
   grouped: true,
 
   createModel(modelId: string) {
-    const client = createAnthropic({
-      baseURL,
-      apiKey: process.env.PROXY_API_KEY || "soulforge",
-    });
-    return client(modelId);
+    // Claude → Anthropic SDK (proxy serves /v1/messages)
+    // Everything else → OpenAI SDK chat completions (proxy serves /v1/chat/completions)
+    // Must use .chat() — default uses Responses API (/v1/responses) which proxy can't translate for all providers
+    if (isAnthropicModel(modelId)) {
+      return createAnthropic({ baseURL, apiKey })(modelId);
+    }
+    return createOpenAI({ baseURL, apiKey }).chat(modelId);
   },
 
-  // Models are fetched via grouped flow in models.ts
   async fetchModels(): Promise<ProviderModelInfo[] | null> {
     return null;
   },
@@ -49,5 +56,13 @@ export const proxy: ProviderDefinition = {
     ["claude-sonnet", 200_000],
     ["claude-haiku", 200_000],
     ["claude-3", 200_000],
+    ["gpt-4", 128_000],
+    ["gpt-4o", 128_000],
+    ["gpt-4.1", 1_000_000],
+    ["o1", 200_000],
+    ["o3", 200_000],
+    ["o4-mini", 200_000],
+    ["gemini-2", 1_000_000],
+    ["gemini-1.5", 1_000_000],
   ],
 };

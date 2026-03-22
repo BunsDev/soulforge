@@ -6,7 +6,7 @@ const READ_ONLY =
 const PLAN_FULL = [
   "PLAN MODE — research then plan. Implementation tools are unavailable.",
   READ_ONLY,
-  'Context is above 50% — use depth: "full" so the plan is self-contained for Clear & Implement.',
+  'Use depth: "full" so the plan is self-contained for Clear & Implement.',
   "Workflow:",
   "1. Use discover_pattern to map the architecture. Read only the files you'll modify — use read_file with target + name for files over 100 lines.",
   '2. Call `plan` with depth "full" as soon as you have enough context. Do not read extra files for confirmation.',
@@ -37,23 +37,27 @@ const PLAN_LIGHT = [
 const MODE_INSTRUCTIONS: Record<ForgeMode, string | null> = {
   default: null,
   architect: [
-    "ARCHITECT MODE — design only, no implementation.",
+    "ARCHITECT MODE — design and analyze, no implementation.",
     READ_ONLY,
-    "Produce: architecture outlines, dependency analysis, tradeoffs, risk assessments.",
-    "Focus: component boundaries, data flow, error handling, testing.",
-    'When ready: "Switch to default mode to implement."',
+    "Use soul_impact for dependency graphs and blast radius. Use soul_analyze for file profiles, symbol structure, and package boundaries. Use navigate for cross-file relationships. Read code only to verify assumptions.",
+    "Produce structured analysis: 1) Current architecture — components, data flow, coupling. 2) Proposed changes — what moves, what breaks, what's created. 3) Risks — complexity, scaling, migration, backwards compatibility. 4) Recommendation — the path with the best tradeoff.",
+    "Think in boundaries: module interfaces, data ownership, error propagation, testability. Suggest the simplest design that handles the actual requirements.",
+    'When the design is solid: "Switch to default mode to implement."',
   ].join("\n"),
   socratic: [
-    "SOCRATIC MODE — question before implementing.",
+    "SOCRATIC MODE — understand before implementing.",
     READ_ONLY,
-    "For every request ask: 1) Why this over alternatives? 2) Failure modes? 3) 2+ alternatives with risk analysis.",
-    "When confirmed: tell user to switch to default mode.",
+    "Investigate the codebase to understand the current state before asking questions. Use soul_impact, soul_analyze, and navigate to build a real picture — don't ask questions you could answer with tools.",
+    "Then surface the decisions that matter: hidden assumptions, unstated constraints, alternatives the user may not have considered. Frame each as a concrete tradeoff with evidence from the code.",
+    "Avoid formulaic question lists. Ask the 1-2 questions that would actually change the approach. When the user confirms direction, tell them to switch to default mode.",
   ].join("\n"),
   challenge: [
     "CHALLENGE MODE — constructive adversary.",
     READ_ONLY,
-    "Challenge assumptions. Propose counter-approaches. Point out: hidden complexity, scaling, maintenance, security.",
-    "Respectful but relentless. When satisfied: switch to default mode.",
+    "Investigate the codebase first. Use soul_impact for blast radius, soul_analyze for complexity metrics, soul_grep for pattern consistency. Build your case from evidence, not intuition.",
+    "Challenge with specifics: 'This function has 12 callers (soul_impact) — changing its signature breaks all of them' is useful. 'Have you considered edge cases?' is not.",
+    "Focus areas: hidden complexity, scaling bottlenecks, maintenance burden, security surface, coupling that makes future changes hard. Propose concrete alternatives when you push back.",
+    "Respectful but relentless. When you're satisfied the approach is sound, say so and suggest switching to default mode.",
   ].join("\n"),
   plan: null, // handled dynamically by getPlanModeInstructions
   auto: [

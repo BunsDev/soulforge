@@ -46,7 +46,7 @@ const COLORS = {
 
 export const RENDER_DEBOUNCE = 80;
 
-export const Spinner = memo(function Spinner({ color }: { color?: string }) {
+const Spinner = memo(function Spinner({ color }: { color?: string }) {
   const frame = useSpinnerFrame();
   return <span fg={color ?? COLORS.spinnerActive}>{SPINNER_FRAMES[frame]}</span>;
 });
@@ -193,14 +193,14 @@ const ChildStepRow = memo(
     prev.step.agentId === next.step.agentId,
 );
 
-export const CACHE_COLORS: Record<string, string> = {
+const CACHE_COLORS: Record<string, string> = {
   hit: "#4a7",
   wait: "#FFDD57",
   store: "#5af",
   invalidate: "#f80",
 };
 
-export function getCacheLabel(step: SubagentStep): string {
+function getCacheLabel(step: SubagentStep): string {
   switch (step.cacheState) {
     case "hit":
       return step.sourceAgentId ? `from ${step.sourceAgentId}` : "from cache";
@@ -303,7 +303,11 @@ const MultiAgentChildRow = memo(
             ) : null}
             {tokenUsage && tokenUsage.total > 0 ? (
               <span fg={isDone ? "#444" : "#7a8"}>
-                [{icon("gauge")} {humanizeTokens(tokenUsage.total)}]
+                [{icon("gauge")}{" "}
+                {isDone && tokenUsage.input > 0
+                  ? `${humanizeTokens(tokenUsage.input)}↓ ${humanizeTokens(tokenUsage.output)}↑`
+                  : humanizeTokens(tokenUsage.total)}
+                ]
               </span>
             ) : null}
             {cacheHits && cacheHits > 0 ? (
@@ -613,6 +617,18 @@ const ToolRow = memo(
       return undefined;
     }, [editDiff, tc.result]);
 
+    const editImpact = useMemo(() => {
+      if (!editDiff || !tc.result || !editSuccess) return null;
+      try {
+        const parsed = JSON.parse(tc.result);
+        if (typeof parsed.output === "string") {
+          const match = parsed.output.match(/\[impact: (.+)\]/);
+          if (match?.[1]) return match[1];
+        }
+      } catch {}
+      return null;
+    }, [editDiff, tc.result, editSuccess]);
+
     const iconColor = isRepoMapHit ? "#2dd4bf" : toolDisplay.iconColor;
     const staticCategory = isRepoMapHit ? ("soul-map" as ToolCategory) : toolDisplay.category;
     const backendCategory = useMemo(() => {
@@ -688,7 +704,7 @@ const ToolRow = memo(
           </text>
         </box>
         {editDiff ? (
-          <box marginLeft={2}>
+          <box marginLeft={2} flexDirection="column">
             <DiffView
               filePath={editDiff.path}
               oldString={editDiff.oldString}
@@ -697,6 +713,13 @@ const ToolRow = memo(
               errorMessage={editError}
               mode={diffStyle}
             />
+            {editImpact ? (
+              <text fg="#666">
+                {"  "}
+                <span fg="#c89030">{"⚡"}</span>
+                <span fg="#888"> {editImpact}</span>
+              </text>
+            ) : null}
           </box>
         ) : null}
         {isMultiAgent &&

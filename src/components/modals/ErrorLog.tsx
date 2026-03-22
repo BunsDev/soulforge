@@ -85,9 +85,9 @@ export function ErrorLog({ visible, messages, onClose }: Props) {
   const [copied, setCopied] = useState(false);
   const [detailScrollOffset, setDetailScrollOffset] = useState(0);
   const { width: termCols, height: termRows } = useTerminalDimensions();
-  const popupWidth = Math.max(60, Math.round(termCols * 0.8));
+  const popupWidth = Math.max(60, Math.round(termCols * 0.85));
   const innerW = popupWidth - 2;
-  const popupHeight = Math.max(12, Math.round(termRows * 0.5));
+  const popupHeight = Math.max(12, Math.round(termRows * 0.6));
   const maxListVisible = Math.max(4, popupHeight - CHROME_ROWS);
   const maxDetailLines = Math.max(4, popupHeight - 6);
   const { cursor, setCursor, scrollOffset, adjustScroll, resetScroll } =

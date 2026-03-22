@@ -20,6 +20,7 @@ import {
   extractSignature,
   GIT_LOG_COMMITS,
   getDirGroup,
+  IMPORT_TRACKABLE_LANGUAGES,
   INDEXABLE_EXTENSIONS,
   kindTag,
   MAX_COCHANGE_FILES_PER_COMMIT,
@@ -314,7 +315,7 @@ export class RepoMap {
   }
 
   private async doScan(): Promise<void> {
-    const tick = () => new Promise<void>((r) => setTimeout(r, 0));
+    const tick = () => new Promise<void>((r) => setTimeout(r, 1));
     try {
       const files = await collectFiles(this.cwd);
 
@@ -370,17 +371,17 @@ export class RepoMap {
       }
 
       if (toIndex.length > 0 || stale.length > 0) {
-        this.resolveUnresolvedRefs();
+        await this.resolveUnresolvedRefs();
         await tick();
-        this.resolveIdentifierRefs();
+        await this.resolveIdentifierRefs();
         this.onProgress?.(-1, -1);
         await tick();
-        this.buildCallGraph();
+        await this.buildCallGraph();
         await tick();
-        this.buildEdges();
+        await this.buildEdges();
         this.onProgress?.(-2, -2);
         await tick();
-        this.computePageRank();
+        await this.computePageRank();
         await tick();
       }
 
@@ -882,7 +883,8 @@ export class RepoMap {
    * Only resolves when the ref's file already has an import-traced edge to the target file,
    * preventing false positives like matching local variable `formatDate` to an unrelated export.
    */
-  private resolveIdentifierRefs(): void {
+  private async resolveIdentifierRefs(): Promise<void> {
+    const tick = () => new Promise<void>((r) => setTimeout(r, 1));
     // Step 1: Build a map of symbol name → file_id for symbols exported from exactly one file
     const uniqueExports = this.db
       .query<{ name: string; file_id: number }, []>(
@@ -922,24 +924,30 @@ export class RepoMap {
       )
       .all();
 
-    const tx = this.db.transaction(() => {
-      for (const ref of unresolvedIds) {
-        const targetFileId = exportMap.get(ref.name);
-        if (targetFileId === undefined) continue;
-        if (targetFileId === ref.file_id) continue; // self-ref
-        // Skip if the referring file defines a symbol with the same name (local shadow)
-        if (localSymbols.has(`${ref.file_id}:${ref.name}`)) continue;
-        update.run(targetFileId, ref.rowid);
-      }
-    });
-    tx();
+    const BATCH = 200;
+    for (let i = 0; i < unresolvedIds.length; i += BATCH) {
+      const batch = unresolvedIds.slice(i, i + BATCH);
+      const tx = this.db.transaction(() => {
+        for (const ref of batch) {
+          const targetFileId = exportMap.get(ref.name);
+          if (targetFileId === undefined) continue;
+          if (targetFileId === ref.file_id) continue; // self-ref
+          // Skip if the referring file defines a symbol with the same name (local shadow)
+          if (localSymbols.has(`${ref.file_id}:${ref.name}`)) continue;
+          update.run(targetFileId, ref.rowid);
+        }
+      });
+      tx();
+      if (i + BATCH < unresolvedIds.length) await tick();
+    }
   }
 
   /**
    * Second-pass resolution: resolve refs that have import_source stored but
    * source_file_id = NULL (because the target file hadn't been indexed yet).
    */
-  private resolveUnresolvedRefs(): void {
+  private async resolveUnresolvedRefs(): Promise<void> {
+    const tick = () => new Promise<void>((r) => setTimeout(r, 1));
     const unresolved = this.db
       .query<{ rowid: number; file_id: number; import_source: string }, []>(
         "SELECT rowid, file_id, import_source FROM refs WHERE source_file_id IS NULL AND import_source IS NOT NULL",
@@ -952,34 +960,42 @@ export class RepoMap {
     );
     const update = this.db.prepare("UPDATE refs SET source_file_id = ? WHERE rowid = ?");
 
+    // Resolve import sources in batches
+    const BATCH = 100;
+    for (let i = 0; i < unresolved.length; i += BATCH) {
+      const batch = unresolved.slice(i, i + BATCH);
+      const tx = this.db.transaction(() => {
+        for (const ref of batch) {
+          const fileRow = getFilePath.get(ref.file_id);
+          if (!fileRow) continue;
+          const absPath = join(this.cwd, fileRow.path);
+          const resolved = this.resolveImportSource(ref.import_source, absPath);
+          if (resolved !== null) {
+            update.run(resolved, ref.rowid);
+          }
+        }
+      });
+      tx();
+      if (i + BATCH < unresolved.length) await tick();
+    }
+
+    // Expand export * refs: copy exported symbols from target to re-exporting file
+    // Multi-pass: handles deep chains (A→B→C) and prevents circular duplication
     const insertRef = this.db.prepare(
       "INSERT INTO refs (file_id, name, source_file_id, import_source) VALUES (?, ?, ?, ?)",
     );
     const insertSymbol = this.db.prepare(
       "INSERT INTO symbols (file_id, name, kind, line, end_line, is_exported, signature) VALUES (?, ?, ?, 1, 1, 1, NULL)",
     );
-
-    const tx = this.db.transaction(() => {
-      for (const ref of unresolved) {
-        const fileRow = getFilePath.get(ref.file_id);
-        if (!fileRow) continue;
-        const absPath = join(this.cwd, fileRow.path);
-        const resolved = this.resolveImportSource(ref.import_source, absPath);
-        if (resolved !== null) {
-          update.run(resolved, ref.rowid);
-        }
-      }
-
-      // Expand export * refs: copy exported symbols from target to re-exporting file
-      // Multi-pass: handles deep chains (A→B→C) and prevents circular duplication
-      const expanded = new Set<string>();
-      for (let pass = 0; pass < 10; pass++) {
-        const starRefs = this.db
-          .query<{ file_id: number; source_file_id: number }, []>(
-            "SELECT file_id, source_file_id FROM refs WHERE name = '*' AND source_file_id IS NOT NULL",
-          )
-          .all();
-        let changed = false;
+    const expanded = new Set<string>();
+    for (let pass = 0; pass < 10; pass++) {
+      const starRefs = this.db
+        .query<{ file_id: number; source_file_id: number }, []>(
+          "SELECT file_id, source_file_id FROM refs WHERE name = '*' AND source_file_id IS NOT NULL",
+        )
+        .all();
+      let changed = false;
+      const tx = this.db.transaction(() => {
         for (const star of starRefs) {
           const key = `${String(star.file_id)}:${String(star.source_file_id)}`;
           if (expanded.has(key)) continue;
@@ -1009,13 +1025,15 @@ export class RepoMap {
             }
           }
         }
-        if (!changed) break;
-      }
-    });
-    tx();
+      });
+      tx();
+      if (!changed) break;
+      await tick();
+    }
   }
 
-  private buildEdges(): void {
+  private async buildEdges(): Promise<void> {
+    const tick = () => new Promise<void>((r) => setTimeout(r, 1));
     this.db.run("DELETE FROM edges");
 
     const rows = this.db
@@ -1046,7 +1064,8 @@ export class RepoMap {
       this.db.query<{ c: number }, []>("SELECT COUNT(*) AS c FROM files").get()?.c ?? 1;
 
     const edgeWeights = new Map<string, number>();
-    for (const row of rows) {
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i] as (typeof rows)[number];
       const name = row.name;
       // IDF: symbols defined in many files are generic (low specificity)
       const idf = Math.log(totalFiles / Math.max(1, row.def_count));
@@ -1058,25 +1077,33 @@ export class RepoMap {
 
       const key = `${String(row.source_file_id)}:${String(row.target_file_id)}`;
       edgeWeights.set(key, (edgeWeights.get(key) ?? 0) + w);
+      if (i % 500 === 499) await tick();
     }
 
     const insert = this.db.prepare(
       "INSERT OR REPLACE INTO edges (source_file_id, target_file_id, weight) VALUES (?, ?, ?)",
     );
-    const tx = this.db.transaction(() => {
-      for (const [key, weight] of edgeWeights) {
-        const [src, tgt] = key.split(":");
-        insert.run(Number(src), Number(tgt), weight);
+    const entries = [...edgeWeights.entries()];
+    const BATCH = 200;
+    for (let i = 0; i < entries.length; i += BATCH) {
+      const batch = entries.slice(i, i + BATCH);
+      const tx = this.db.transaction(() => {
+        for (const [key, weight] of batch) {
+          const [src, tgt] = key.split(":");
+          insert.run(Number(src), Number(tgt), weight);
+        }
+      });
+      try {
+        tx();
+      } catch {
+        // database locked — edges will be rebuilt on next flush
       }
-    });
-    try {
-      tx();
-    } catch {
-      // database locked — edges will be rebuilt on next flush
+      if (i + BATCH < entries.length) await tick();
     }
   }
 
-  private computePageRank(personalization?: Map<number, number>): void {
+  private async computePageRank(personalization?: Map<number, number>): Promise<void> {
+    const tick = () => new Promise<void>((r) => setTimeout(r, 1));
     const files = this.db.query<{ id: number }, []>("SELECT id FROM files").all();
     if (files.length === 0) return;
 
@@ -1141,6 +1168,95 @@ export class RepoMap {
         if ((outWeight[i] ?? 0) === 0) danglingSum += rank[i] ?? 0;
       }
       // Dangling nodes distribute to personalization vector
+      for (let j = 0; j < n; j++) {
+        next[j] = (next[j] ?? 0) + PAGERANK_DAMPING * danglingSum * (pv[j] ?? 0);
+      }
+
+      for (const { from, to, weight } of adj) {
+        const contribution =
+          (PAGERANK_DAMPING * (rank[from] ?? 0) * weight) / (outWeight[from] ?? 1);
+        next[to] = (next[to] ?? 0) + contribution;
+      }
+      [rank, next] = [next, rank];
+      // Yield every 5 iterations to let UI breathe
+      if (iter % 5 === 4) await tick();
+    }
+
+    const update = this.db.prepare("UPDATE files SET pagerank = ? WHERE id = ?");
+    const tx = this.db.transaction(() => {
+      for (let i = 0; i < n; i++) {
+        update.run(rank[i] ?? 0, ids[i] ?? 0);
+      }
+    });
+    try {
+      tx();
+    } catch {
+      // database locked — stale pagerank values are acceptable
+    }
+  }
+
+  /** Sync version for render-time personalized PageRank (small, bounded workload) */
+  private computePageRankSync(personalization?: Map<number, number>): void {
+    const files = this.db.query<{ id: number }, []>("SELECT id FROM files").all();
+    if (files.length === 0) return;
+
+    const n = files.length;
+    const idToIdx = new Map<number, number>();
+    const ids: number[] = [];
+    for (const file of files) {
+      idToIdx.set(file.id, ids.length);
+      ids.push(file.id);
+    }
+
+    const outWeight: number[] = new Array(n).fill(0);
+    const adj: Array<{ from: number; to: number; weight: number }> = [];
+
+    const edges = this.db
+      .query<EdgeRow, []>("SELECT source_file_id, target_file_id, weight FROM edges")
+      .all();
+
+    for (const edge of edges) {
+      const src = idToIdx.get(edge.source_file_id);
+      const tgt = idToIdx.get(edge.target_file_id);
+      if (src !== undefined && tgt !== undefined) {
+        const w = edge.weight || 1;
+        adj.push({ from: src, to: tgt, weight: w });
+        outWeight[src] = (outWeight[src] ?? 0) + w;
+      }
+    }
+
+    const pv = new Float64Array(n);
+    const uniform = 1 / n;
+    if (personalization && personalization.size > 0) {
+      let boostSum = 0;
+      for (const [fileId, boost] of personalization) {
+        const idx = idToIdx.get(fileId);
+        if (idx !== undefined) {
+          pv[idx] = boost;
+          boostSum += boost;
+        }
+      }
+      if (boostSum > 0) {
+        for (let i = 0; i < n; i++) {
+          pv[i] = 0.7 * uniform + 0.3 * ((pv[i] ?? 0) / boostSum);
+        }
+      } else {
+        pv.fill(uniform);
+      }
+    } else {
+      pv.fill(uniform);
+    }
+
+    let rank = new Float64Array(n).fill(1 / n);
+    let next = new Float64Array(n);
+
+    for (let iter = 0; iter < PAGERANK_ITERATIONS; iter++) {
+      for (let j = 0; j < n; j++) next[j] = (1 - PAGERANK_DAMPING) * (pv[j] ?? 0);
+
+      let danglingSum = 0;
+      for (let i = 0; i < n; i++) {
+        if ((outWeight[i] ?? 0) === 0) danglingSum += rank[i] ?? 0;
+      }
       for (let j = 0; j < n; j++) {
         next[j] = (next[j] ?? 0) + PAGERANK_DAMPING * danglingSum * (pv[j] ?? 0);
       }
@@ -1732,7 +1848,8 @@ export class RepoMap {
    * Language-agnostic: uses symbol line ranges from the DB and import specifiers.
    * For each function, checks which imported names appear within its body lines.
    */
-  private buildCallGraph(): void {
+  private async buildCallGraph(): Promise<void> {
+    const tick = () => new Promise<void>((r) => setTimeout(r, 1));
     this.db.run("DELETE FROM calls");
 
     const filesWithImports = this.db
@@ -1746,12 +1863,15 @@ export class RepoMap {
     if (filesWithImports.length === 0) return;
 
     // Pre-read all files OUTSIDE the transaction to avoid holding DB lock during file I/O
+    // Yield every 20 files to prevent UI blocking during large repos
     const fileContents = new Map<number, string[]>();
-    for (const file of filesWithImports) {
+    for (let i = 0; i < filesWithImports.length; i++) {
+      const file = filesWithImports[i] as (typeof filesWithImports)[number];
       try {
         const content = readFileSync(join(this.cwd, file.path), "utf-8");
         fileContents.set(file.id, content.split("\n"));
       } catch {}
+      if (i % 20 === 19) await tick();
     }
 
     const getImports = this.db.prepare<{ name: string; source_file_id: number }, [number]>(
@@ -1776,49 +1896,63 @@ export class RepoMap {
        VALUES (?, ?, ?, ?, ?)`,
     );
 
-    const tx = this.db.transaction(() => {
-      for (const file of filesWithImports) {
-        const lines = fileContents.get(file.id);
-        if (!lines) continue;
+    // Process files in batches to avoid blocking the event loop during regex matching
+    const BATCH_SIZE = 15;
+    for (let batchStart = 0; batchStart < filesWithImports.length; batchStart += BATCH_SIZE) {
+      const batchEnd = Math.min(batchStart + BATCH_SIZE, filesWithImports.length);
+      const batch = filesWithImports.slice(batchStart, batchEnd);
 
-        const imports = getImports.all(file.id);
-        if (imports.length === 0) continue;
+      const tx = this.db.transaction(() => {
+        for (const file of batch) {
+          const lines = fileContents.get(file.id);
+          if (!lines) continue;
 
-        const functions = getFunctions.all(file.id);
-        if (functions.length === 0) continue;
+          const imports = getImports.all(file.id);
+          if (imports.length === 0) continue;
 
-        const importPatterns = imports.map((imp) => ({
-          name: imp.name,
-          sourceFileId: imp.source_file_id,
-          re: new RegExp(`\\b${imp.name.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\b`),
-        }));
+          const functions = getFunctions.all(file.id);
+          if (functions.length === 0) continue;
 
-        for (const func of functions) {
-          const bodyStart = func.line;
-          const bodyEnd = Math.min(func.end_line, lines.length);
-          const bodyText = lines.slice(bodyStart - 1, bodyEnd).join("\n");
+          const importPatterns = imports.map((imp) => ({
+            name: imp.name,
+            sourceFileId: imp.source_file_id,
+            re: new RegExp(`\\b${imp.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`),
+          }));
 
-          for (const imp of importPatterns) {
-            if (imp.name === func.name) continue;
+          for (const func of functions) {
+            const bodyStart = func.line;
+            const bodyEnd = Math.min(func.end_line, lines.length);
+            const bodyText = lines.slice(bodyStart - 1, bodyEnd).join("\n");
 
-            if (imp.re.test(bodyText)) {
-              let callLine = func.line;
-              for (let i = bodyStart - 1; i < bodyEnd; i++) {
-                const ln = lines[i];
-                if (ln !== undefined && imp.re.test(ln)) {
-                  callLine = i + 1;
-                  break;
+            for (const imp of importPatterns) {
+              if (imp.name === func.name) continue;
+
+              if (imp.re.test(bodyText)) {
+                let callLine = func.line;
+                for (let i = bodyStart - 1; i < bodyEnd; i++) {
+                  const ln = lines[i];
+                  if (ln !== undefined && imp.re.test(ln)) {
+                    callLine = i + 1;
+                    break;
+                  }
                 }
-              }
 
-              const calleeRow = resolveCallee.get(imp.sourceFileId, imp.name);
-              insertCall.run(func.id, imp.name, calleeRow?.id ?? null, imp.sourceFileId, callLine);
+                const calleeRow = resolveCallee.get(imp.sourceFileId, imp.name);
+                insertCall.run(
+                  func.id,
+                  imp.name,
+                  calleeRow?.id ?? null,
+                  imp.sourceFileId,
+                  callLine,
+                );
+              }
             }
           }
         }
-      }
-    });
-    tx();
+      });
+      tx();
+      if (batchStart + BATCH_SIZE < filesWithImports.length) await tick();
+    }
   }
 
   private flushPromise: Promise<void> | null = null;
@@ -1830,13 +1964,13 @@ export class RepoMap {
   }
 
   private async flushAsync(): Promise<void> {
-    const tick = () => new Promise<void>((r) => setTimeout(r, 0));
+    const tick = () => new Promise<void>((r) => setTimeout(r, 1));
     try {
-      this.buildCallGraph();
+      await this.buildCallGraph();
       await tick();
-      this.buildEdges();
+      await this.buildEdges();
       await tick();
-      this.computePageRank();
+      await this.computePageRank();
     } catch {
       // DB closed during shutdown or locked — next flush will retry
     } finally {
@@ -1849,7 +1983,7 @@ export class RepoMap {
 
     // Recompute PageRank with personalization when we have conversation context
     const pv = this.buildPersonalization(opts);
-    if (pv.size > 0) this.computePageRank(pv);
+    if (pv.size > 0) this.computePageRankSync(pv);
 
     const budget = this.computeBudget(opts.conversationTokens);
     const ranked = this.rankFiles(opts);
@@ -2393,8 +2527,16 @@ export class RepoMap {
       )
       .all(limit);
 
+    // Filter out files in languages where we can't track imports --
+    // we can't determine if they're truly unused via import graph analysis.
+    const trackable = rows.filter((row) => {
+      const ext = extname(row.path).toLowerCase();
+      const lang = INDEXABLE_EXTENSIONS[ext];
+      return lang != null && IMPORT_TRACKABLE_LANGUAGES.has(lang);
+    });
+
     const escaped = (name: string) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return rows.map((row) => {
+    return trackable.map((row) => {
       let usedInternally = false;
       try {
         const raw = readFileSync(join(this.cwd, row.path), "utf-8");

@@ -1,10 +1,10 @@
 import { type ChildProcess, execSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { logBackgroundError } from "../../stores/errors.js";
 import { toErrorMessage } from "../../utils/errors.js";
-import { getVendoredPath, installProxy } from "../setup/install.js";
+import { getVendoredPath, installProxy, PROXY_VERSION } from "../setup/install.js";
 
 let proxyProcess: ChildProcess | null = null;
 
@@ -186,12 +186,63 @@ export function getProxyPid(): number | null {
   return proxyProcess?.pid ?? null;
 }
 
+export interface ProxyProvider {
+  id: string;
+  name: string;
+  flag: string;
+  prefix: string;
+}
+
+export const PROXY_PROVIDERS: ProxyProvider[] = [
+  { id: "claude", name: "Claude", flag: "-claude-login", prefix: "claude-" },
+  { id: "google", name: "Google (Gemini)", flag: "-login", prefix: "gemini-" },
+  { id: "openai", name: "OpenAI", flag: "-codex-login", prefix: "codex-" },
+  { id: "codex", name: "Codex (device)", flag: "-codex-device-login", prefix: "codex-" },
+  { id: "qwen", name: "Qwen", flag: "-qwen-login", prefix: "qwen-" },
+  { id: "kimi", name: "Kimi", flag: "-kimi-login", prefix: "kimi-" },
+  { id: "iflow", name: "iFlow", flag: "-iflow-login", prefix: "iflow-" },
+];
+
+const AUTH_DIR = join(homedir(), ".cli-proxy-api");
+
+export interface ProxyAccount {
+  file: string;
+  provider: string;
+  label: string;
+}
+
+export function listProxyAccounts(): ProxyAccount[] {
+  if (!existsSync(AUTH_DIR)) return [];
+  const files = readdirSync(AUTH_DIR).filter((f) => f.endsWith(".json"));
+  return files.map((f) => {
+    const base = f.replace(/\.json$/, "");
+    const provider =
+      PROXY_PROVIDERS.find((p) => base.startsWith(p.prefix))?.name ??
+      base.split("-")[0] ??
+      "Unknown";
+    const label = base.replace(/^[^-]+-/, "");
+    return { file: f, provider, label };
+  });
+}
+
+export function removeProxyAccount(file: string): boolean {
+  if (file.includes("/") || file.includes("\\") || file.includes("..")) return false;
+  const resolved = join(AUTH_DIR, file);
+  if (!resolved.startsWith(AUTH_DIR)) return false;
+  if (!existsSync(resolved)) return false;
+  unlinkSync(resolved);
+  return true;
+}
+
 interface ProxyLoginHandle {
   promise: Promise<{ ok: boolean }>;
   abort: () => void;
 }
 
-export function runProxyLogin(onOutput: (line: string) => void): ProxyLoginHandle {
+export function runProxyLogin(
+  onOutput: (line: string) => void,
+  providerFlag?: string,
+): ProxyLoginHandle {
   const binary = getProxyBinary();
   if (!binary) {
     onOutput("CLIProxyAPI binary not found. Run /proxy install first.");
@@ -199,7 +250,8 @@ export function runProxyLogin(onOutput: (line: string) => void): ProxyLoginHandl
   }
   ensureConfig();
 
-  const proc = spawn(binary, ["-config", PROXY_CONFIG_PATH, "-claude-login"], {
+  const flag = providerFlag ?? "-claude-login";
+  const proc = spawn(binary, ["-config", PROXY_CONFIG_PATH, flag], {
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -239,6 +291,92 @@ export function runProxyLogin(onOutput: (line: string) => void): ProxyLoginHandl
   return { promise, abort };
 }
 
+export interface ProxyVersionInfo {
+  installed: string;
+  latest: string | null;
+  updateAvailable: boolean;
+}
+
+let cachedLatest: { version: string; checkedAt: number } | null = null;
+const VERSION_CACHE_TTL = 10 * 60 * 1000; // 10 min
+
+export async function checkForProxyUpdate(): Promise<ProxyVersionInfo> {
+  const installed = PROXY_VERSION;
+  const now = Date.now();
+
+  if (cachedLatest && now - cachedLatest.checkedAt < VERSION_CACHE_TTL) {
+    return {
+      installed,
+      latest: cachedLatest.version,
+      updateAvailable: cachedLatest.version !== installed,
+    };
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(
+      "https://api.github.com/repos/router-for-me/CLIProxyAPI/releases/latest",
+      {
+        signal: controller.signal,
+        headers: { Accept: "application/vnd.github+json" },
+      },
+    );
+    clearTimeout(timeout);
+    if (!res.ok) return { installed, latest: null, updateAvailable: false };
+    const data = (await res.json()) as { tag_name?: string };
+    const tag = data.tag_name?.replace(/^v/, "") ?? null;
+    if (tag) cachedLatest = { version: tag, checkedAt: now };
+    return { installed, latest: tag, updateAvailable: tag != null && tag !== installed };
+  } catch {
+    return { installed, latest: null, updateAvailable: false };
+  }
+}
+
+export async function upgradeProxy(
+  onStatus: (msg: string) => void,
+): Promise<{ ok: boolean; error?: string }> {
+  const vinfo = await checkForProxyUpdate();
+  if (!vinfo.updateAvailable || !vinfo.latest) {
+    return { ok: true };
+  }
+
+  const wasRunning = currentState === "running";
+
+  if (wasRunning) {
+    onStatus("Stopping proxy…");
+    stopProxy();
+    await new Promise((r) => setTimeout(r, 500));
+  }
+
+  onStatus(`Downloading CLIProxyAPI v${vinfo.latest}…`);
+  try {
+    await installProxy(vinfo.latest);
+  } catch (err) {
+    const msg = toErrorMessage(err);
+    onStatus(`Upgrade failed: ${msg}`);
+    if (wasRunning) {
+      onStatus("Restarting proxy with previous version…");
+      await ensureProxy();
+    }
+    return { ok: false, error: msg };
+  }
+
+  cachedLatest = null;
+
+  if (wasRunning) {
+    onStatus("Starting proxy…");
+    const result = await ensureProxy();
+    if (!result.ok) {
+      onStatus(`Upgraded but failed to restart: ${result.error ?? "unknown"}`);
+      return { ok: false, error: result.error };
+    }
+  }
+
+  onStatus(`Upgraded to v${vinfo.latest}`);
+  return { ok: true };
+}
+
 interface ProxyStatus {
   installed: boolean;
   binaryPath: string | null;
@@ -248,6 +386,7 @@ interface ProxyStatus {
   pid: number | null;
   models: string[];
   error: string | null;
+  version: ProxyVersionInfo | null;
 }
 
 export async function fetchProxyStatus(): Promise<ProxyStatus> {
@@ -263,24 +402,31 @@ export async function fetchProxyStatus(): Promise<ProxyStatus> {
     pid,
     models: [],
     error,
+    version: null,
   };
 
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
-    const res = await fetch(`${PROXY_URL}/models`, {
-      signal: controller.signal,
-      headers: { Authorization: `Bearer ${PROXY_API_KEY}` },
-    });
-    clearTimeout(timeout);
-    if (res.ok) {
-      status.running = true;
-      const data = (await res.json()) as { data?: { id: string }[] };
-      status.models = (data.data ?? []).map((m) => m.id);
-    }
-  } catch (err) {
-    status.error = toErrorMessage(err);
-  }
+  const [, versionInfo] = await Promise.all([
+    (async () => {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
+        const res = await fetch(`${PROXY_URL}/models`, {
+          signal: controller.signal,
+          headers: { Authorization: `Bearer ${PROXY_API_KEY}` },
+        });
+        clearTimeout(timeout);
+        if (res.ok) {
+          status.running = true;
+          const data = (await res.json()) as { data?: { id: string }[] };
+          status.models = (data.data ?? []).map((m) => m.id);
+        }
+      } catch (err) {
+        status.error = toErrorMessage(err);
+      }
+    })(),
+    checkForProxyUpdate(),
+  ]);
+  status.version = versionInfo;
 
   return status;
 }

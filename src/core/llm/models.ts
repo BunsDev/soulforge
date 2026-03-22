@@ -459,7 +459,6 @@ async function fetchProxyGrouped(): Promise<GroupedModelsResult> {
   const baseURL = process.env.PROXY_API_URL || "http://127.0.0.1:8317/v1";
   const apiKey = process.env.PROXY_API_KEY || "soulforge";
 
-  // Auto-install and spawn proxy if needed
   const proxyStatus = await ensureProxy();
   if (!proxyStatus.ok) {
     return { ...groupFallbackModels("proxy"), error: proxyStatus.error };
@@ -471,20 +470,31 @@ async function fetchProxyGrouped(): Promise<GroupedModelsResult> {
     });
     if (!res.ok) throw new Error(`Proxy API ${String(res.status)}`);
 
-    const data = (await res.json()) as { data: OpenAIModelEntry[] };
+    const data = (await res.json()) as {
+      data: (OpenAIModelEntry & { context_length?: number })[];
+    };
 
-    // Enrich with context windows from Anthropic's API
-    const ctxWindows = await fetchAnthropicContextWindows();
+    // Tier 1: context windows from proxy /models response
+    // Tier 2: Anthropic API + OpenRouter catalog (parallel fetch)
+    const [anthropicCtx] = await Promise.all([
+      fetchAnthropicContextWindows(),
+      fetchOpenRouterMetadata(),
+    ]);
 
     const grouped: Record<string, ProviderModelInfo[]> = {};
 
     for (const m of data.data) {
       const group = inferModelGroup(m.id);
       if (!grouped[group]) grouped[group] = [];
+
+      // Tier 1: proxy response, Tier 2: Anthropic API / OpenRouter, Tier 3: hardcoded (via caller)
+      const ctxWindow =
+        m.context_length ?? anthropicCtx.get(m.id) ?? findOpenRouterModel(m.id)?.context_length;
+
       grouped[group].push({
         id: m.id,
         name: m.id,
-        contextWindow: ctxWindows.get(m.id),
+        contextWindow: ctxWindow,
       });
     }
 

@@ -8,11 +8,11 @@ import { toolDenied, toolError } from "./tool-utils.js";
 
 const NO_EDITOR: ToolResult = {
   success: false,
-  output: "Editor is not open. Use editor_panel to open it first.",
+  output: "Editor is not open. Tell the user to press Ctrl+E to open it.",
   error: "Editor is not open",
 };
 
-export type EditorAction =
+type EditorAction =
   | "read"
   | "edit"
   | "navigate"
@@ -28,14 +28,13 @@ export type EditorAction =
   | "select"
   | "goto_cursor"
   | "yank"
-  | "open_file"
   | "highlight"
   | "cursor_context"
   | "buffers"
   | "quickfix"
   | "terminal_output";
 
-export interface EditorArgs {
+interface EditorArgs {
   action: EditorAction;
   startLine?: number;
   endLine?: number;
@@ -55,7 +54,7 @@ export interface EditorArgs {
 export const editorTool = {
   name: "editor" as const,
   description:
-    "Neovim editor integration. Actions: read, edit, navigate, diagnostics, symbols, hover, references, definition, actions, rename, lsp_status, format, select (visual select lines), goto_cursor (jump + center), yank (put text in register), open_file, highlight (ephemeral highlight), cursor_context (function/symbol at cursor), buffers (list open buffers), quickfix (read quickfix/location list), terminal_output (read last N lines from terminal buffers).",
+    "Neovim editor integration. Actions: read (use file param to switch buffers), edit, navigate, diagnostics, symbols, hover, references, definition, actions, rename, lsp_status, format, select (visual select lines), goto_cursor (jump + center), yank (put text in register), highlight (ephemeral highlight), cursor_context (function/symbol at cursor), buffers (list open buffers), quickfix (read quickfix/location list), terminal_output (read last N lines from terminal buffers).",
   execute: async (args: EditorArgs): Promise<ToolResult> => {
     switch (args.action) {
       case "read":
@@ -119,8 +118,6 @@ export const editorTool = {
         return editorGotoCursorTool.execute({ line: args.line ?? 1, col: args.col });
       case "yank":
         return editorYankTool.execute({ text: args.text ?? "", register: args.register });
-      case "open_file":
-        return editorOpenFileTool.execute({ file: args.file ?? "" });
       case "highlight":
         return editorHighlightTool.execute({
           startLine: args.startLine ?? 1,
@@ -245,7 +242,7 @@ interface EditorReadArgs {
   file?: string;
 }
 
-export const editorReadTool = {
+const editorReadTool = {
   name: "editor_read",
   description:
     "Read the live buffer from the embedded neovim editor, including unsaved changes. Optionally specify a line range (1-indexed). Requires the editor panel to be open.",
@@ -266,7 +263,9 @@ export const editorReadTool = {
         emitFileRead(resolve(bufName));
       }
 
-      return { success: true, output: lines.join("\n") };
+      const lineOffset = args.startLine ?? 1;
+      const numbered = lines.map((l, i) => `${String(i + lineOffset).padStart(4)}\t${l}`);
+      return { success: true, output: numbered.join("\n") };
     }, args.file),
 };
 
@@ -277,7 +276,7 @@ interface EditorEditArgs {
   file?: string;
 }
 
-export const editorEditTool = {
+const editorEditTool = {
   name: "editor_edit",
   description:
     "Replace lines startLine through endLine (inclusive, 1-indexed) in the neovim buffer with the replacement text. The replacement ONLY contains the new content — do NOT include the original lines. Changes are instant and undoable. Requires the editor panel to be open. Prefer edit_file for writing changes to disk.",
@@ -318,7 +317,7 @@ interface EditorNavigateArgs {
   search?: string;
 }
 
-export const editorNavigateTool = {
+const editorNavigateTool = {
   name: "editor_navigate",
   description:
     "Open a file, jump to a line:col, or search in the embedded neovim editor. At least one of file, line, or search must be provided. Requires the editor panel to be open. Use to show files to the user.",
@@ -351,7 +350,7 @@ export const editorNavigateTool = {
       };
     }, args.file),
 };
-export const editorDiagnosticsTool = {
+const editorDiagnosticsTool = {
   name: "editor_diagnostics",
   description:
     "Get LSP diagnostics (errors, warnings) for the current buffer in the embedded neovim editor. Requires the editor panel to be open.",
@@ -400,7 +399,7 @@ export const editorDiagnosticsTool = {
       }
     }),
 };
-export const editorSymbolsTool = {
+const editorSymbolsTool = {
   name: "editor_symbols",
   description:
     "Get document symbols (functions, classes, variables) from the LSP server for the current buffer. Requires the editor panel to be open.",
@@ -452,7 +451,7 @@ interface EditorReferencesArgs {
   col?: number;
 }
 
-export const editorReferencesTool = {
+const editorReferencesTool = {
   name: "editor_references",
   description:
     "Find all references to the symbol at the current cursor position or a specified line:col via LSP. Requires the editor panel to be open.",
@@ -506,7 +505,7 @@ interface EditorDefinitionArgs {
   jump?: boolean;
 }
 
-export const editorDefinitionTool = {
+const editorDefinitionTool = {
   name: "editor_definition",
   description:
     "Go to the definition of the symbol at the current cursor position or a specified line:col via LSP. By default jumps the editor to the first definition. Requires the editor panel to be open.",
@@ -568,7 +567,7 @@ interface EditorActionsArgs {
   apply?: number;
 }
 
-export const editorActionsTool = {
+const editorActionsTool = {
   name: "editor_actions",
   description:
     "List or apply code actions (quick fixes, refactorings) at the current cursor position or a specified line:col via LSP. Pass apply (0-indexed) to apply a specific action. Requires the editor panel to be open.",
@@ -646,7 +645,7 @@ interface EditorRenameArgs {
   col?: number;
 }
 
-export const editorRenameTool = {
+const editorRenameTool = {
   name: "editor_rename",
   description:
     "Rename a symbol across the workspace using LSP. Optionally specify line:col to target a specific symbol, otherwise uses the current cursor position. Requires LSP support in the editor.",
@@ -696,7 +695,7 @@ export const editorRenameTool = {
     }),
 };
 
-export const editorLspStatusTool = {
+const editorLspStatusTool = {
   name: "editor_lsp_status",
   description:
     "Get the status of LSP servers attached to the current buffer, including their names, root directories, and capabilities.",
@@ -749,7 +748,7 @@ interface EditorFormatArgs {
   endLine?: number;
 }
 
-export const editorFormatTool = {
+const editorFormatTool = {
   name: "editor_format",
   description:
     "Format the current buffer (or a line range) using the LSP formatter. Requires a language server with formatting capability.",
@@ -798,7 +797,7 @@ interface EditorHoverArgs {
   col?: number;
 }
 
-export const editorHoverTool = {
+const editorHoverTool = {
   name: "editor_hover",
   description:
     "Get hover/type information from the LSP server at the current cursor position or a specified line:col. Requires the editor panel to be open.",
@@ -884,18 +883,6 @@ const editorYankTool = {
         output: `${String(lines)} line(s) yanked to register "${reg}" — paste with "${reg}p"`,
       };
     }),
-};
-
-const editorOpenFileTool = {
-  execute: async (args: { file: string }): Promise<ToolResult> =>
-    withNvimRaw(async (nvim) => {
-      const blocked = isForbidden(args.file);
-      if (blocked) {
-        return toolDenied(`Access denied: "${args.file}" matches forbidden pattern "${blocked}".`);
-      }
-      await nvim.api.executeLua("vim.cmd.edit(vim.fn.fnameescape(...))", [args.file]);
-      return { success: true, output: `Opened ${args.file} in editor` };
-    }, args.file),
 };
 
 const HIGHLIGHT_NS = "soulforge_highlight";
