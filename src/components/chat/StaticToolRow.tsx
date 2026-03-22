@@ -1,5 +1,6 @@
 import { TextAttributes } from "@opentui/core";
 import type { ReactNode } from "react";
+import { icon as getIcon } from "../../core/icons.js";
 import {
   CATEGORY_COLORS,
   getBackendLabel,
@@ -113,7 +114,7 @@ export function StaticToolRow({
           {diff.impact ? (
             <text fg="#666">
               {"  "}
-              <span fg="#c89030">{"⚡"}</span>
+              <span fg="#c89030">{getIcon("impact")}</span>
               <span fg="#888"> {diff.impact}</span>
             </text>
           ) : null}
@@ -123,9 +124,96 @@ export function StaticToolRow({
   );
 }
 
-// ── Helpers for converting data shapes to StaticToolRowProps ──
+// ── Shared helpers (used by both streaming and static builders) ──
 
 const EDIT_TOOL_NAMES = new Set(["edit_file", "multi_edit"]);
+
+/** Resolve backend/category split display from tool name + backend string. */
+function resolveBackendCategory(
+  toolCategory: ToolCategory | undefined,
+  backend: string | null,
+): {
+  category: string | undefined;
+  categoryColor: string;
+  backendTag: string | undefined;
+  backendColor: string | undefined;
+} {
+  const hasSplit = !!(backend && toolCategory && backend !== toolCategory);
+  const category = hasSplit ? toolCategory : (backend ?? toolCategory);
+  const backendTag = hasSplit ? backend : null;
+  const categoryColor =
+    (toolCategory ? CATEGORY_COLORS[toolCategory as ToolCategory] : null) ??
+    (backend ? (CATEGORY_COLORS[backend as ToolCategory] ?? "#888") : undefined) ??
+    "#888";
+  const backendColor = backendTag
+    ? (CATEGORY_COLORS[backendTag as ToolCategory] ?? "#888")
+    : undefined;
+  return {
+    category: category ?? undefined,
+    categoryColor,
+    backendTag: backendTag ?? undefined,
+    backendColor,
+  };
+}
+
+/** Extract edit diff from parsed args + result. */
+function extractEditDiff(
+  toolName: string,
+  args: { path?: unknown; oldString?: unknown; newString?: unknown },
+  result: { success: boolean; output?: string; error?: string } | null,
+): StaticToolRowProps["diff"] {
+  if (toolName !== "edit_file") return null;
+  if (
+    typeof args.path !== "string" ||
+    typeof args.oldString !== "string" ||
+    typeof args.newString !== "string"
+  )
+    return null;
+
+  let impact: string | undefined;
+  if (result?.success && result.output) {
+    const m = result.output.match(/\[impact: (.+)\]/);
+    if (m?.[1]) impact = m[1];
+  }
+
+  return {
+    path: args.path,
+    oldString: args.oldString,
+    newString: args.newString,
+    success: result?.success ?? false,
+    errorMessage: result?.error,
+    impact,
+  };
+}
+
+/** Compute suffix for a completed tool call. */
+function computeSuffix(
+  toolName: string,
+  resultJson: string | undefined,
+  result: { success: boolean; error?: string } | null,
+  isEdit: boolean,
+  hasEditResultText: boolean,
+): { suffix?: string; suffixColor?: string } {
+  if (hasEditResultText || !result) return {};
+
+  const denied =
+    !result.success && !!(result.error && /denied|rejected|cancelled/i.test(result.error));
+  const isError = !result.success && !denied;
+
+  if (isError) {
+    const fullError = result.error ?? "";
+    const clean = fullError.length > 60 ? `${fullError.slice(0, 57)}…` : fullError;
+    return { suffix: ` → ${clean}`, suffixColor: "#a55" };
+  }
+  if (denied) return { suffix: " → denied", suffixColor: "#666" };
+  if (!isEdit && resultJson) {
+    const r = formatResult(toolName, resultJson);
+    if (r) return { suffix: ` → ${r}` };
+  }
+  return {};
+}
+
+// ── Prop builders ──
 
 /** Build props from a LiveToolCall (streaming path) — call this from ToolRow */
 export function buildLiveToolRowProps(
@@ -148,37 +236,28 @@ export function buildLiveToolRowProps(
 ): Omit<StaticToolRowProps, "statusContent"> {
   const isRepoMapHit = extra?.isRepoMapHit ?? false;
   const toolDisplay = resolveToolDisplay(tc.toolName);
-  const repoMapIcon = extra?.repoMapIcon ?? "◈";
 
-  const iconVal = isRepoMapHit ? repoMapIcon : toolDisplay.icon;
+  const iconVal = isRepoMapHit ? (extra?.repoMapIcon ?? "◈") : toolDisplay.icon;
   const labelVal = isRepoMapHit ? "Soul Map" : toolDisplay.label;
   const iconColorVal = isRepoMapHit ? "#2dd4bf" : toolDisplay.iconColor;
-  const staticCategory = isRepoMapHit ? ("soul-map" as ToolCategory) : toolDisplay.category;
+  const toolCategory = isRepoMapHit ? ("soul-map" as ToolCategory) : toolDisplay.category;
 
   // Backend from result or prop
-  let backendCategory: string | null = null;
+  let backend: string | null = null;
   if (!isRepoMapHit) {
     if (tc.result) {
       try {
         const parsed = JSON.parse(tc.result);
-        if (parsed.backend && typeof parsed.backend === "string") {
-          backendCategory = parsed.backend as string;
-        }
+        if (typeof parsed.backend === "string") backend = parsed.backend;
       } catch {}
     }
-    if (!backendCategory) backendCategory = tc.backend ?? null;
+    if (!backend) backend = tc.backend ?? null;
   }
 
-  const hasSplit = !!(backendCategory && staticCategory && backendCategory !== staticCategory);
-  const category = hasSplit ? staticCategory : (backendCategory ?? staticCategory);
-  const backendTag = hasSplit ? backendCategory : null;
-  const categoryColor =
-    (staticCategory ? CATEGORY_COLORS[staticCategory as ToolCategory] : null) ??
-    (backendCategory ? (CATEGORY_COLORS[backendCategory as ToolCategory] ?? "#888") : undefined) ??
-    "#888";
-  const backendColorVal = backendTag
-    ? (CATEGORY_COLORS[backendTag as ToolCategory] ?? "#888")
-    : undefined;
+  const { category, categoryColor, backendTag, backendColor } = resolveBackendCategory(
+    toolCategory,
+    backend,
+  );
 
   const isDone = tc.state !== "running";
   const argStr = formatArgs(tc.toolName, tc.args);
@@ -188,49 +267,31 @@ export function buildLiveToolRowProps(
   const editResultText =
     isDone && isEdit && tc.result ? formatResult(tc.toolName, tc.result) : undefined;
 
-  // Diff extraction for edit tools
+  // Diff extraction
   let diff: StaticToolRowProps["diff"] = null;
-  if (tc.toolName === "edit_file" && tc.state === "done" && tc.args) {
+  if (tc.toolName === "edit_file" && isDone && tc.args) {
     try {
-      const parsed = JSON.parse(tc.args);
-      if (
-        typeof parsed.path === "string" &&
-        typeof parsed.oldString === "string" &&
-        typeof parsed.newString === "string"
-      ) {
-        let editSuccess = false;
-        let editError: string | undefined;
-        let editImpact: string | undefined;
-        if (tc.result) {
-          try {
-            const rp = JSON.parse(tc.result);
-            editSuccess = rp.success === true;
-            if (!rp.success && rp.error) editError = rp.error as string;
-            if (editSuccess && typeof rp.output === "string") {
-              const m = rp.output.match(/\[impact: (.+)\]/);
-              if (m?.[1]) editImpact = m[1];
-            }
-          } catch {}
-        }
-        diff = {
-          path: parsed.path as string,
-          oldString: parsed.oldString as string,
-          newString: parsed.newString as string,
-          success: editSuccess,
-          errorMessage: editError,
-          impact: editImpact,
-        };
+      const parsedArgs = JSON.parse(tc.args);
+      let parsedResult: { success: boolean; output?: string; error?: string } | null = null;
+      if (tc.result) {
+        try {
+          parsedResult = JSON.parse(tc.result);
+        } catch {}
       }
+      diff = extractEditDiff(tc.toolName, parsedArgs, parsedResult);
     } catch {}
   }
 
-  // Compute suffix: caller can override, otherwise derive from result for done non-edit calls
+  // Suffix
   let suffix = extra?.suffix;
-  const suffixColor = extra?.suffixColor;
-  if (!suffix && isDone && tc.result && !isEdit && !diff) {
-    const r = formatResult(tc.toolName, tc.result);
-    if (r) {
-      suffix = ` → ${r}`;
+  let suffixColor = extra?.suffixColor;
+  if (!suffix && isDone && !isEdit && !diff) {
+    const computed = computeSuffix(tc.toolName, tc.result, null, isEdit, !!editResultText);
+    suffix = computed.suffix;
+    suffixColor = suffixColor ?? computed.suffixColor;
+    if (!suffix && tc.result) {
+      const r = formatResult(tc.toolName, tc.result);
+      if (r) suffix = ` → ${r}`;
     }
   }
 
@@ -239,10 +300,10 @@ export function buildLiveToolRowProps(
     icon: iconVal,
     iconColor: iconColorVal,
     label: labelVal,
-    category: category ?? undefined,
+    category,
     categoryColor,
-    backendTag: backendTag ?? undefined,
-    backendColor: backendColorVal,
+    backendTag,
+    backendColor,
     outsideBadge: outsideKind ? OUTSIDE_BADGE[outsideKind] : null,
     argStr: argStr || undefined,
     editResultText,
@@ -267,26 +328,22 @@ export function buildFinalToolRowProps(tc: {
   const outsideKind = detectOutsideCwd(tc.name, argsJson);
   const isEdit = EDIT_TOOL_NAMES.has(tc.name);
 
-  // Backend
-  const backend = tc.result?.backend ?? null;
-  const staticCategory = toolDisplay.category;
-  const hasSplit = !!(backend && staticCategory && backend !== staticCategory);
-  const category = hasSplit ? staticCategory : (backend ?? staticCategory);
-  const backendTag = hasSplit ? backend : null;
-  const categoryColor =
-    (staticCategory ? CATEGORY_COLORS[staticCategory as ToolCategory] : null) ??
-    (backend ? (CATEGORY_COLORS[backend as ToolCategory] ?? "#888") : undefined) ??
-    "#888";
-  const backendColorVal = backendTag
-    ? (CATEGORY_COLORS[backendTag as ToolCategory] ?? "#888")
-    : undefined;
+  const { category, categoryColor, backendTag, backendColor } = resolveBackendCategory(
+    toolDisplay.category,
+    tc.result?.backend ?? null,
+  );
 
   // Status
   const denied =
     !tc.result?.success &&
     !!(tc.result?.error && /denied|rejected|cancelled/i.test(tc.result.error));
-  const isError = !!tc.result && !tc.result.success && !denied;
-  const statusIcon = tc.result ? (tc.result.success ? "✓" : denied ? "⊘" : "✗") : "●";
+  const statusIcon = tc.result
+    ? tc.result.success
+      ? getIcon("success")
+      : denied
+        ? getIcon("skip")
+        : getIcon("fail")
+    : "●";
   const statusColor = tc.result
     ? tc.result.success
       ? ROW_COLORS.checkDone
@@ -300,45 +357,16 @@ export function buildFinalToolRowProps(tc: {
     isEdit && tc.result?.success && resultJson ? formatResult(tc.name, resultJson) : undefined;
 
   // Suffix
-  let suffix: string | undefined;
-  let suffixColor: string | undefined;
-  if (!editResultText && tc.result) {
-    if (isError) {
-      const fullError = tc.result.error ?? "";
-      const clean = fullError.length > 60 ? `${fullError.slice(0, 57)}…` : fullError;
-      suffix = ` → ${clean}`;
-      suffixColor = "#a55";
-    } else if (denied) {
-      suffix = " → denied";
-      suffixColor = "#666";
-    } else if (!isEdit && resultJson) {
-      const r = formatResult(tc.name, resultJson);
-      if (r) suffix = ` → ${r}`;
-    }
-  }
+  const { suffix, suffixColor } = computeSuffix(
+    tc.name,
+    resultJson,
+    tc.result ?? null,
+    isEdit,
+    !!editResultText,
+  );
 
   // Diff
-  let diff: StaticToolRowProps["diff"] = null;
-  if (
-    tc.name === "edit_file" &&
-    typeof tc.args.path === "string" &&
-    typeof tc.args.oldString === "string" &&
-    typeof tc.args.newString === "string"
-  ) {
-    let impact: string | undefined;
-    if (tc.result?.success) {
-      const m = tc.result.output.match(/\[impact: (.+)\]/);
-      if (m?.[1]) impact = m[1];
-    }
-    diff = {
-      path: tc.args.path as string,
-      oldString: tc.args.oldString as string,
-      newString: tc.args.newString as string,
-      success: tc.result?.success ?? false,
-      errorMessage: tc.result?.error,
-      impact,
-    };
-  }
+  const diff = tc.result ? extractEditDiff(tc.name, tc.args, tc.result) : null;
 
   return {
     statusContent: <span fg={statusColor}>{statusIcon} </span>,
@@ -346,10 +374,10 @@ export function buildFinalToolRowProps(tc: {
     icon: toolDisplay.icon,
     iconColor: toolDisplay.iconColor,
     label: toolDisplay.label,
-    category: category ?? undefined,
+    category,
     categoryColor,
-    backendTag: backendTag ?? undefined,
-    backendColor: backendColorVal,
+    backendTag,
+    backendColor,
     outsideBadge: outsideKind ? OUTSIDE_BADGE[outsideKind] : null,
     argStr: argStr || undefined,
     editResultText,

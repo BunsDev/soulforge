@@ -272,9 +272,10 @@ export function buildSubagentTools(models: SubagentModels) {
                 ),
               role: z
                 .enum(["explore", "code", "investigate"])
-                .default("explore")
+                .optional()
                 .describe(
-                  "explore = targeted extraction, investigate = broad cross-cutting analysis (scans with soul_grep/soul_analyze/grep), code = edits",
+                  "Agent role (default: explore). " +
+                    "explore = targeted extraction, investigate = broad cross-cutting analysis (scans with soul_grep/soul_analyze/grep), code = edits",
                 ),
               returnFormat: z
                 .enum(["summary", "code", "files", "full", "verdict"])
@@ -845,7 +846,7 @@ export function buildSubagentTools(models: SubagentModels) {
 
             return {
               agentId: t.id ?? `agent-${String(i + 1)}`,
-              role: t.role,
+              role: t.role ?? "explore",
               task: `${t.task}${fileHint}${skillHint}${crossTabHint}`,
               returnFormat: t.returnFormat,
               dependsOn: t.dependsOn,

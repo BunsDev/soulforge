@@ -2,7 +2,7 @@ import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { memo, useEffect, useState } from "react";
 import { icon, providerIcon } from "../../core/icons.js";
-import { PROVIDER_CONFIGS } from "../../core/llm/models.js";
+import { invalidateModelCache, PROVIDER_CONFIGS } from "../../core/llm/models.js";
 import { checkProviders, type ProviderStatus } from "../../core/llm/provider.js";
 import { hasSecret, type SecretKey } from "../../core/secrets.js";
 import { useGroupedModels } from "../../hooks/useGroupedModels.js";
@@ -100,11 +100,9 @@ export const LlmSelector = memo(function LlmSelector({
   const [providerStatuses, setProviderStatuses] = useState<ProviderStatus[]>([]);
 
   useEffect(() => {
-    checkProviders().then(setProviderStatuses);
-  }, []);
-
-  useEffect(() => {
     if (visible) {
+      invalidateModelCache();
+      checkProviders().then(setProviderStatuses);
       setLevel("provider");
       setExpandedProvider(null);
       setExpandedSubprovider(null);

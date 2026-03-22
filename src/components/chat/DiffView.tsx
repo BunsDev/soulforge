@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { memo, useMemo } from "react";
 import { computeDiff, langFromPath } from "../../core/diff.js";
+import { icon } from "../../core/icons.js";
 import { getSyntaxStyle, getTSClient } from "../../core/utils/syntax.js";
 
 const HEADER_ACCENT = "#9B30FF";
@@ -101,7 +102,7 @@ export const DiffView = memo(function DiffView({
   const isLarge = computed != null && computed.added + computed.removed > LARGE_DIFF_THRESHOLD;
 
   const verb = !success ? "Edit" : computed?.isCreation ? "New" : "Edit";
-  const icon = !success ? "✗" : "✎";
+  const diffIcon = !success ? icon("fail") : icon("pencil");
   const iconColor = !success ? ERROR_COLOR : HEADER_ACCENT;
 
   const unifiedDiff = useMemo(() => {
@@ -115,7 +116,7 @@ export const DiffView = memo(function DiffView({
     return (
       <box minHeight={1} flexShrink={0}>
         <text truncate>
-          <span fg={iconColor}>{icon} </span>
+          <span fg={iconColor}>{diffIcon} </span>
           <span fg={HEADER_PATH}>{filePath}</span>
           {!success ? (
             <span fg={ERROR_COLOR}> {errorMessage ?? "failed"}</span>
@@ -149,7 +150,7 @@ export const DiffView = memo(function DiffView({
         marginTop={-1}
       >
         <text truncate>
-          <span fg={iconColor}>{icon}</span> <span fg={HEADER_ACCENT}>{verb}</span>
+          <span fg={iconColor}>{diffIcon}</span> <span fg={HEADER_ACCENT}>{verb}</span>
           <span fg={BORDER_COLOR}> ─ </span>
           <span fg={HEADER_PATH}>{filePath}</span>
           {success && computed ? (

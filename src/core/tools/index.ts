@@ -507,11 +507,11 @@ export function buildTools(
               "Essential for counting variable/identifier occurrences.",
           ),
         dep: z
-          .union([z.string(), z.boolean()])
+          .string()
           .optional()
           .describe(
             "Search dependency/vendor directories (bypasses .gitignore). " +
-              "Pass package name (e.g. 'react') to auto-locate, or true to search all with --no-ignore.",
+              "Pass package name (e.g. 'react') to auto-locate, or 'true' to search all with --no-ignore.",
           ),
         fresh: z.boolean().optional().describe("Set true to bypass cache and re-execute"),
       }),

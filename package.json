@@ -70,6 +70,7 @@
     "neovim": "^5.4.0",
     "react": "^19.2.4",
     "shiki": "^4.0.2",
+    "strip-ansi": "^7.2.0",
     "tree-sitter-wasms": "^0.1.13",
     "ts-morph": "^27.0.2",
     "web-tree-sitter": "0.25.10",

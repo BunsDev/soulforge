@@ -35,7 +35,7 @@ export function ReasoningBlock({ content, expanded, isStreaming, id }: Props) {
         </box>
       );
     }
-    const firstLine = (lines[0] ?? "").trim();
+    const firstLine = (lines[0] ?? "").trim().replace(/\*\*/g, "");
     const preview = firstLine.length > 60 ? `${firstLine.slice(0, 57)}...` : firstLine;
     return (
       <box key={`${id}-col`} height={1} flexShrink={0}>

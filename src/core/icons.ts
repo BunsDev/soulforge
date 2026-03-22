@@ -84,6 +84,14 @@ const NERD: Record<string, string> = {
   investigate: "\uDB80\uDF50",
   key: "\uF084",
   key_missing: "\uF084",
+  impact: "󰁕",
+  cochange: "󰓻",
+  success: "󰄬",
+  fail: "󰅖",
+  diff_add: "󰐕",
+  diff_remove: "󰍴",
+  create: "󰝒",
+  write: "󰏫",
 };
 
 const ASCII: Record<string, string> = {
@@ -170,6 +178,14 @@ const ASCII: Record<string, string> = {
   investigate: "◎",
   key: "⚷",
   key_missing: "⚷",
+  impact: "⚡",
+  cochange: "↔",
+  success: "✓",
+  fail: "✗",
+  diff_add: "+",
+  diff_remove: "-",
+  create: "+",
+  write: "✎",
 };
 
 let _nerdFont: boolean | null = null;

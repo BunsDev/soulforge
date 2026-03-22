@@ -72,9 +72,20 @@ export const grepTool = {
           });
 
           const grepChunks: string[] = [];
-          grepProc.stdout.on("data", (data: Buffer) => grepChunks.push(data.toString()));
+          let grepBytes = 0;
+          grepProc.stdout.on("data", (data: Buffer) => {
+            grepBytes += data.length;
+            if (grepBytes <= MAX_SEARCH_OUTPUT_BYTES) grepChunks.push(data.toString());
+          });
           grepProc.on("close", () => {
-            res(grepChunks.join("") || "No matches found.");
+            let out = grepChunks.join("") || "No matches found.";
+            if (grepBytes > MAX_SEARCH_OUTPUT_BYTES) {
+              out = out.slice(0, MAX_SEARCH_OUTPUT_BYTES);
+              const lastNl = out.lastIndexOf("\n");
+              if (lastNl > 0) out = out.slice(0, lastNl);
+              out += `\n[output capped — narrow with glob or path params]`;
+            }
+            res(out);
           });
         }
       });

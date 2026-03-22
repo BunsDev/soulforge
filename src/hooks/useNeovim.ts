@@ -76,8 +76,9 @@ export function useNeovim(
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastFlushRef = useRef(0);
 
-  // Launch neovim on first active=true
+  // Launch neovim on first active=true (launchGeneration triggers re-launch after close)
   useEffect(() => {
+    void launchGeneration;
     if (!active || nvimRef.current || launchingRef.current) return;
 
     launchingRef.current = true;
@@ -169,7 +170,6 @@ export function useNeovim(
       .finally(() => {
         launchingRef.current = false;
       });
-    // biome-ignore lint/correctness/useExhaustiveDependencies: launchGeneration is intentional — triggers re-launch after close
   }, [active, nvimPath, nvimConfig, showHints, hasTabBar, splitPct, launchGeneration]);
 
   // Resize neovim when terminal dimensions change

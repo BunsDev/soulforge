@@ -109,7 +109,6 @@ export function buildInteractiveTools(
               details: z
                 .string()
                 .optional()
-                .default("")
                 .describe("Additional context / guidance for the executor"),
             }),
           )

@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
+import stripAnsi from "strip-ansi";
 import type { ToolResult } from "../../types";
 import { isForbidden } from "../security/forbidden.js";
+import { checkShellBinaryRead } from "./binary-detect.js";
 import { compressShellOutputFull } from "./shell-compress.js";
 import { saveTee, truncateWithTee } from "./tee.js";
 
@@ -41,9 +43,16 @@ async function runPreCommitChecks(cwd: string): Promise<string | null> {
     }>((resolve) => {
       const chunks: string[] = [];
       const errChunks: string[] = [];
+      let lintBytes = 0;
       const proc = spawn("sh", ["-c", lintCmd], { cwd, timeout: 15_000, env: { ...process.env } });
-      proc.stdout.on("data", (d: Buffer) => chunks.push(d.toString()));
-      proc.stderr.on("data", (d: Buffer) => errChunks.push(d.toString()));
+      proc.stdout.on("data", (d: Buffer) => {
+        lintBytes += d.length;
+        if (lintBytes <= MAX_COLLECT_BYTES) chunks.push(d.toString());
+      });
+      proc.stderr.on("data", (d: Buffer) => {
+        lintBytes += d.length;
+        if (lintBytes <= MAX_COLLECT_BYTES) errChunks.push(d.toString());
+      });
       proc.on("close", (code) =>
         resolve({ exitCode: code, stdout: chunks.join(""), stderr: errChunks.join("") }),
       );
@@ -80,6 +89,15 @@ function injectCoAuthor(command: string): string {
   );
 }
 const MAX_OUTPUT_BYTES = 16_384;
+/** Cap bytes collected during streaming to prevent OOM on huge outputs */
+const MAX_COLLECT_BYTES = 256_000;
+/** Control chars to strip (keep \t \n \r) */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: intentional — stripping terminal control chars from shell output
+const CTRL_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
+
+function sanitizeOutput(text: string): string {
+  return stripAnsi(text).replace(CTRL_RE, "");
+}
 
 // Commands that read file content
 const FILE_READ_RE =
@@ -266,6 +284,9 @@ export const shellTool = {
       return { success: false, output: msg, error: msg };
     }
 
+    const binaryErr = checkShellBinaryRead(command, cwd);
+    if (binaryErr) return { success: false, output: binaryErr, error: binaryErr };
+
     if (GIT_COMMIT_MSG_RE.test(args.command)) {
       const lintErr = await runPreCommitChecks(cwd);
       if (lintErr) return { success: false, output: lintErr, error: lintErr };
@@ -275,6 +296,8 @@ export const shellTool = {
     return new Promise((resolve) => {
       const chunks: string[] = [];
       const errChunks: string[] = [];
+      let stdoutBytes = 0;
+      let stderrBytes = 0;
 
       const proc = spawn("sh", ["-c", command], {
         cwd,
@@ -300,13 +323,23 @@ export const shellTool = {
         }
       }
 
-      proc.stdout.on("data", (data: Buffer) => chunks.push(data.toString()));
-      proc.stderr.on("data", (data: Buffer) => errChunks.push(data.toString()));
+      proc.stdout.on("data", (data: Buffer) => {
+        stdoutBytes += data.length;
+        if (stdoutBytes <= MAX_COLLECT_BYTES) chunks.push(data.toString());
+      });
+      proc.stderr.on("data", (data: Buffer) => {
+        stderrBytes += data.length;
+        if (stderrBytes <= MAX_COLLECT_BYTES) errChunks.push(data.toString());
+      });
 
       proc.on("close", (code: number | null) => {
-        const compressed = compressShellOutputFull(chunks.join(""));
+        let raw = sanitizeOutput(chunks.join(""));
+        if (stdoutBytes > MAX_COLLECT_BYTES) {
+          raw += `\n[output truncated — ${String(Math.round(stdoutBytes / 1024))}KB total, showing first ${String(Math.round(MAX_COLLECT_BYTES / 1024))}KB]`;
+        }
+        const compressed = compressShellOutputFull(raw);
         let stdout = compressed.text;
-        const stderr = errChunks.join("");
+        const stderr = sanitizeOutput(errChunks.join(""));
 
         if (compressed.original) {
           const teeFile = saveTee("shell-full", compressed.original);

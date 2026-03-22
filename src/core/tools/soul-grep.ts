@@ -22,9 +22,9 @@ const DEP_DIRS = [
   "bower_components",
 ];
 
-function resolveDepPath(dep: string | boolean, explicitPath?: string): string {
+function resolveDepPath(dep: string, explicitPath?: string): string {
   if (explicitPath) return explicitPath;
-  if (typeof dep === "string" && dep.length > 0) {
+  if (typeof dep === "string" && dep.length > 0 && dep !== "true") {
     for (const dir of DEP_DIRS) {
       const candidate = `${dir}/${dep}`;
       if (existsSync(candidate)) return candidate;
@@ -41,7 +41,7 @@ interface SoulGrepArgs {
   count?: boolean;
   wordBoundary?: boolean;
   maxCount?: number;
-  dep?: string | boolean;
+  dep?: string;
 }
 
 export const soulGrepTool = {
