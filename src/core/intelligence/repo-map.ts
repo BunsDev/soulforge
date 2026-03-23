@@ -282,6 +282,7 @@ export class RepoMap {
     this.migrateSemanticSource();
     this.migrateSemanticNoCascade();
     this.backfillSummaryPaths();
+    this.cleanOrphanedSummaries();
 
     this.rebuildFts();
   }
@@ -390,6 +391,12 @@ export class RepoMap {
            symbol_name = COALESCE((SELECT s.name FROM symbols s WHERE s.id = semantic_summaries.symbol_id), '')
          WHERE file_path = '' AND symbol_id IN (SELECT id FROM symbols)`,
       );
+    } catch {}
+  }
+
+  private cleanOrphanedSummaries(): void {
+    try {
+      this.db.run("DELETE FROM semantic_summaries WHERE symbol_id NOT IN (SELECT id FROM symbols)");
     } catch {}
   }
 

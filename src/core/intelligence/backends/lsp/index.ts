@@ -72,8 +72,11 @@ export class LspBackend implements IntelligenceBackend {
   private standaloneClients = new Map<string, StandaloneLspClient>();
   /** language:projectRoot → client[] (index for fast lookup) */
   private languageClients = new Map<string, StandaloneLspClient[]>();
-  /** Servers that failed to start — skip retrying (keyed by command:projectRoot) */
-  private failedServers = new Set<string>();
+  /** Servers that failed to start — retry after cooldown (keyed by command:projectRoot → timestamp) */
+  private static readonly FAILED_SERVER_COOLDOWN_MS = 60_000;
+  private failedServers = new Map<string, number>();
+  /** Pending init promises for deduplication (keyed by langKey) */
+  private pendingInits = new Map<string, Promise<StandaloneLspClient[]>>();
 
   async initialize(cwd: string): Promise<void> {
     this.cwd = cwd;
@@ -1082,7 +1085,7 @@ export class LspBackend implements IntelligenceBackend {
 
     // Clear failed servers so they can be retried
     if (filter) {
-      for (const key of this.failedServers) {
+      for (const key of this.failedServers.keys()) {
         if (key.includes(filter)) this.failedServers.delete(key);
       }
     } else {
@@ -1151,6 +1154,7 @@ export class LspBackend implements IntelligenceBackend {
   /**
    * Get or create ALL standalone LSP clients for a file's language.
    * Starts all available servers (not just the first match).
+   * Deduplicates concurrent calls for the same language to prevent duplicate processes.
    */
   private async getStandaloneClients(file: string): Promise<StandaloneLspClient[]> {
     const language = detectLanguage(file);
@@ -1164,17 +1168,38 @@ export class LspBackend implements IntelligenceBackend {
       return existing;
     }
 
+    const pending = this.pendingInits.get(langKey);
+    if (pending) return pending;
+
+    const initPromise = this.initClientsForLanguage(langKey, projectRoot, language);
+    this.pendingInits.set(langKey, initPromise);
+    try {
+      return await initPromise;
+    } finally {
+      this.pendingInits.delete(langKey);
+    }
+  }
+
+  private async initClientsForLanguage(
+    langKey: string,
+    projectRoot: string,
+    language: Language,
+  ): Promise<StandaloneLspClient[]> {
     const configs = findServersForLanguage(language);
     if (configs.length === 0) return [];
 
     const clients: StandaloneLspClient[] = [];
     for (const config of configs) {
       const serverKey = `${config.command}:${projectRoot}`;
-      if (this.failedServers.has(serverKey)) continue;
+      const failedAt = this.failedServers.get(serverKey);
+      if (failedAt !== undefined && Date.now() - failedAt < LspBackend.FAILED_SERVER_COOLDOWN_MS) {
+        continue;
+      }
 
       const existingClient = this.standaloneClients.get(serverKey);
       if (existingClient?.isReady) {
         clients.push(existingClient);
+        this.failedServers.delete(serverKey);
         continue;
       }
 
@@ -1182,9 +1207,10 @@ export class LspBackend implements IntelligenceBackend {
       try {
         await client.start();
         this.standaloneClients.set(serverKey, client);
+        this.failedServers.delete(serverKey);
         clients.push(client);
       } catch {
-        this.failedServers.add(serverKey);
+        this.failedServers.set(serverKey, Date.now());
       }
     }
 

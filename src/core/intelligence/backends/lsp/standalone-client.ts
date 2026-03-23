@@ -34,6 +34,7 @@ export class StandaloneLspClient {
   private nextId = 1;
   private pending = new Map<number, PendingRequest>();
   private buffer = Buffer.alloc(0);
+  private static readonly MAX_OPEN_DOCUMENTS = 50;
   private openDocuments = new Map<string, { version: number; content: string }>();
   private diagnostics = new Map<string, LspDiagnostic[]>();
   private diagnosticWaiters = new Map<string, Array<() => void>>();
@@ -165,11 +166,12 @@ export class StandaloneLspClient {
       } else if (isNotification(msg) && msg.method === "textDocument/publishDiagnostics") {
         const params = msg.params as { uri: string; diagnostics: LspDiagnostic[] };
         this.diagnostics.set(params.uri, params.diagnostics);
-        // Wake up any waiters for this URI
+        // Snapshot and clear waiters before invoking to avoid splice-during-iteration (#8)
         const waiters = this.diagnosticWaiters.get(params.uri);
         if (waiters) {
-          for (const waiter of waiters) waiter();
+          const snapshot = [...waiters];
           this.diagnosticWaiters.delete(params.uri);
+          for (const waiter of snapshot) waiter();
         }
       }
     }
@@ -217,6 +219,16 @@ export class StandaloneLspClient {
       textDocument: { uri, languageId, version: 1, text },
     });
     this.openDocuments.set(uri, { version: 1, content: text });
+    this.evictOldDocuments();
+  }
+
+  private evictOldDocuments(): void {
+    while (this.openDocuments.size > StandaloneLspClient.MAX_OPEN_DOCUMENTS) {
+      const oldest = this.openDocuments.keys().next().value;
+      if (!oldest) break;
+      this.openDocuments.delete(oldest);
+      this.notify("textDocument/didClose", { textDocument: { uri: oldest } });
+    }
   }
 
   /** Get definition locations */

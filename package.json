@@ -62,7 +62,6 @@
     "@openrouter/ai-sdk-provider": "^2.3.3",
     "@opentui/react": "^0.1.88",
     "ai": "^6.0.116",
-    "chalk": "^5.6.2",
     "isbinaryfile": "^6.0.0",
     "linkedom": "^0.18.12",
     "linkify-it": "^5.0.0",

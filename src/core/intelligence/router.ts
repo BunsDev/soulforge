@@ -662,12 +662,19 @@ export class CodeIntelligenceRouter {
     };
   }
 
-  private initFailed = new Set<string>();
+  private static readonly INIT_RETRY_INTERVAL_MS = 60_000;
+  private initFailed = new Map<string, number>();
 
   private async ensureInitialized(backend: IntelligenceBackend): Promise<void> {
     if (this.initialized.has(backend.name)) return;
-    if (this.initFailed.has(backend.name)) {
-      throw new Error(`${backend.name} initialization previously failed`);
+    const failedAt = this.initFailed.get(backend.name);
+    if (
+      failedAt !== undefined &&
+      Date.now() - failedAt < CodeIntelligenceRouter.INIT_RETRY_INTERVAL_MS
+    ) {
+      throw new Error(
+        `${backend.name} initialization previously failed (retryable in ${String(Math.ceil((CodeIntelligenceRouter.INIT_RETRY_INTERVAL_MS - (Date.now() - failedAt)) / 1000))}s)`,
+      );
     }
     try {
       if (backend.initialize) {
@@ -679,8 +686,9 @@ export class CodeIntelligenceRouter {
         ]);
       }
       this.initialized.add(backend.name);
+      this.initFailed.delete(backend.name);
     } catch (err) {
-      this.initFailed.add(backend.name);
+      this.initFailed.set(backend.name, Date.now());
       throw err;
     }
   }

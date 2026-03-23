@@ -61,7 +61,10 @@ export function loadConfig(): AppConfig {
   try {
     const raw = readFileSync(CONFIG_FILE, "utf-8");
     return { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
-  } catch {
+  } catch (err) {
+    process.stderr.write(
+      `[soulforge] Failed to parse ${CONFIG_FILE}: ${err instanceof Error ? err.message : String(err)} — using defaults\n`,
+    );
     return DEFAULT_CONFIG;
   }
 }
@@ -73,7 +76,10 @@ export function loadProjectConfig(cwd: string): Partial<AppConfig> | null {
   try {
     const raw = readFileSync(projectFile, "utf-8");
     return JSON.parse(raw) as Partial<AppConfig>;
-  } catch {
+  } catch (err) {
+    process.stderr.write(
+      `[soulforge] Failed to parse ${projectFile}: ${err instanceof Error ? err.message : String(err)} — ignoring project config\n`,
+    );
     return null;
   }
 }
@@ -134,7 +140,7 @@ export function saveConfig(config: AppConfig): void {
 export function saveProjectConfig(cwd: string, patch: Partial<AppConfig>): void {
   const dir = join(cwd, ".soulforge");
   const file = join(dir, "config.json");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
 
   let existing: Partial<AppConfig> = {};
   try {

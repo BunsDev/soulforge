@@ -357,8 +357,9 @@ export class ContextManager {
   }
 
   getContextPercent(): number {
-    if (this.contextWindowTokens <= 0) return 0;
-    return Math.round((this.conversationTokens / this.contextWindowTokens) * 100);
+    const window = this.contextWindowTokens > 0 ? this.contextWindowTokens : DEFAULT_CONTEXT_WINDOW;
+    if (this.conversationTokens <= 0) return 0;
+    return Math.round((this.conversationTokens / window) * 100);
   }
 
   setEditorIntegration(settings: EditorIntegration): void {
