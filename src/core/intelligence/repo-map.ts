@@ -66,7 +66,6 @@ export interface RepoMapOptions {
   mentionedFiles?: string[];
   editedFiles?: string[];
   editorFile?: string | null;
-  conversationTerms?: string[];
   conversationTokens?: number;
 }
 
@@ -2427,25 +2426,6 @@ export class RepoMap {
       )
       .all();
 
-    // FTS matching on conversation terms (not captured by PageRank personalization)
-    let ftsMatches = new Set<number>();
-    if (opts.conversationTerms && opts.conversationTerms.length > 0) {
-      const ftsQuery = opts.conversationTerms
-        .slice(0, 10)
-        .map((t) => `"${t.replace(/"/g, "")}"`)
-        .join(" OR ");
-      try {
-        const rows = this.db
-          .query<{ id: number }, [string]>(
-            `SELECT DISTINCT s.file_id AS id FROM symbols_fts f
-             JOIN symbols s ON s.id = f.rowid
-             WHERE symbols_fts MATCH ?`,
-          )
-          .all(ftsQuery);
-        ftsMatches = new Set(rows.map((r) => r.id));
-      } catch {}
-    }
-
     // Neighbor boosting (files connected to context files via edges)
     const mentionedSet = new Set((opts.mentionedFiles ?? []).map((f) => relative(this.cwd, f)));
     const editedSet = new Set((opts.editedFiles ?? []).map((f) => relative(this.cwd, f)));
@@ -2486,7 +2466,6 @@ export class RepoMap {
       })
       .map((f) => {
         let score = f.pagerank * 1000;
-        if (ftsMatches.has(f.id)) score += 0.5;
         if (neighborFiles.has(f.id)) score += 1;
         const cochangeCount = coChangePartners.get(f.id);
         if (cochangeCount) score += Math.min(cochangeCount / 5, 3);

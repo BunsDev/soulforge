@@ -7,10 +7,10 @@ import type { AgentFeatures } from "../../types/index.js";
 import { getWorkspaceCoordinator } from "../coordination/WorkspaceCoordinator.js";
 import type { RepoMap } from "../intelligence/repo-map.js";
 import { getModelContextWindow } from "../llm/models.js";
-import { detectModelFamily } from "../llm/provider-options.js";
+// detectModelFamily removed — subagent pruning is now always disabled
 import { getActiveTaskTab } from "../tools/task-list.js";
 import { AgentBus, type AgentTask, normalizePath, type SharedCache } from "./agent-bus.js";
-import type { DispatchOutput, DoneToolResult } from "./agent-results.js";
+import { cleanupDispatchDir, type DispatchOutput, type DoneToolResult } from "./agent-results.js";
 import {
   detectTaskTier,
   MAX_CONCURRENT_AGENTS,
@@ -190,7 +190,7 @@ export function createAgent(
     onApproveFetchPage: models.onApproveFetchPage,
     repoMap: models.repoMap,
     contextWindow,
-    disablePruning: detectModelFamily(modelId) === "claude" || models.disablePruning,
+    disablePruning: true, // Subagents have 15-step max — pruning causes re-reads, context never gets large enough to matter
     role: task.role === "investigate" ? ("investigate" as const) : ("explore" as const),
   };
   const agent = useExplore ? createExploreAgent(model, opts) : createCodeAgent(model, opts);
@@ -334,8 +334,10 @@ export function buildSubagentTools(models: SubagentModels) {
       }),
       execute: async (rawArgs, { abortSignal, toolCallId }) => {
         const bus = new AgentBus(cacheRef.current);
-        const dispatchTabId = getActiveTaskTab();
-        if (dispatchTabId) getWorkspaceCoordinator().agentStarted(dispatchTabId);
+        const activeTabId = getActiveTaskTab();
+        const dispatchTabId = activeTabId ?? "default";
+        cleanupDispatchDir(process.cwd(), dispatchTabId, toolCallId);
+        if (activeTabId) getWorkspaceCoordinator().agentStarted(activeTabId);
         let editingDone = false;
         let dependentWarning = "";
         try {
@@ -1106,11 +1108,18 @@ export function buildSubagentTools(models: SubagentModels) {
           for (const r of results) {
             const done = r.result.startsWith("[done]");
             const status = r.success ? (done ? "✓" : "⚠") : "✗";
-            const doneTag = done ? " [done]" : " [no-done]";
-            // Truncate task to first line — main agent already knows what it dispatched
+            // Slim output: summary only + context file path. Full tool results are on disk.
             const taskSummary = r.task.split("\n")[0]?.slice(0, 200) ?? r.task.slice(0, 200);
+            const contextPath = `.soulforge/dispatch/tab-${dispatchTabId}/${toolCallId}/${r.agentId}.md`;
+            // Extract just the summary from [done] prefix — strip the verbose formatDoneResult output
+            const summaryText = done
+              ? (r.result
+                  .replace(/^\[done\]\s*/, "")
+                  .split("\n")[0]
+                  ?.slice(0, 500) ?? r.result.slice(0, 500))
+              : r.result.slice(0, 500);
             sections.push(
-              `\n### ${status} Agent: ${r.agentId} (${r.role})${doneTag}\nTask: ${taskSummary}\n\n${r.result}\n\n---`,
+              `\n### ${status} Agent: ${r.agentId} (${r.role})\nTask: ${taskSummary}\n${summaryText}\n\nFull context: \`${contextPath}\`\n\n---`,
             );
           }
 
@@ -1166,7 +1175,7 @@ export function buildSubagentTools(models: SubagentModels) {
           // Release git lock: code agents + desloppify are done editing.
           // Verifier is read-only (role: "explore", no edit tools) — safe to unlock.
           editingDone = true;
-          if (dispatchTabId) getWorkspaceCoordinator().agentFinished(dispatchTabId);
+          if (activeTabId) getWorkspaceCoordinator().agentFinished(activeTabId);
 
           const verifyResult = await runVerifier(bus, tasks, models, toolCallId, combinedAbort);
           if (verifyResult) sections.push(verifyResult);
@@ -1194,7 +1203,7 @@ export function buildSubagentTools(models: SubagentModels) {
             output: sections.join("\n") + dependentWarning,
           } satisfies DispatchOutput;
         } finally {
-          if (dispatchTabId && !editingDone) getWorkspaceCoordinator().agentFinished(dispatchTabId);
+          if (activeTabId && !editingDone) getWorkspaceCoordinator().agentFinished(activeTabId);
           try {
             cacheRef.current = bus.exportCaches();
           } catch (err) {

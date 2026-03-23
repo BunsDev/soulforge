@@ -735,7 +735,7 @@ describe("buildPrepareStep — cache control", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildPrepareStep — token budgets", () => {
-	it("nudges structured output at 80% of context (160k for 200k)", () => {
+	it("nudges text summary at 80% of context (160k for 200k)", () => {
 		const result = callPrepareStep(
 			{ role: "explore", allTools: TOOLS },
 			{ stepNumber: 1, messages: [], steps: makeSteps(161_000) },
@@ -743,7 +743,7 @@ describe("buildPrepareStep — token budgets", () => {
 		expect(result?.activeTools).toEqual([]);
 		const lastMsg = result!.messages![result!.messages!.length - 1];
 		const text = (lastMsg?.content as Array<{ text: string }>)[0]?.text;
-		expect(text).toContain("JSON object");
+		expect(text).toContain("text summary");
 	});
 
 	it("no nudge below 80% of context", () => {

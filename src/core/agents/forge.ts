@@ -166,12 +166,22 @@ function buildForgePrepareStep(
     buildCrossTabSection(): string | null;
     isEditorOpen(): boolean;
     getEditorIntegration(): import("../../types/index.js").EditorIntegration | undefined;
+    buildSoulMapMessages():
+      | [{ role: "user"; content: string }, { role: "assistant"; content: string }]
+      | null;
+    buildSkillsMessages():
+      | [{ role: "user"; content: string }, { role: "assistant"; content: string }]
+      | null;
   },
 ) {
+  // Markers for detecting already-injected message pairs (must match the opening text)
+  const SOUL_MAP_MARKER = "<soul_map>";
+  const SKILLS_MARKER = "<loaded_skills>";
+
   // biome-ignore lint/suspicious/noExplicitAny: PrepareStepFunction generic is invariant
   return ({ stepNumber, messages }: { stepNumber: number; messages: ModelMessage[] }): any => {
     const sanitized = sanitizeMessages(messages);
-    const stripped = stripRejectedDispatches(sanitized);
+    let stripped = stripRejectedDispatches(sanitized);
     const result: {
       messages?: ModelMessage[];
       activeTools?: string[];
@@ -179,7 +189,41 @@ function buildForgePrepareStep(
       system?: string;
     } = {};
 
-    if (stripped !== messages) {
+    // Inject context message pairs (Soul Map + Skills) at the start of the conversation.
+    // Each pair is user→assistant — the model "acknowledges" the context, making it
+    // much more likely to reference it. Rebuilt every step to stay current after edits.
+    // Order: Soul Map first (most important), then Skills.
+    if (contextManager) {
+      // Strip any existing injected pairs (they start with known markers)
+      let conversationStart = 0;
+      while (conversationStart < stripped.length - 1) {
+        const msg = stripped[conversationStart];
+        if (
+          msg?.role === "user" &&
+          typeof msg.content === "string" &&
+          (msg.content.startsWith(SOUL_MAP_MARKER) || msg.content.startsWith(SKILLS_MARKER))
+        ) {
+          conversationStart += 2; // skip the user + assistant pair
+        } else {
+          break;
+        }
+      }
+      const conversation = stripped.slice(conversationStart);
+
+      // Build fresh context pairs
+      const prefix: ModelMessage[] = [];
+      const mapMsgs = contextManager.buildSoulMapMessages();
+      if (mapMsgs) prefix.push(...(mapMsgs as unknown as ModelMessage[]));
+      const skillsMsgs = contextManager.buildSkillsMessages();
+      if (skillsMsgs) prefix.push(...(skillsMsgs as unknown as ModelMessage[]));
+
+      if (prefix.length > 0) {
+        stripped = [...prefix, ...conversation];
+        result.messages = stripped;
+      }
+    }
+
+    if (stripped !== messages && !result.messages) {
       result.messages = stripped;
     }
 

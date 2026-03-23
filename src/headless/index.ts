@@ -13,6 +13,11 @@ function initConfig(cwd?: string): AppConfig {
   const config = loadConfig();
   const projectConfig = loadProjectConfig(cwd ?? process.cwd());
   const merged = mergeConfigs(config, projectConfig);
+  if (merged.keyPriority) {
+    const { setDefaultKeyPriority } =
+      require("../core/secrets.js") as typeof import("../core/secrets.js");
+    setDefaultKeyPriority(merged.keyPriority);
+  }
   if (merged.providers && merged.providers.length > 0) {
     registerCustomProviders(merged.providers);
   }

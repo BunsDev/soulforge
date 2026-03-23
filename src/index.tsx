@@ -225,6 +225,12 @@ function AppRoot({ opts }: { opts: StartOptions }) {
         Promise.resolve(checkPrerequisites()),
       ]);
 
+      const kp = newProjectConfig?.keyPriority ?? newConfig.keyPriority;
+      if (kp) {
+        const { setDefaultKeyPriority } = await import("./core/secrets.js");
+        setDefaultKeyPriority(kp);
+      }
+
       setFreshConfig(newConfig);
       setFreshProjectConfig(newProjectConfig);
       setFreshProviders(newProviders);

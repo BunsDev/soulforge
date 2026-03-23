@@ -1,3 +1,5 @@
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { FileReadRecord } from "./agent-bus.js";
 
 export interface DoneToolResult {
@@ -285,4 +287,110 @@ export function formatDoneResult(done: DoneToolResult): string {
     return `${result.slice(0, DONE_RESULT_CAP)}\n[... capped at ${String(Math.round(DONE_RESULT_CAP / 1000))}K chars]`;
   }
   return result;
+}
+
+/**
+ * Write agent context to disk for the parent agent to read on demand.
+ * Deterministic extraction — zero LLM cost.
+ * Returns the file path written.
+ */
+export function writeAgentContext(
+  dispatchId: string,
+  agentId: string,
+  task: { task: string; role: string },
+  agentResult: AgentResult,
+  findings: Array<{ label: string; content: string }>,
+  agentText: string,
+  cwd: string,
+  tabId?: string,
+): string {
+  const dir = tabId
+    ? dispatchDir(cwd, tabId, dispatchId)
+    : join(cwd, ".soulforge", "dispatch", dispatchId);
+  mkdirSync(dir, { recursive: true });
+  const filePath = join(dir, `${agentId}.md`);
+
+  const lines: string[] = [];
+  lines.push(`# Agent: ${agentId} (${task.role})`);
+  lines.push(`Task: ${task.task.slice(0, 300)}`);
+  lines.push("");
+
+  // Tool call stubs — what files/symbols were accessed
+  const toolStubs: string[] = [];
+  for (const step of agentResult.steps) {
+    for (const tc of step.toolCalls ?? []) {
+      const args = tc.args as Record<string, unknown> | undefined;
+      const name = tc.toolName;
+      if (name === "read_file") {
+        const path = args?.path ?? args?.file ?? "";
+        const start = args?.startLine ? ` lines ${String(args.startLine)}` : "";
+        const end = args?.endLine ? `-${String(args.endLine)}` : "";
+        const target = args?.target ? ` (${String(args.target)}: ${String(args.name ?? "")})` : "";
+        toolStubs.push(`[read_file] ${String(path)}${start}${end}${target}`);
+      } else if (name === "edit_file" || name === "multi_edit") {
+        toolStubs.push(`[${name}] ${String(args?.path ?? "")}`);
+      } else if (name === "grep" || name === "soul_grep") {
+        toolStubs.push(`[${name}] /${String(args?.pattern ?? "")}/`);
+      } else if (name === "navigate") {
+        toolStubs.push(`[navigate] ${String(args?.action ?? "")} ${String(args?.symbol ?? "")}`);
+      } else if (name === "analyze") {
+        toolStubs.push(
+          `[analyze] ${String(args?.action ?? "")} ${String(args?.file ?? args?.symbol ?? "")}`,
+        );
+      } else if (name === "soul_find") {
+        toolStubs.push(`[soul_find] ${String(args?.query ?? "")}`);
+      } else if (name === "soul_impact" || name === "soul_analyze") {
+        toolStubs.push(`[${name}] ${String(args?.action ?? "")} ${String(args?.file ?? "")}`);
+      } else if (name !== "done" && name !== "report_finding" && name !== "check_findings") {
+        toolStubs.push(`[${name}]`);
+      }
+    }
+  }
+  if (toolStubs.length > 0) {
+    lines.push("## Tool Calls");
+    lines.push(...toolStubs);
+    lines.push("");
+  }
+
+  // Findings from report_finding
+  if (findings.length > 0) {
+    lines.push("## Findings");
+    for (const f of findings) {
+      lines.push(`**${f.label}:**`);
+      lines.push(f.content.slice(0, 2000));
+      lines.push("");
+    }
+  }
+
+  // Agent's own text summary
+  if (agentText.trim()) {
+    lines.push("## Agent Summary");
+    lines.push(agentText.trim().slice(0, 4000));
+    lines.push("");
+  }
+
+  writeFileSync(filePath, lines.join("\n"), "utf-8");
+  return filePath;
+}
+
+/**
+ * Clean up dispatch context files from previous dispatches for a specific tab.
+ * Tab-prefixed dirs (tab-<tabId>/) isolate dispatches across concurrent tabs.
+ */
+export function cleanupDispatchDir(cwd: string, tabId: string, keepDispatchId?: string): void {
+  const tabDir = join(cwd, ".soulforge", "dispatch", `tab-${tabId}`);
+  try {
+    for (const entry of readdirSync(tabDir)) {
+      if (entry !== keepDispatchId) {
+        try {
+          rmSync(join(tabDir, entry), { recursive: true });
+        } catch {}
+      }
+    }
+  } catch {}
+}
+
+/** Build the dispatch context dir path for a given tab + dispatch. */
+export function dispatchDir(cwd: string, tabId: string, dispatchId: string): string {
+  return join(cwd, ".soulforge", "dispatch", `tab-${tabId}`, dispatchId);
 }

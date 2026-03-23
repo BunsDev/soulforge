@@ -833,9 +833,10 @@ export function buildTools(
             "search_symbols",
           ])
           .describe(
-            "definition=where defined, references=all usages, call_hierarchy=callers/callees, " +
-              "implementation=interface implementors, type_hierarchy=super/subtypes, " +
-              "symbols/imports/exports=file contents, workspace_symbols/search_symbols=search by query",
+            "definition=returns file:line of definition, references=returns all file:line usages, " +
+              "call_hierarchy=returns callers/callees with file:line, implementation=returns concrete implementors, " +
+              "type_hierarchy=returns super/subtypes, symbols/imports/exports=returns file contents, " +
+              "workspace_symbols/search_symbols=returns matching symbols across all files",
           ),
         symbol: z.string().optional().describe("Symbol name to look up"),
         file: z.string().optional().describe("File path (auto-resolved from symbol if omitted)"),
@@ -1233,9 +1234,10 @@ export function buildSubagentExploreTools(opts?: {
             "search_symbols",
           ])
           .describe(
-            "definition=where defined, references=all usages, call_hierarchy=callers/callees, " +
-              "implementation=interface implementors, type_hierarchy=super/subtypes, " +
-              "symbols/imports/exports=file contents, workspace_symbols/search_symbols=search by query",
+            "definition=returns file:line of definition, references=returns all file:line usages, " +
+              "call_hierarchy=returns callers/callees with file:line, implementation=returns concrete implementors, " +
+              "type_hierarchy=returns super/subtypes, symbols/imports/exports=returns file contents, " +
+              "workspace_symbols/search_symbols=returns matching symbols across all files",
           ),
         symbol: z.string().optional().describe("Symbol name to look up"),
         file: z.string().optional().describe("File path (auto-resolved from symbol if omitted)"),

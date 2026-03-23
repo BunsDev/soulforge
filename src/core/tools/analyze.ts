@@ -26,7 +26,8 @@ interface AnalyzeArgs {
 
 export const analyzeTool = {
   name: "analyze",
-  description: "Static analysis via LSP.",
+  description:
+    "Query code structure — returns type signatures, symbol outlines, diagnostics, quick-fix suggestions.",
   execute: async (args: AnalyzeArgs): Promise<ToolResult> => {
     try {
       const router = getIntelligenceRouter(process.cwd());

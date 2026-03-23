@@ -2,26 +2,27 @@ import { decodePasteBytes, type PasteEvent, TextAttributes } from "@opentui/core
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
 import { useEffect, useState } from "react";
 import { create } from "zustand";
+import { saveGlobalConfig } from "../../config/index.js";
 import { icon } from "../../core/icons.js";
 import {
   deleteSecret,
+  getDefaultKeyPriority,
+  getSecretSources,
   getStorageBackend,
-  hasSecret,
+  type KeyPriority,
   type SecretKey,
+  type SecretSources,
+  setDefaultKeyPriority,
   setSecret,
 } from "../../core/secrets.js";
 import { Overlay, POPUP_BG, POPUP_HL, PopupRow } from "../layout/shared.js";
 
 const MAX_POPUP_WIDTH = 72;
-const CHROME_ROWS = 10;
-
-interface KeyInfo {
-  set: boolean;
-  source: "env" | "keychain" | "file" | "none";
-}
+const CHROME_ROWS = 14;
 
 interface ApiKeyState {
-  keys: Partial<Record<SecretKey, KeyInfo>>;
+  keys: Partial<Record<SecretKey, SecretSources>>;
+  priority: KeyPriority;
   refresh: () => void;
 }
 
@@ -35,12 +36,14 @@ const PROVIDER_KEYS: SecretKey[] = [
   "vercel-gateway-api-key",
 ];
 
-const useApiKeyStore = create<ApiKeyState>()((set) => ({
-  keys: Object.fromEntries(PROVIDER_KEYS.map((k) => [k, hasSecret(k)])),
-  refresh: () =>
-    set({
-      keys: Object.fromEntries(PROVIDER_KEYS.map((k) => [k, hasSecret(k)])),
-    }),
+function refreshKeys(priority: KeyPriority) {
+  return Object.fromEntries(PROVIDER_KEYS.map((k) => [k, getSecretSources(k, priority)]));
+}
+
+const useApiKeyStore = create<ApiKeyState>()((set, get) => ({
+  keys: refreshKeys(getDefaultKeyPriority()),
+  priority: getDefaultKeyPriority(),
+  refresh: () => set({ keys: refreshKeys(get().priority) }),
 }));
 
 interface KeyItem {
@@ -96,12 +99,23 @@ const KEY_ITEMS: KeyItem[] = [
 ];
 
 type MenuItem =
-  | { type: "key"; item: KeyItem; info: KeyInfo }
-  | { type: "action"; id: string; label: string; keyId: SecretKey };
+  | { type: "key"; item: KeyItem; sources: SecretSources }
+  | { type: "action"; id: string; label: string; keyId: SecretKey }
+  | { type: "priority" };
 
 interface Props {
   visible: boolean;
   onClose: () => void;
+}
+
+function sourceBadges(sources: SecretSources): string {
+  const parts: string[] = [];
+  const tag = (label: string, isActive: boolean) => (isActive ? `[${label}]` : `(${label})`);
+  if (sources.env) parts.push(tag("env", sources.active === "env"));
+  if (sources.keychain) parts.push(tag("keychain", sources.active === "keychain"));
+  if (sources.file) parts.push(tag("file", sources.active === "file"));
+  if (parts.length === 0) return "not set";
+  return parts.join(" ");
 }
 
 export function ApiKeySettings({ visible, onClose }: Props) {
@@ -112,6 +126,7 @@ export function ApiKeySettings({ visible, onClose }: Props) {
   const maxVisible = Math.max(4, Math.floor((termRows - 2) * 0.8) - CHROME_ROWS);
 
   const keys = useApiKeyStore((s) => s.keys);
+  const priority = useApiKeyStore((s) => s.priority);
   const refresh = useApiKeyStore((s) => s.refresh);
   const [cursor, setCursor] = useState(0);
   const [mode, setMode] = useState<"menu" | "input">("menu");
@@ -122,6 +137,7 @@ export function ApiKeySettings({ visible, onClose }: Props) {
 
   useEffect(() => {
     if (visible) {
+      useApiKeyStore.setState({ priority: getDefaultKeyPriority() });
       refresh();
       setCursor(0);
       setScrollOffset(0);
@@ -145,15 +161,16 @@ export function ApiKeySettings({ visible, onClose }: Props) {
   }, [visible, mode, renderer]);
 
   const menuItems: MenuItem[] = [];
+  menuItems.push({ type: "priority" });
   for (const k of KEY_ITEMS) {
-    const info = keys[k.id];
-    if (!info) continue;
-    menuItems.push({ type: "key", item: k, info });
-    if (info.set && info.source !== "env") {
+    const sources = keys[k.id];
+    if (!sources) continue;
+    menuItems.push({ type: "key", item: k, sources });
+    if (sources.keychain || sources.file) {
       menuItems.push({
         type: "action",
         id: `remove:${k.id}`,
-        label: `  Remove ${k.label}`,
+        label: `Remove ${k.label}`,
         keyId: k.id,
       });
     }
@@ -165,14 +182,18 @@ export function ApiKeySettings({ visible, onClose }: Props) {
   };
 
   const handleSetKey = (target: SecretKey) => {
-    const info = keys[target];
-    if (info?.source === "env") {
-      flash("Set via env var — edit your shell config to change it.");
-      return;
-    }
     setInputTarget(target);
     setInputValue("");
     setMode("input");
+  };
+
+  const handleTogglePriority = () => {
+    const next: KeyPriority = priority === "env" ? "app" : "env";
+    setDefaultKeyPriority(next);
+    useApiKeyStore.setState({ priority: next });
+    refresh();
+    saveGlobalConfig({ keyPriority: next });
+    flash(`Priority: ${next === "env" ? "env vars first" : "app keys first"}`);
   };
 
   const handleConfirmInput = () => {
@@ -206,7 +227,6 @@ export function ApiKeySettings({ visible, onClose }: Props) {
     refresh();
   };
 
-  // Clamp cursor and handle scroll
   const clampedCursor = Math.min(cursor, Math.max(0, menuItems.length - 1));
   const effectiveScrollOffset = Math.min(scrollOffset, Math.max(0, menuItems.length - maxVisible));
   const visibleItems = menuItems.slice(effectiveScrollOffset, effectiveScrollOffset + maxVisible);
@@ -235,7 +255,6 @@ export function ApiKeySettings({ visible, onClose }: Props) {
       return;
     }
 
-    // Menu mode
     if (evt.name === "escape") {
       onClose();
       return;
@@ -257,7 +276,9 @@ export function ApiKeySettings({ visible, onClose }: Props) {
     if (evt.name === "return" || evt.name === " ") {
       const item = menuItems[clampedCursor];
       if (!item) return;
-      if (item.type === "key") {
+      if (item.type === "priority") {
+        handleTogglePriority();
+      } else if (item.type === "key") {
         handleSetKey(item.item.id);
       } else if (item.type === "action") {
         handleRemoveKey(item.keyId);
@@ -269,10 +290,12 @@ export function ApiKeySettings({ visible, onClose }: Props) {
 
   const backend = getStorageBackend();
   const backendLabel = backend === "keychain" ? "OS Keychain" : "~/.soulforge/secrets.json";
-  const configuredCount = KEY_ITEMS.filter((k) => keys[k.id]?.set).length;
+  const configuredCount = KEY_ITEMS.filter((k) => keys[k.id]?.active !== "none").length;
+  const priorityLabel = priority === "env" ? "env vars first" : "app keys first";
 
   if (mode === "input") {
     const target = KEY_ITEMS.find((k) => k.id === inputTarget);
+    const existingSources = inputTarget ? keys[inputTarget] : undefined;
     const masked =
       inputValue.length > 0
         ? `${"*".repeat(Math.max(0, inputValue.length - 4))}${inputValue.slice(-4)}`
@@ -302,6 +325,15 @@ export function ApiKeySettings({ visible, onClose }: Props) {
               {"─".repeat(innerW - 2)}
             </text>
           </PopupRow>
+
+          {existingSources?.env && (
+            <PopupRow w={innerW}>
+              <text bg={POPUP_BG} fg="#FF8C00">
+                env var already set — this will add an app key
+                {priority === "app" ? " (takes priority)" : " (env takes priority)"}
+              </text>
+            </PopupRow>
+          )}
 
           <PopupRow w={innerW}>
             <text bg={POPUP_BG} fg="#888">
@@ -343,7 +375,6 @@ export function ApiKeySettings({ visible, onClose }: Props) {
         borderColor="#8B5CF6"
         width={popupWidth}
       >
-        {/* Title */}
         <PopupRow w={innerW}>
           <text bg={POPUP_BG} fg="#9B30FF" attributes={TextAttributes.BOLD}>
             {icon("key") ?? ""}
@@ -363,47 +394,62 @@ export function ApiKeySettings({ visible, onClose }: Props) {
           </text>
         </PopupRow>
 
-        {/* Key list */}
+        {/* Priority setting */}
+        <PopupRow w={innerW}>
+          <text bg={POPUP_BG} fg="#888" attributes={TextAttributes.BOLD}>
+            Resolution Priority
+          </text>
+        </PopupRow>
+
         {visibleItems.map((mi, idx) => {
           const absoluteIdx = effectiveScrollOffset + idx;
           const isSelected = absoluteIdx === clampedCursor;
           const bg = isSelected ? POPUP_HL : POPUP_BG;
+
+          if (mi.type === "priority") {
+            return (
+              <PopupRow key="priority" w={innerW}>
+                <text bg={bg} fg={isSelected ? "white" : "#ccc"}>
+                  {isSelected ? "›" : " "} Priority
+                </text>
+                <text bg={bg} fg={priority === "app" ? "#FF8C00" : "#2d9bf0"}>
+                  {" "}
+                  [{priorityLabel}]
+                </text>
+              </PopupRow>
+            );
+          }
 
           if (mi.type === "action") {
             return (
               <PopupRow key={mi.id} w={innerW}>
                 <text bg={bg} fg={isSelected ? "#FF0040" : "#555"}>
                   {isSelected ? "›" : " "}
-                  {"  "}
-                  {mi.label.trimStart()}
+                  {"    "}
+                  {mi.label}
                 </text>
               </PopupRow>
             );
           }
 
-          const info = mi.info;
+          const sources = mi.sources;
           const item = mi.item;
-          const statusColor = info.set ? "#2d5" : "#555";
-          const statusText = info.set
-            ? info.source === "env"
-              ? `set (${item.envVar})`
-              : `set (${info.source})`
-            : "not set";
+          const hasAny = sources.active !== "none";
+          const badges = sourceBadges(sources);
 
           return (
             <PopupRow key={item.id} w={innerW}>
               <text bg={bg} fg={isSelected ? "white" : "#ccc"}>
                 {isSelected ? "›" : " "} {item.label}
               </text>
-              <text bg={bg} fg={statusColor}>
+              <text bg={bg} fg={hasAny ? "#2d5" : "#555"}>
                 {" "}
-                [{statusText}]
+                {badges}
               </text>
             </PopupRow>
           );
         })}
 
-        {/* Description for selected key item */}
         {(() => {
           const selected = menuItems[clampedCursor];
           if (selected?.type === "key") {
@@ -416,10 +462,19 @@ export function ApiKeySettings({ visible, onClose }: Props) {
               </PopupRow>
             );
           }
+          if (selected?.type === "priority") {
+            return (
+              <PopupRow w={innerW}>
+                <text bg={POPUP_BG} fg="#555">
+                  {"   "}
+                  {priority === "env" ? "env vars override app keys" : "app keys override env vars"}
+                </text>
+              </PopupRow>
+            );
+          }
           return null;
         })()}
 
-        {/* Scroll indicator */}
         {menuItems.length > maxVisible && (
           <PopupRow w={innerW}>
             <text bg={POPUP_BG} fg="#555">
@@ -428,7 +483,6 @@ export function ApiKeySettings({ visible, onClose }: Props) {
           </PopupRow>
         )}
 
-        {/* Status message */}
         {statusMsg && (
           <PopupRow w={innerW}>
             <text bg={POPUP_BG} fg="#FF9500">
@@ -446,13 +500,13 @@ export function ApiKeySettings({ visible, onClose }: Props) {
 
         <PopupRow w={innerW}>
           <text bg={POPUP_BG} fg="#555">
-            {"↑↓ navigate  ↵ set key  esc close"}
+            {"↑↓ navigate  ↵ set/toggle  esc close"}
           </text>
         </PopupRow>
 
         <PopupRow w={innerW}>
           <text bg={POPUP_BG} fg="#555">
-            {"Storage: "}
+            {"[active] (available)  Storage: "}
             {backendLabel}
           </text>
         </PopupRow>

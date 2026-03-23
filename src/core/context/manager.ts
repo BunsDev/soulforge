@@ -12,7 +12,7 @@ import { MemoryManager } from "../memory/manager.js";
 import { getModeInstructions } from "../modes/prompts.js";
 import { buildForbiddenContext, isForbidden } from "../security/forbidden.js";
 import { emitFileEdited, onFileEdited, onFileRead } from "../tools/file-events.js";
-import { extractConversationTerms } from "./conversation-terms.js";
+// extractConversationTerms removed — FTS boosting was noisy
 import { walkDir } from "./file-tree.js";
 import { detectToolchain } from "./toolchain.js";
 
@@ -26,6 +26,12 @@ import { detectToolchain } from "./toolchain.js";
 // Each tier costs ~10x more tokens than the one above. Stay as low as possible.
 
 const TOOL_ROUTING = [
+  // Mandatory pre-flight gate — LSP first, Soul Map as context feed
+  `BEFORE EVERY TOOL CALL — run this gate:
+1. Is it a symbol/identifier question? → navigate or analyze FIRST. These are your primary tools — they resolve symbols across the entire codebase from just a name, return file:line locations, callers, type info. One call replaces 3-5 read_file calls. The Soul Map in your context gives you the symbol names and file paths to feed into navigate/analyze.
+2. Is it a broad/conceptual question? → soul_find, soul_grep(count), soul_impact. These search by pattern, not type system.
+3. Only if steps 1-2 cannot answer → read_file, grep, shell.
+Every read_file you skip saves ~2k tokens. LSP + Soul Map answer 80% of exploration questions without reading files.`,
   // Core discipline
   "Soul Map and tool results are authoritative (auto-updated on every edit). One read per file, one search per question. Stop as soon as you can act. Every response ends with an action.",
   // Tier system
@@ -35,21 +41,21 @@ Tier 0 — Soul Map (already in your context, zero cost):
 Check the rendered Soul Map FIRST. It has file paths, exported symbols with signatures, PageRank rankings, and dependency edges. Often answers "where is X" / "what does X export" without any tool call.
 
 Tier 1 — Structural queries (instant, zero file I/O):
-  Soul Map tools:
+  LSP (primary — use for any symbol/identifier question, auto-resolves files from name alone):
+    navigate(definition) → returns file:line where symbol is defined
+    navigate(references) → returns all file:line locations that use the symbol (up to 50)
+    navigate(call_hierarchy) → returns callers (incoming) or callees (outgoing) with file:line
+    navigate(implementation) → returns file:line of concrete implementations
+    navigate(type_hierarchy) → returns supertypes and subtypes with file:line
+    navigate(workspace_symbols) → returns matching symbols across all files with kind + file:line
+    analyze(type_info) → returns type signature + docs for a symbol
+    analyze(diagnostics) → returns type errors and warnings in a file
+    analyze(outline) → returns compact symbol list with line numbers for a file
+  Soul Map tools (for broad/pattern queries — concepts, counts, relationships):
     soul_find → locate files/symbols by name (ranked, with signatures)
     soul_impact → dependents, dependencies, cochanges, blast_radius
     soul_analyze → file_profile, unused_exports, frequency, duplication, packages, symbols_by_kind
     soul_grep(count) → quantify matches before reading anything
-  LSP/Intelligence (auto-resolves files, falls back gracefully):
-    navigate(definition) → jump to where a symbol is defined
-    navigate(references) → all usages of a symbol across the codebase
-    navigate(call_hierarchy) → who calls this / what does this call
-    navigate(implementation) → where interfaces/abstract methods are implemented
-    navigate(type_hierarchy) → supertypes and subtypes
-    navigate(workspace_symbols) → search symbols by query across all files
-    analyze(type_info) → type signature + docs for any symbol
-    analyze(diagnostics) → type errors and warnings in a file
-    analyze(outline) → compact symbol list for a file
 
 Tier 2 — Targeted reads (read only what Tier 1 pointed you to):
   read_file(target, name) → extract one symbol, not the whole file
@@ -71,7 +77,16 @@ Compound tools (one call, complete job — no verification needed after):
   rename_file → rename + update all import paths
   refactor → extract_function, extract_variable, organize_imports, format
 
-Match tool to question scope: need one value/label/constant? → soul_grep or navigate(definition). Need one function? → read_file(target, name). Need type info? → analyze(type_info). Need callers? → navigate(call_hierarchy). Need file structure? → soul_analyze(file_profile) or analyze(outline). Full file reads are for editing, not for looking things up.`,
+QUICK REF — question → best tool (cheapest first):
+"Where is X defined?" → navigate(definition, symbol: "X") — returns file:line
+"Who calls X?" → navigate(call_hierarchy, symbol: "X", direction: "incoming") — returns caller list
+"What uses X?" → navigate(references, symbol: "X") — returns all file:line locations
+"What type is X?" → analyze(type_info, symbol: "X") — returns signature + docs
+"What does file X export?" → Soul Map already lists this. Or: analyze(outline)
+"How is this component structured?" → analyze(outline) — returns symbol list with line numbers
+"Read one function body" → read_file(target: "function", name: "X") — extracts just that symbol
+"Read full file for editing" → read_file(startLine: 1) — always pass startLine to get content, not outline
+Full file reads are for editing, not for understanding code structure.`,
 ];
 
 const TOOL_ROUTING_SOUL_MAP = [
@@ -142,7 +157,7 @@ export class ContextManager {
   private repoMapEnabled = process.env.SOULFORGE_NO_REPOMAP !== "1";
   private editedFiles = new Set<string>();
   private mentionedFiles = new Set<string>();
-  private conversationTerms: string[] = [];
+  // conversationTerms removed — FTS boosting was noisy, PageRank handles ranking
   private conversationTokens = 0;
   private contextWindowTokens = DEFAULT_CONTEXT_WINDOW;
   private repoMapCache: { content: string; at: number } | null = null;
@@ -404,9 +419,10 @@ export class ContextManager {
   }
 
   /** Update conversation context for repo map ranking */
-  updateConversationContext(input: string, totalTokens: number): void {
+  updateConversationContext(_input: string, totalTokens: number): void {
     this.conversationTokens = totalTokens;
-    this.conversationTerms = extractConversationTerms(input);
+    // conversationTerms removed — FTS boosting from user input was noisy.
+    // Personalized PageRank (edits/reads/editor boosts) handles ranking better.
   }
 
   /** Get a snapshot of tracked files (for preserving across compaction) */
@@ -421,7 +437,7 @@ export class ContextManager {
   resetConversationTracking(): void {
     this.editedFiles.clear();
     this.mentionedFiles.clear();
-    this.conversationTerms = [];
+
     this.conversationTokens = 0;
     this.repoMapCache = null;
   }
@@ -437,7 +453,6 @@ export class ContextManager {
       editorFile: this.editorFile,
       editedFiles: [...this.editedFiles],
       mentionedFiles: [...this.mentionedFiles],
-      conversationTerms: this.conversationTerms,
       conversationTokens: this.conversationTokens,
     });
     this.repoMapCache = { content, at: now };
@@ -879,27 +894,6 @@ export class ContextManager {
     const isMinimal = ctxWindow <= MINIMAL_CONTEXT_THRESHOLD;
 
     const projectInfo = this.getProjectInfo();
-    let repoMapContent: string | null = null;
-    if (this.repoMapEnabled && this.repoMapReady) {
-      const rendered = this.renderRepoMap();
-      if (rendered) {
-        repoMapContent = rendered;
-      }
-    }
-
-    const hasRepoMap = repoMapContent !== null;
-    const mapText = repoMapContent ?? "";
-    const codebaseSection = hasRepoMap
-      ? [
-          "Soul Map (live-updated after every edit, ranked by PageRank + git co-change + conversation context):",
-          ...(isMinimal
-            ? ["Indexed codebase. Scan before tool calls.", mapText]
-            : [
-                "+ = exported. (→N) = blast radius. [NEW] = new since last render. Scan it FIRST before any tool call.",
-                mapText,
-              ]),
-        ]
-      : ["Files:", this.getFileTree(3)];
 
     // ── STATIC SECTION (stable prefix → cached across all turns) ──
     const parts = [
@@ -912,10 +906,10 @@ export class ContextManager {
     // 2. Tool routing + dispatch + planning (static behavioral rules)
     if (!isMinimal) {
       parts.push(
-        // Soul Map orientation
-        "The Soul Map is your index — check it before any tool call. If it answers your question, act without tools.",
+        // Soul Map orientation — always present, map is injected as a message pair
+        "A Soul Map of the codebase is provided at the start of the conversation — it lists every file, exported symbol, signature, and dependency. Consult it before any tool call to identify relevant files and symbols.",
         // Tool routing
-        ...buildToolGuidance(hasRepoMap),
+        ...buildToolGuidance(true),
       );
 
       if (this.repoMapReady && this.repoMap.getStats().symbols === 0) {
@@ -925,11 +919,11 @@ export class ContextManager {
       }
 
       // Dispatch
-      parts.push("", ...buildDispatchGuidance(hasRepoMap));
+      parts.push("", ...buildDispatchGuidance(true));
 
       // Planning
       parts.push(
-        `Planning: edit files directly — the plan tool requires 7+ files (smaller plans are rejected). When planning: research → plan (self-contained with exact paths${hasRepoMap ? " from Soul Map" : ""}, symbols, step details) → user confirms → execute. Zero exploration during execution.`,
+        `Planning: edit files directly — the plan tool requires 7+ files (smaller plans are rejected). When planning: research → plan (self-contained with exact paths from Soul Map, symbols, step details) → user confirms → execute. Zero exploration during execution.`,
       );
     }
 
@@ -952,14 +946,8 @@ export class ContextManager {
     if (projectInfo) parts.push(projectInfo);
     if (this.projectInstructions) parts.push(this.projectInstructions);
 
-    // 5. Skills (dynamic — loaded/unloaded by user)
-    if (this.skills.size > 0) {
-      const names = [...this.skills.keys()];
-      parts.push(`Skills loaded: ${names.join(", ")}. Follow when relevant.`);
-      for (const [name, content] of this.skills) {
-        parts.push(`[${name}] ${content}`);
-      }
-    }
+    // 5. Skills are injected as a message pair (like Soul Map) to keep system prompt stable.
+    // Only a static reference line here.
 
     // 6. Forbidden files (dynamic — changes per project)
     const forbiddenCtx = buildForbiddenContext();
@@ -967,8 +955,10 @@ export class ContextManager {
       parts.push("", forbiddenCtx);
     }
 
-    // 7. Soul Map / file tree (dynamic — largest section, changes on every edit)
-    parts.push("", ...codebaseSection);
+    // 7. Soul Map is now injected as a user→assistant message pair (not in system prompt).
+    // This makes the system prompt stable for caching and the agent "acknowledges" the map.
+    // Fallback: if repo map isn't ready, include a simple file tree here.
+    // Soul Map is always injected as a message pair — no file tree fallback needed here.
 
     parts.push("", ...this.buildEditorToolsSection());
 
@@ -1015,16 +1005,118 @@ export class ContextManager {
       parts.push(`Mode: ${modeInstructions}`);
     }
 
-    if (this.skills.size === 0) {
-      parts.push(
-        "Skills: none loaded. Use skills(action: search) for domain-specific expertise, or Ctrl+S to browse.",
-      );
-    }
+    // Skills status is injected as a message pair, not here. Static reference only.
+    parts.push(
+      "Skills may be loaded as context at the start of the conversation. Use skills(action: search) to find new ones, or Ctrl+S to browse.",
+    );
 
     // Cross-tab claims injected via prepareStep (fresh on every step),
     // not here in the system prompt (would go stale as claims change).
 
     return parts.filter(Boolean).join("\n");
+  }
+
+  /**
+   * Build the Soul Map as a user→assistant message pair.
+   * Injected at the start of the conversation so the model "acknowledges" the map.
+   * This makes the system prompt stable (better caching) and the model more likely to use the map.
+   * Returns null if the repo map isn't ready.
+   */
+  buildSoulMapMessages():
+    | [{ role: "user"; content: string }, { role: "assistant"; content: string }]
+    | null {
+    if (!this.repoMapEnabled || !this.repoMapReady) return null;
+    const rendered = this.renderRepoMap();
+    if (!rendered) return null;
+
+    const isMinimal = this.contextWindowTokens <= MINIMAL_CONTEXT_THRESHOLD;
+    const legend = isMinimal
+      ? ""
+      : "+ = exported. (→N) = blast radius. [NEW] = new since last render.\n";
+
+    // Build the top files list for the assistant to reference (grounds the acknowledgment)
+    const topFiles: string[] = [];
+    try {
+      const stats = this.repoMap.getStats();
+      if (stats.files > 0) {
+        const top = this.repoMap.getTopFiles(5);
+        for (const f of top) topFiles.push(f.path);
+      }
+    } catch {}
+
+    const userMessage =
+      `<soul_map>\n` +
+      `<description>\n` +
+      `This is the Soul Map — a live structural index of the entire codebase. ` +
+      `It is rebuilt automatically after every edit using AST parsing (tree-sitter), ` +
+      `PageRank file ranking, and git co-change analysis.\n\n` +
+      `What each part means:\n` +
+      `- Files are ranked by importance (highest-impact files first)\n` +
+      `- (→N) after a file = blast radius — N other files depend on it\n` +
+      `- + before a symbol = exported (part of the public API)\n` +
+      `- ← arrows = "imported by" — shows which files depend on this one\n` +
+      `- Signatures show function/type shapes so you can understand APIs without reading files\n` +
+      `- Key dependencies section shows external packages and how widely they're used\n` +
+      `</description>\n\n` +
+      `<how_to_use>\n` +
+      `This map answers most structural questions about the codebase directly:\n` +
+      `- "Where is X?" → find the file and line in the map\n` +
+      `- "What does file Y export?" → listed under that file\n` +
+      `- "What depends on Z?" → check the ← arrows and blast radius\n` +
+      `- "What packages does this project use?" → Key dependencies section\n\n` +
+      `For deeper questions, feed symbol names from the map into navigate() or analyze() — ` +
+      `these return precise file:line results from the type system. ` +
+      `The map gives you the names, LSP gives you the details.\n` +
+      `</how_to_use>\n\n` +
+      `<data>\n` +
+      `${legend}${rendered}\n` +
+      `</data>\n` +
+      `</soul_map>`;
+
+    const topRef =
+      topFiles.length > 0 ? ` The highest-impact files are ${topFiles.join(", ")}.` : "";
+    const assistantAck =
+      `I've internalized the Soul Map.${topRef} ` +
+      `I'll reference it before every task to identify relevant files and symbols, ` +
+      `then use navigate/analyze for precise answers. ` +
+      `Ready for your request.`;
+
+    return [
+      { role: "user" as const, content: userMessage },
+      { role: "assistant" as const, content: assistantAck },
+    ];
+  }
+
+  /**
+   * Build skills as a user→assistant message pair.
+   * Keeps the system prompt stable when skills are loaded/unloaded.
+   * Returns null if no skills are loaded.
+   */
+  buildSkillsMessages():
+    | [{ role: "user"; content: string }, { role: "assistant"; content: string }]
+    | null {
+    if (this.skills.size === 0) return null;
+
+    const names = [...this.skills.keys()];
+    const skillBlocks = [...this.skills.entries()]
+      .map(([name, content]) => `<skill name="${name}">\n${content}\n</skill>`)
+      .join("\n\n");
+
+    const userMessage =
+      `<loaded_skills>\n` +
+      `The following ${String(names.length)} skill(s) are loaded: ${names.join(", ")}.\n` +
+      `Apply them when the task matches their domain.\n\n` +
+      `${skillBlocks}\n` +
+      `</loaded_skills>`;
+
+    const assistantAck =
+      `Noted — ${String(names.length)} skill(s) loaded: ${names.join(", ")}. ` +
+      `I'll apply them when relevant to the task.`;
+
+    return [
+      { role: "user" as const, content: userMessage },
+      { role: "assistant" as const, content: assistantAck },
+    ];
   }
 
   /** Build the editor tools section for the system prompt */

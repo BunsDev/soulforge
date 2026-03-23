@@ -40,6 +40,7 @@ export class StandaloneLspClient {
   private initialized = false;
   private rootUri: string;
   private serverSupportsWillRename = false;
+  private startedAt = 0;
 
   constructor(
     private config: LspServerConfig,
@@ -107,6 +108,7 @@ export class StandaloneLspClient {
 
     this.notify("initialized", {});
     this.initialized = true;
+    this.startedAt = Date.now();
   }
 
   /** Send a request and wait for the response */
@@ -488,6 +490,11 @@ export class StandaloneLspClient {
   /** Check if the client has been initialized */
   get isReady(): boolean {
     return this.initialized && this.process !== null;
+  }
+
+  /** Whether the server started recently and may still be indexing */
+  get isWarmingUp(): boolean {
+    return this.startedAt > 0 && Date.now() - this.startedAt < 30_000;
   }
 
   /** The language this server is configured for */

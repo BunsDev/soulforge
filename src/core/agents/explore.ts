@@ -1,7 +1,6 @@
 import type { ProviderOptions } from "@ai-sdk/provider-utils";
 import type { LanguageModel } from "ai";
-import { Output, ToolLoopAgent } from "ai";
-import { z } from "zod";
+import { ToolLoopAgent } from "ai";
 import { EPHEMERAL_CACHE } from "../llm/provider-options.js";
 import { buildSubagentExploreTools, wrapWithBusCache } from "../tools/index.js";
 import type { AgentBus } from "./agent-bus.js";
@@ -21,7 +20,7 @@ function exploreBase(): string {
       " Exhaust Tier 1 before Tier 2. Three Tier 1 calls replace twenty Tier 3 calls.",
     "Workflow: EXTRACTION (paths given) → read_file(target, name). DISCOVERY (keywords only) → soul_find or navigate, then read hits. TRACING (data flow) → soul_impact + navigate(references), not grep→read chains.",
     "After reading targets, trace one level of callers via navigate(references). Flag disconnects between stated vs actual behavior.",
-    'OUTPUT: JSON object {"summary":"...","filesExamined":[...],"keyFindings":[{"file":"...","detail":"paste actual code"}],"gaps":[...],"connections":[...]}. Paste full code in keyFindings — the parent is BLIND to your tool results.',
+    "OUTPUT: End with a concise text summary of your findings. The system extracts tool results automatically — your text is the only thing the parent sees. Be specific: name files, line numbers, exact values found.",
   ].join("\n");
 }
 
@@ -36,44 +35,12 @@ function investigateBase(): string {
       " Only read files that Tier 1 tools pointed you to.",
     "Target paths are pre-resolved. Use soul_grep for pattern matching, soul_analyze for structural queries (unused exports, symbol frequency, file profiles), soul_impact for dependency analysis.",
     "Quantify findings: counts, percentages, file lists. Flag inconsistencies between files.",
-    'OUTPUT: JSON object {"summary":"...","filesExamined":[...],"keyFindings":[{"file":"...","detail":"paste evidence"}],"gaps":[...],"connections":[...]}. Paste actual code/data, not descriptions.',
+    "OUTPUT: End with a concise text summary. Name files, line numbers, exact values. The system extracts tool results automatically — your text is all the parent sees.",
   ].join("\n");
 }
 
-const exploreOutputSchema = z.object({
-  summary: z.string().describe("Direct answer to the task question with key conclusions"),
-  filesExamined: z.array(z.string()).describe("File paths you examined"),
-  keyFindings: z
-    .array(
-      z.object({
-        file: z.string(),
-        detail: z
-          .string()
-          .describe("PASTE actual code: full function bodies, type definitions, relevant blocks"),
-        lineNumbers: z.string().optional(),
-      }),
-    )
-    .describe("Each finding with pasteable code"),
-  gaps: z
-    .array(z.string())
-    .optional()
-    .describe(
-      "Disconnects: missing enforcement, stated vs actual behavior, unhandled edge cases, dead code paths",
-    ),
-  connections: z
-    .array(z.string())
-    .optional()
-    .describe(
-      "Cross-cutting: symbols, configs, or APIs in your files that also appear in peer agents' targets",
-    ),
-});
-
-const exploreOutput = Output.object({
-  name: "research_result",
-  description:
-    "Structured research result. Paste full code in keyFindings — the parent is BLIND to your tool results.",
-  schema: exploreOutputSchema,
-});
+// No structured output schema — agents return plain text summaries.
+// The system extracts tool results deterministically and writes context files to disk.
 
 interface ExploreAgentOptions {
   bus?: AgentBus;
@@ -137,7 +104,6 @@ export function createExploreAgent(model: LanguageModel, options?: ExploreAgentO
       })(),
       providerOptions: EPHEMERAL_CACHE,
     },
-    output: exploreOutput,
     stopWhen: stopConditions,
     prepareStep,
     experimental_repairToolCall: repairToolCall,

@@ -31,7 +31,7 @@ const KEEP_RECENT_MESSAGES = 4;
 // Step-count limits — hard caps to prevent runaway loops.
 // Bumped +3 from original (25/15) to compensate for the final step being
 // forced to toolChoice:"none" (text-only) — agents need room to finish work
-// before the hard JSON-output lockdown kicks in.
+// before the text-only summary requirement kicks in.
 const EXPLORE_MAX_STEPS = 28;
 const CODE_MAX_STEPS = 18;
 // Step at which we inject a "wrap up" nudge (before hard stop)
@@ -508,7 +508,7 @@ export function buildPrepareStep({
       if (consecutiveReads >= CONSECUTIVE_READ_LIMIT) {
         const existing = result.system ?? "";
         const hint = isExplore
-          ? 'Act on what you have: produce your JSON output {"summary":"...","filesExamined":[...],"keyFindings":[...]}, or use a search tool (soul_grep, grep) if you need something specific.'
+          ? "Act on what you have: write a concise text summary of your findings (files, line numbers, values), or use a search tool (soul_grep, grep) if you need something specific."
           : "You have the file contents. Apply your edits with multi_edit NOW.";
         result.system =
           `${existing}\n\n${String(consecutiveReads)} consecutive reads without action. ${hint}`.trim();
@@ -520,17 +520,13 @@ export function buildPrepareStep({
       const remaining = maxSteps - stepNumber;
       const existing = result.system ?? "";
       if (remaining <= 1) {
-        // LAST STEP — force text-only response so Output.object() can parse it.
-        // Without toolChoice:"none", the model may emit finishReason:'tool-calls'
-        // with garbage text (e.g. "."), causing NoObjectGeneratedError.
+        // LAST STEP — force text-only response. No more tool calls.
         const hint = isExplore
-          ? 'Produce your JSON output NOW: {"summary":"...","filesExamined":[...],"keyFindings":[{"file":"...","detail":"paste code"}]}. No more tool calls.'
-          : 'Apply edits with multi_edit NOW then produce JSON output: {"summary":"...","filesEdited":[{"file":"...","changes":"..."}]}. Last chance.';
+          ? "Write your final text summary NOW. Name files, line numbers, exact values found. No more tool calls."
+          : "Apply edits with multi_edit NOW then write a summary of what you changed. Last chance.";
         result.system = `${existing}\n\n🛑 FINAL STEP. ${hint}`.trim();
-        // Force text-only response for ALL agent types on the last step
         result.toolChoice = "none";
         result.activeTools = [];
-        // Inject a user message to further steer the model toward JSON output
         const msgs = result.messages ?? messages;
         result.messages = [
           ...msgs,
@@ -539,33 +535,29 @@ export function buildPrepareStep({
             content: [
               {
                 type: "text" as const,
-                text: `This is your FINAL step. Do not call any tools. Respond ONLY with a JSON object: ${isExplore ? '{"summary":"...","filesExamined":[...],"keyFindings":[{"file":"...","detail":"paste code"}]}' : '{"summary":"...","filesEdited":[{"file":"...","changes":"..."}],"verified":true}'}`,
+                text: `This is your FINAL step. Do not call any tools. Write a concise text summary: what you found or changed, which files, key details.`,
               },
             ],
           },
         ];
       } else if (remaining <= 2) {
-        // Penultimate step — strong nudge + restrict tools for code agents
         const hint = isExplore
-          ? 'Produce your JSON output NOW: {"summary":"...","filesExamined":[...],"keyFindings":[{"file":"...","detail":"paste code"}]}. No more tool calls.'
-          : 'Apply edits with multi_edit NOW then produce JSON output: {"summary":"...","filesEdited":[{"file":"...","changes":"..."}]}. Last chance.';
+          ? "Write your text summary NOW. Name files, line numbers, exact values. No more tool calls."
+          : "Apply edits with multi_edit NOW then write a summary of what you changed. Last chance.";
         result.system = `${existing}\n\n🛑 ${String(remaining)} steps left. ${hint}`.trim();
         if (!isExplore) {
           result.activeTools = ["edit_file", "multi_edit", "done", "report_finding"];
         }
       } else {
         const hint = isExplore
-          ? 'Produce your JSON output now: {"summary":"...","filesExamined":[...],"keyFindings":[{"file":"...","detail":"paste code"}]}.'
-          : 'Apply your edits NOW with multi_edit then produce JSON output: {"summary":"...","filesEdited":[...]}. No more reading.';
+          ? "Write your text summary soon. Name files, line numbers, exact values found."
+          : "Apply your edits NOW with multi_edit. No more reading.";
         result.system =
           `${existing}\n\n⚠ Step ${String(stepNumber)}/${String(maxSteps)} — ${String(remaining)} steps left. ${hint}`.trim();
       }
     }
 
-    // Nudge structured output before tokenStop fires.
-    // prepareStep runs BEFORE each step — removing tools forces a text-only
-    // response, so the agent stops with finishReason:'stop' and Output.object()
-    // parses the text successfully. tokenStop is the safety net, not the enforcer.
+    // Token budget nudge: force text-only response before context overflows.
     if (contextSize > nudgeThreshold) {
       nudgeFired = true;
       if (parentToolCallId) {
@@ -585,7 +577,7 @@ export function buildPrepareStep({
           content: [
             {
               type: "text" as const,
-              text: 'Stop calling tools. Respond with a JSON object now: {"summary":"...","filesExamined":[...],"keyFindings":[{"file":"...","detail":"paste code"}]}.',
+              text: "Stop calling tools. Write a concise text summary now: what you found or changed, which files, key details.",
             },
           ],
         },

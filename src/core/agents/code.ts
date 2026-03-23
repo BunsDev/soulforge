@@ -1,7 +1,6 @@
 import type { ProviderOptions } from "@ai-sdk/provider-utils";
 import type { LanguageModel } from "ai";
-import { Output, ToolLoopAgent } from "ai";
-import { z } from "zod";
+import { ToolLoopAgent } from "ai";
 import { EPHEMERAL_CACHE } from "../llm/provider-options.js";
 import { buildSubagentCodeTools, wrapWithBusCache } from "../tools/index.js";
 import type { AgentBus } from "./agent-bus.js";
@@ -17,30 +16,12 @@ function codeBase(): string {
     "On edit failure: re-read the file once, retry with exact text from that read.",
     "Multiple edits to one file = multi_edit (one call, all changes).",
     "Compound tools: rename_symbol (workspace rename), move_symbol (move + update imports), refactor(extract_function/organize_imports). FORBIDDEN: re-reading to verify, re-reading after edits, exploring unrelated files, grep/search when you already have target paths, sequential edit_file calls to the same file.",
-    'OUTPUT: When done editing, respond with a JSON object: {"summary":"...","filesEdited":[{"file":"...","changes":"..."}],"filesExamined":[...],"verified":true}.',
+    "OUTPUT: End with a concise text summary of what you changed. Name files and what was modified. The system tracks edits automatically.",
   ].join("\n");
 }
 
-const codeOutputSchema = z.object({
-  summary: z.string().describe("What was accomplished and any decisions made"),
-  filesEdited: z
-    .array(z.object({ file: z.string(), changes: z.string() }))
-    .optional()
-    .describe("Files modified with change descriptions"),
-  filesExamined: z.array(z.string()).optional().describe("Files read during task"),
-  keyFindings: z
-    .array(z.object({ file: z.string(), detail: z.string() }))
-    .optional()
-    .describe("Key findings with code"),
-  verified: z.boolean().optional().describe("Whether changes were verified"),
-});
-
-const codeOutput = Output.object({
-  name: "code_result",
-  description:
-    "Structured result of code edits. Include file paths, changes, and verification status.",
-  schema: codeOutputSchema,
-});
+// No structured output schema — agents return plain text summaries.
+// The system tracks edits via bus and extracts tool results deterministically.
 
 interface CodeAgentOptions {
   bus?: AgentBus;
@@ -102,7 +83,6 @@ export function createCodeAgent(model: LanguageModel, options?: CodeAgentOptions
       })(),
       providerOptions: EPHEMERAL_CACHE,
     },
-    output: codeOutput,
     stopWhen: stopConditions,
     prepareStep,
     experimental_repairToolCall: repairToolCall,

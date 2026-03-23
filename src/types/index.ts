@@ -276,6 +276,8 @@ export interface AppConfig {
   providers?: import("../core/llm/providers/types.js").CustomProviderConfig[];
   /** Instruction files to load into system prompt. Default: ["forge"] (FORGE.md only). */
   instructionFiles?: string[];
+  /** API key resolution priority: "env" = env vars first (default), "app" = keychain/file first. */
+  keyPriority?: "env" | "app";
 }
 
 export type FocusMode = "chat" | "editor";

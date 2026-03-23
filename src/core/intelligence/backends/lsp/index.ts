@@ -148,15 +148,22 @@ export class LspBackend implements IntelligenceBackend {
 
     const client = await this.getStandaloneClient(file);
     if (!client) return null;
-    try {
-      const locations =
-        method === "definition"
-          ? await client.textDocumentDefinition(file, pos.line, pos.col)
-          : method === "references"
-            ? await client.textDocumentReferences(file, pos.line, pos.col)
-            : await client.textDocumentImplementation(file, pos.line, pos.col);
-      if (locations.length > 0) return locations.map(lspLocationToSourceLocation);
-    } catch {}
+
+    const maxAttempts = client.isWarmingUp ? 2 : 1;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        const locations =
+          method === "definition"
+            ? await client.textDocumentDefinition(file, pos.line, pos.col)
+            : method === "references"
+              ? await client.textDocumentReferences(file, pos.line, pos.col)
+              : await client.textDocumentImplementation(file, pos.line, pos.col);
+        if (locations.length > 0) return locations.map(lspLocationToSourceLocation);
+      } catch {}
+      if (attempt === 0 && client.isWarmingUp) {
+        await new Promise<void>((r) => setTimeout(r, 2_000));
+      }
+    }
     return null;
   }
 
@@ -919,9 +926,29 @@ export class LspBackend implements IntelligenceBackend {
     return workspaceEditToRefactorResult(edit, symbol, newName);
   }
 
-  /** Ensure all standalone LSP servers are running for a file, regardless of Neovim state. */
+  /** Ensure all standalone LSP servers are running AND indexed for a file. */
   async ensureStandaloneReady(file: string): Promise<void> {
-    await this.getStandaloneClients(file);
+    const clients = await this.getStandaloneClients(file);
+    if (clients.length === 0) return;
+    const client = clients[0];
+    if (!client) return;
+
+    // Open the file so the server starts indexing the project
+    client.ensureDocumentOpen(file);
+
+    // Poll documentSymbol until the server returns real results (= project loaded).
+    // Don't trust diagnostics — servers may emit bogus parse errors before loading tsconfig.
+    const deadline = Date.now() + 8_000;
+    while (Date.now() < deadline) {
+      try {
+        const symbols = await Promise.race([
+          client.textDocumentDocumentSymbol(file),
+          new Promise<never>((_, rej) => setTimeout(() => rej(new Error("probe timeout")), 3_000)),
+        ]);
+        if (Array.isArray(symbols) && symbols.length > 0) return;
+      } catch {}
+      await new Promise<void>((r) => setTimeout(r, 500));
+    }
   }
 
   /** Warm up nvim LSP by opening a file and waiting for diagnostics. */

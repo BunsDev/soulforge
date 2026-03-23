@@ -7,6 +7,16 @@ const SECRETS_DIR = join(homedir(), ".soulforge");
 const SECRETS_FILE = join(SECRETS_DIR, "secrets.json");
 const KEYCHAIN_SERVICE = "soulforge";
 
+let _defaultPriority: "env" | "app" = "env";
+
+export function setDefaultKeyPriority(p: "env" | "app"): void {
+  _defaultPriority = p;
+}
+
+export function getDefaultKeyPriority(): "env" | "app" {
+  return _defaultPriority;
+}
+
 type SecretKey =
   | "brave-api-key"
   | "jina-api-key"
@@ -131,20 +141,53 @@ function fileWrite(data: Record<string, string>): void {
   chmodSync(SECRETS_FILE, 0o600);
 }
 
-export function getSecret(key: SecretKey): string | null {
+export type KeyPriority = "env" | "app";
+
+export interface SecretSources {
+  env: boolean;
+  keychain: boolean;
+  file: boolean;
+  active: "env" | "keychain" | "file" | "none";
+}
+
+export function getSecretSources(
+  key: SecretKey,
+  priority: KeyPriority = _defaultPriority,
+): SecretSources {
   const envVar = ENV_MAP[key];
-  if (envVar) {
-    const envValue = process.env[envVar];
-    if (envValue) return envValue;
+  const hasEnv = !!(envVar && process.env[envVar]);
+  const hasKeychain = keychainAvailable() && !!keychainGet(key);
+  const hasFile = !!fileRead()[key];
+
+  let active: SecretSources["active"] = "none";
+  if (priority === "app") {
+    if (hasKeychain) active = "keychain";
+    else if (hasFile) active = "file";
+    else if (hasEnv) active = "env";
+  } else {
+    if (hasEnv) active = "env";
+    else if (hasKeychain) active = "keychain";
+    else if (hasFile) active = "file";
   }
 
-  if (keychainAvailable()) {
-    const value = keychainGet(key);
-    if (value) return value;
-  }
+  return { env: hasEnv, keychain: hasKeychain, file: hasFile, active };
+}
 
-  const data = fileRead();
-  return data[key] ?? null;
+export function getSecret(key: SecretKey, priority: KeyPriority = _defaultPriority): string | null {
+  const envVar = ENV_MAP[key];
+  const getEnv = () => (envVar ? (process.env[envVar] ?? null) : null);
+  const getApp = () => {
+    if (keychainAvailable()) {
+      const value = keychainGet(key);
+      if (value) return value;
+    }
+    return fileRead()[key] ?? null;
+  };
+
+  if (priority === "app") {
+    return getApp() ?? getEnv();
+  }
+  return getEnv() ?? getApp();
 }
 
 interface SetSecretResult {
@@ -212,24 +255,15 @@ export function deleteSecret(key: SecretKey): { success: boolean; storage: "keyc
   return { success: deleted, storage };
 }
 
-export function hasSecret(key: SecretKey): {
+export function hasSecret(
+  key: SecretKey,
+  priority: KeyPriority = _defaultPriority,
+): {
   set: boolean;
   source: "env" | "keychain" | "file" | "none";
 } {
-  const envVar = ENV_MAP[key];
-  if (envVar && process.env[envVar]) {
-    return { set: true, source: "env" };
-  }
-
-  if (keychainAvailable()) {
-    const value = keychainGet(key);
-    if (value) return { set: true, source: "keychain" };
-  }
-
-  const data = fileRead();
-  if (data[key]) return { set: true, source: "file" };
-
-  return { set: false, source: "none" };
+  const sources = getSecretSources(key, priority);
+  return { set: sources.active !== "none", source: sources.active };
 }
 
 export function getStorageBackend(): "keychain" | "file" {
@@ -245,16 +279,24 @@ const ENV_TO_SECRET = new Map(Object.entries(ENV_MAP).map(([k, v]) => [v, k as S
  * Resolve a provider API key: checks process.env first, then secrets store.
  * Used by provider createModel/fetchModels as a drop-in for process.env[envVar].
  */
-export function getProviderApiKey(envVar: string): string | undefined {
-  const envValue = process.env[envVar];
-  if (envValue) return envValue;
+export function getProviderApiKey(
+  envVar: string,
+  priority: KeyPriority = _defaultPriority,
+): string | undefined {
   const secretKey = ENV_TO_SECRET.get(envVar);
-  if (secretKey) return getSecret(secretKey) ?? undefined;
-  // Custom provider keys: check keychain and file store by env var name
-  if (keychainAvailable()) {
-    const value = keychainGet(envVar as SecretKey);
-    if (value) return value;
+  if (secretKey) return getSecret(secretKey, priority) ?? undefined;
+
+  const getEnv = () => process.env[envVar] ?? undefined;
+  const getApp = () => {
+    if (keychainAvailable()) {
+      const value = keychainGet(envVar as SecretKey);
+      if (value) return value;
+    }
+    return fileRead()[envVar] ?? undefined;
+  };
+
+  if (priority === "app") {
+    return getApp() ?? getEnv();
   }
-  const data = fileRead();
-  return data[envVar] ?? undefined;
+  return getEnv() ?? getApp();
 }

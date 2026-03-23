@@ -1,5 +1,5 @@
 import type { ProviderOptions } from "@ai-sdk/provider-utils";
-import { type LanguageModel, NoObjectGeneratedError, NoOutputGeneratedError, RetryError } from "ai";
+import { type LanguageModel, RetryError } from "ai";
 import { logBackgroundError } from "../../stores/errors.js";
 import { taskListTool } from "../tools/task-list.js";
 import {
@@ -14,6 +14,7 @@ import {
   extractDoneResult,
   formatDoneResult,
   synthesizeDoneFromResults,
+  writeAgentContext,
 } from "./agent-results.js";
 import { emitMultiAgentEvent } from "./subagent-events.js";
 import {
@@ -30,49 +31,6 @@ const MAX_NO_EDIT_RETRIES = 1;
 export const MAX_CONCURRENT_AGENTS = 3;
 const AGENT_TIMEOUT_MS = 300_000;
 const RETRY_JITTER_MS = 1000;
-
-/**
- * Attempt to salvage a valid JSON object from error text.
- * Models sometimes wrap JSON in markdown fences (```json ... ```) or prepend/append junk.
- * Returns the parsed object if it has a 'summary' field (our output schemas all require it),
- * or undefined if unsalvageable.
- */
-function salvageJsonFromText(text: string | undefined): Record<string, unknown> | undefined {
-  if (!text || text.length < 10) return undefined;
-
-  // Strategy 1: try raw parse (handles cases where SDK's parse failed on validation, not syntax)
-  try {
-    const parsed = JSON.parse(text) as unknown;
-    if (typeof parsed === "object" && parsed !== null && "summary" in parsed) {
-      return parsed as Record<string, unknown>;
-    }
-  } catch {}
-
-  // Strategy 2: strip markdown code fences (```json ... ``` or ``` ... ```)
-  const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
-  if (fenceMatch?.[1]) {
-    try {
-      const parsed = JSON.parse(fenceMatch[1]) as unknown;
-      if (typeof parsed === "object" && parsed !== null && "summary" in parsed) {
-        return parsed as Record<string, unknown>;
-      }
-    } catch {}
-  }
-
-  // Strategy 3: find first { to last } (greedy brace extraction)
-  const firstBrace = text.indexOf("{");
-  const lastBrace = text.lastIndexOf("}");
-  if (firstBrace !== -1 && lastBrace > firstBrace) {
-    try {
-      const parsed = JSON.parse(text.slice(firstBrace, lastBrace + 1)) as unknown;
-      if (typeof parsed === "object" && parsed !== null && "summary" in parsed) {
-        return parsed as Record<string, unknown>;
-      }
-    } catch {}
-  }
-
-  return undefined;
-}
 
 const RETURN_FORMAT_INSTRUCTIONS: Record<import("./agent-bus.js").ReturnFormat, string> = {
   summary:
@@ -335,13 +293,9 @@ export async function runAgentTask(
           ...callbacks,
         });
       } catch (genErr: unknown) {
-        // Output.object() throws NoObjectGeneratedError when the model's final
-        // response can't be parsed into the Zod schema (e.g. model returns "."
-        // instead of JSON). ToolLoopAgent throws NoOutputGeneratedError when no
-        // output is produced at all. Neither carries .steps, so we recover them
-        // from the onStepFinish callback accumulator.
+        // Recover steps from error or callback accumulator so we can
+        // synthesize results even when the agent errors mid-run.
         const errWithSteps = genErr as { steps?: unknown[]; text?: string; totalUsage?: unknown };
-        // Prefer steps from the error object, fall back to callback-accumulated steps
         const recoveredSteps =
           errWithSteps.steps && Array.isArray(errWithSteps.steps)
             ? errWithSteps.steps
@@ -349,42 +303,23 @@ export async function runAgentTask(
               ? callbacks._steps
               : [];
 
-        if (
-          errWithSteps.steps ||
-          NoObjectGeneratedError.isInstance(genErr) ||
-          NoOutputGeneratedError.isInstance(genErr)
-        ) {
+        if (recoveredSteps.length > 0 || errWithSteps.text) {
           const errObj = genErr as {
             text?: string;
-            cause?: unknown;
-            finishReason?: string;
             usage?: { inputTokens?: number; outputTokens?: number };
           };
-
-          // Attempt to salvage structured output from the error text.
-          // Models sometimes wrap JSON in markdown fences or prepend/append junk.
-          const salvagedOutput = salvageJsonFromText(errObj.text);
-
           result = {
             text: errObj.text ?? "",
-            output: salvagedOutput,
             steps: recoveredSteps,
             totalUsage: {
               inputTokens: errObj.usage?.inputTokens ?? callbacks._acc.input,
               outputTokens: errObj.usage?.outputTokens ?? callbacks._acc.output,
             },
           };
-          if (!salvagedOutput) {
-            const diagParts = [
-              `Output schema failed (${String(recoveredSteps.length)} steps recovered): ${genErr instanceof Error ? genErr.message : String(genErr)}`,
-            ];
-            if (errObj.finishReason) diagParts.push(`finishReason: ${errObj.finishReason}`);
-            if (errObj.cause)
-              diagParts.push(
-                `cause: ${errObj.cause instanceof Error ? errObj.cause.message : String(errObj.cause)}`,
-              );
-            logBackgroundError(task.agentId, diagParts.join("\n"));
-          }
+          logBackgroundError(
+            task.agentId,
+            `Agent error (${String(recoveredSteps.length)} steps recovered): ${genErr instanceof Error ? genErr.message : String(genErr)}`,
+          );
         } else {
           throw genErr;
         }
@@ -401,54 +336,26 @@ export async function runAgentTask(
       const cacheRead =
         callbacks._acc.cacheRead || (result.totalUsage.inputTokenDetails?.cacheReadTokens ?? 0);
 
-      // Three sources for structured results (priority order):
-      // 1. Output schema (SDK-generated structured data after loop ends)
-      // 2. Done tool (agent explicitly called done with curated content)
-      // 3. Auto-synthesize from tool results + bus findings (guaranteed fallback)
+      // Synthesize structured result deterministically from tool calls + bus findings.
+      // No Output.object() — agents return plain text. We extract everything from steps.
       const agentFindings = bus.getFindings().filter((f) => f.agentId === task.agentId);
       let doneResult: DoneToolResult | null = null;
       let calledDone = false;
 
-      const outputData = result.output as
-        | {
-            summary?: string;
-            filesExamined?: string[];
-            keyFindings?: Array<{ file: string; detail: string }>;
-            gaps?: string[];
-            connections?: string[];
-          }
-        | undefined;
-      if (outputData && typeof outputData.summary === "string") {
-        const hasFindings = outputData.keyFindings && outputData.keyFindings.length > 0;
-        const hasFiles = outputData.filesExamined && outputData.filesExamined.length > 0;
-        // Only synthesize if the output schema is missing findings or files
-        const synthesized =
-          !hasFindings || !hasFiles ? synthesizeDoneFromResults(result, agentFindings, task) : null;
-        doneResult = {
-          summary: outputData.summary,
-          filesExamined: hasFiles ? outputData.filesExamined : synthesized?.filesExamined,
-          keyFindings: hasFindings ? outputData.keyFindings : synthesized?.keyFindings,
-          gaps: outputData.gaps,
-          connections: outputData.connections,
-        };
-        calledDone = true;
-      }
+      // Check for explicit done tool call first (agent curated its own summary)
+      doneResult = extractDoneResult(result);
+      if (doneResult) calledDone = true;
 
-      if (!doneResult) {
-        doneResult = extractDoneResult(result);
-        if (doneResult) calledDone = true;
-      }
-
+      // Otherwise synthesize from tool results + bus findings (deterministic, zero LLM cost)
       if (!doneResult) {
         doneResult = synthesizeDoneFromResults(result, agentFindings, task);
-        // When steps are empty (NoObjectGeneratedError recovery), enrich with bus file reads
+        // When steps are empty, enrich with bus file reads
         if (result.steps.length === 0) {
           const busReads = bus.getFileReadRecords(task.agentId);
           if (busReads.length > 0 && doneResult.filesExamined?.length === 0) {
             doneResult.filesExamined = busReads.map((r) => r.path);
           }
         }
-        // Synthesis with real findings from bus or steps counts as done
         if (agentFindings.length > 0 || result.steps.length > 0) {
           calledDone = true;
         }
@@ -504,7 +411,6 @@ export async function runAgentTask(
                 const errWithSteps = retryGenErr as {
                   steps?: unknown[];
                   text?: string;
-                  totalUsage?: unknown;
                 };
                 const recoveredSteps =
                   errWithSteps.steps && Array.isArray(errWithSteps.steps)
@@ -513,14 +419,9 @@ export async function runAgentTask(
                       ? retryCallbacks._steps
                       : [];
 
-                if (
-                  errWithSteps.steps ||
-                  NoObjectGeneratedError.isInstance(retryGenErr) ||
-                  NoOutputGeneratedError.isInstance(retryGenErr)
-                ) {
+                if (recoveredSteps.length > 0 || errWithSteps.text) {
                   retryResult = {
-                    text: (retryGenErr as { text?: string }).text ?? "",
-                    output: salvageJsonFromText((retryGenErr as { text?: string }).text),
+                    text: errWithSteps.text ?? "",
                     steps: recoveredSteps,
                     totalUsage: {
                       inputTokens: retryCallbacks._acc.input,
@@ -646,6 +547,20 @@ export async function runAgentTask(
           tabId: task.tabId,
         });
       }
+      try {
+        const agentText = typeof result.text === "string" ? result.text : "";
+        writeAgentContext(
+          parentToolCallId,
+          task.agentId,
+          task,
+          result,
+          agentFindings,
+          agentText,
+          process.cwd(),
+          task.tabId,
+        );
+      } catch {}
+
       return { doneResult, resultText, callbacks, result: agentResult };
     } catch (error) {
       lastError = error;

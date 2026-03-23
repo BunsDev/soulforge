@@ -20,6 +20,9 @@ async function handleExportAll(ctx: CommandContext): Promise<void> {
   const forgeMode = ctx.chat.forgeMode;
   const repoMapReady = ctx.contextManager.isRepoMapReady();
 
+  const soulMapMessages = ctx.contextManager.buildSoulMapMessages();
+  const skillsMessages = ctx.contextManager.buildSkillsMessages();
+
   const payload = {
     exportedAt: new Date().toISOString(),
     model: activeModel,
@@ -27,6 +30,14 @@ async function handleExportAll(ctx: CommandContext): Promise<void> {
     repoMapReady,
     tokenUsage,
     systemPrompt,
+    injectedMessages: {
+      soulMap: soulMapMessages
+        ? { user: soulMapMessages[0].content, assistant: soulMapMessages[1].content }
+        : null,
+      skills: skillsMessages
+        ? { user: skillsMessages[0].content, assistant: skillsMessages[1].content }
+        : null,
+    },
     coreMessages,
     chatMessages: chatMessages.map((m) => ({
       id: m.id,

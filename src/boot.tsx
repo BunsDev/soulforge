@@ -282,6 +282,14 @@ const config = loadConfig();
 const projectConfig = loadProjectConfig(process.cwd());
 initNerdFont(config.nerdFont);
 
+{
+  const priority = projectConfig?.keyPriority ?? config.keyPriority;
+  if (priority) {
+    const { setDefaultKeyPriority } = await import("./core/secrets.js");
+    setDefaultKeyPriority(priority);
+  }
+}
+
 // Register custom providers from global + project config (project overrides global by id)
 {
   const globalP = config.providers ?? [];
