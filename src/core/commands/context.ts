@@ -1,11 +1,8 @@
 import type { InfoPopupLine } from "../../components/modals/InfoPopup.js";
-import type { TokenUsage } from "../../hooks/useChat.js";
-import { useStatusBarStore } from "../../stores/statusbar.js";
 import { useUIStore } from "../../stores/ui.js";
 import { icon } from "../icons.js";
-import { getModelContextInfo, getShortModelLabel } from "../llm/models.js";
 import type { CommandContext, CommandHandler } from "./types.js";
-import { fmtTokenCount, sysMsg } from "./utils.js";
+import { sysMsg } from "./utils.js";
 
 export function openRepoMapMenu(_ctx: CommandContext): void {
   useUIStore.getState().openModal("repoMapStatus");
@@ -182,172 +179,9 @@ function handleContextClear(input: string, ctx: CommandContext): void {
   sysMsg(ctx, cleared.length > 0 ? `Cleared: ${cleared.join(", ")}` : "Nothing to clear.");
 }
 
-function handleContext(_input: string, ctx: CommandContext): void {
-  const breakdown = ctx.contextManager.getContextBreakdown();
-  const totalChars = breakdown.reduce((sum, s) => sum + s.chars, 0);
-  const modelId = ctx.chat.activeModel;
-  const storeWindow = useStatusBarStore.getState().contextWindow;
-  const ctxWindow = storeWindow > 0 ? storeWindow : getModelContextInfo(modelId).tokens;
-  const tu: TokenUsage = ctx.chat.tokenUsage;
-  const apiCtx = ctx.chat.contextTokens;
-  const usedTokens = apiCtx > 0 ? apiCtx : Math.ceil(totalChars / 4);
-  const fillPct = Math.min(100, Math.round((usedTokens / ctxWindow) * 100));
-
-  const fmtT = fmtTokenCount;
-
-  const popupLines: InfoPopupLine[] = [
-    {
-      type: "bar",
-      label: "Context window",
-      pct: fillPct,
-      desc: `${fmtT(usedTokens)} / ${fmtT(ctxWindow)} (${String(fillPct)}%)`,
-      descColor: fillPct > 75 ? "#FF0040" : fillPct > 50 ? "#FF8C00" : "#888",
-    },
-    {
-      type: "entry",
-      label: "Model",
-      desc: getShortModelLabel(modelId),
-      color: "#888",
-      descColor: "#ccc",
-    },
-    { type: "separator" },
-    { type: "header", label: "System Prompt Breakdown" },
-  ];
-
-  const activeSections = breakdown.filter((s) => s.active && s.chars > 0);
-  const totalSysChars = activeSections.reduce((sum, s) => sum + s.chars, 0);
-  for (const s of activeSections) {
-    const sTokens = Math.ceil(s.chars / 4);
-    const sPct = totalSysChars > 0 ? Math.round((s.chars / totalSysChars) * 100) : 0;
-    popupLines.push({
-      type: "bar",
-      label: s.section,
-      pct: sPct,
-      desc: `~${fmtT(sTokens)}`,
-      color: "#ccc",
-      descColor: "#666",
-      barColor: sPct > 40 ? "#FF8C00" : "#555",
-    });
-  }
-
-  popupLines.push(
-    { type: "separator" },
-    { type: "header", label: "Token Usage (session)" },
-    {
-      type: "entry",
-      label: "Input",
-      desc: fmtT(tu.prompt),
-      color: "#2d9bf0",
-      descColor: "#2d9bf0",
-    },
-    {
-      type: "entry",
-      label: "Output",
-      desc: fmtT(tu.completion),
-      color: "#e0a020",
-      descColor: "#e0a020",
-    },
-    { type: "entry", label: "Total", desc: fmtT(tu.total), color: "#ccc", descColor: "#ccc" },
-  );
-  if (tu.subagentInput > 0 || tu.subagentOutput > 0) {
-    popupLines.push({
-      type: "entry",
-      label: "  Dispatch Agents",
-      desc: `${fmtT(tu.subagentInput)}↑ ${fmtT(tu.subagentOutput)}↓ (included in total)`,
-      color: "#9B30FF",
-      descColor: "#666",
-    });
-  }
-
-  // Per-tab usage breakdown (only when multiple tabs exist)
-  const allTabs = ctx.tabMgr.tabs;
-  if (allTabs.length > 1) {
-    let grandInput = 0;
-    let grandOutput = 0;
-    let grandTotal = 0;
-    const tabEntries: { label: string; usage: TokenUsage }[] = [];
-    for (const tab of allTabs) {
-      const chat = ctx.tabMgr.getChat(tab.id);
-      const usage = chat
-        ? chat.tokenUsage
-        : { prompt: 0, completion: 0, total: 0, cacheRead: 0, subagentInput: 0, subagentOutput: 0 };
-      tabEntries.push({ label: tab.label, usage });
-      grandInput += usage.prompt;
-      grandOutput += usage.completion;
-      grandTotal += usage.total;
-    }
-
-    popupLines.push(
-      { type: "separator" },
-      { type: "header", label: `All Tabs (${String(allTabs.length)})` },
-    );
-    for (let i = 0; i < tabEntries.length; i++) {
-      const entry = tabEntries[i];
-      if (!entry) continue;
-      const isActive = entry.usage === tu;
-      const label = isActive ? `▸ Tab ${String(i + 1)}` : `  Tab ${String(i + 1)}`;
-      popupLines.push({
-        type: "entry",
-        label,
-        desc:
-          entry.usage.total > 0
-            ? `${fmtT(entry.usage.prompt)}↑ ${fmtT(entry.usage.completion)}↓ = ${fmtT(entry.usage.total)}`
-            : "—",
-        color: isActive ? "#2d9bf0" : "#888",
-        descColor: isActive ? "#ccc" : "#666",
-      });
-    }
-    popupLines.push({
-      type: "entry",
-      label: "  All tabs total",
-      desc: `${fmtT(grandInput)}↑ ${fmtT(grandOutput)}↓ = ${fmtT(grandTotal)}`,
-      color: "#ccc",
-      descColor: "#ccc",
-    });
-  }
-
-  if (tu.cacheRead > 0) {
-    const cachePct = tu.prompt > 0 ? Math.round((tu.cacheRead / tu.prompt) * 100) : 0;
-    const newTokens = tu.prompt - tu.cacheRead;
-    popupLines.push(
-      { type: "separator" },
-      { type: "header", label: "⚡ Cache Savings" },
-      {
-        type: "bar",
-        label: "Cache hit rate",
-        pct: cachePct,
-        desc: `${String(cachePct)}%`,
-        barColor: "#2d5",
-        descColor: "#2d5",
-      },
-      {
-        type: "entry",
-        label: "Cached",
-        desc: `${fmtT(tu.cacheRead)} tokens (reused from cache)`,
-        color: "#2d5",
-        descColor: "#2d5",
-      },
-      {
-        type: "entry",
-        label: "New input",
-        desc: `${fmtT(newTokens)} tokens (fresh processing)`,
-        color: "#888",
-        descColor: "#888",
-      },
-    );
-  }
-
-  popupLines.push(
-    { type: "separator" },
-    { type: "text", label: "/context clear [git|skills|memory|all]" },
-  );
-  ctx.openInfoPopup({
-    title: "Context Budget",
-    icon: icon("budget"),
-    lines: popupLines,
-    labelWidth: 22,
-    width: 72,
-  });
+function handleContext(_input: string, _ctx: CommandContext): void {
+  useUIStore.setState({ statusDashboardTab: "Context" });
+  useUIStore.getState().openModal("statusDashboard");
 }
 
 function handleMemory(_input: string, ctx: CommandContext): void {

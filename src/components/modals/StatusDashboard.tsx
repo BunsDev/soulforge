@@ -1,0 +1,604 @@
+import { TextAttributes } from "@opentui/core";
+import { useKeyboard, useTerminalDimensions } from "@opentui/react";
+import { useEffect, useMemo, useState } from "react";
+import type { ContextManager } from "../../core/context/manager.js";
+import { getNvimInstance } from "../../core/editor/instance.js";
+import { icon } from "../../core/icons.js";
+import { getIntelligenceStatus } from "../../core/intelligence/index.js";
+import { getModelContextInfo, getShortModelLabel } from "../../core/llm/models.js";
+import type { ChatInstance } from "../../hooks/useChat.js";
+import type { UseTabsReturn } from "../../hooks/useTabs.js";
+import { useRepoMapStore } from "../../stores/repomap.js";
+import { useStatusBarStore } from "../../stores/statusbar.js";
+import { Overlay, POPUP_BG, PopupRow } from "../layout/shared.js";
+
+const CHROME_ROWS = 6;
+const TABS = ["Context", "System"] as const;
+type Tab = (typeof TABS)[number];
+
+const TAB_COLORS: Record<Tab, string> = {
+  Context: "#2d9bf0",
+  System: "#9B30FF",
+};
+
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+function fmtBytes(b: number): string {
+  if (b >= 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+  if (b >= 1024) return `${(b / 1024).toFixed(0)} KB`;
+  return `${String(b)} B`;
+}
+
+function fmtMem(mb: number): string {
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${String(mb)} MB`;
+}
+
+function BarRow({
+  label,
+  pct,
+  desc,
+  barColor,
+  descColor,
+  innerW,
+}: {
+  label: string;
+  pct: number;
+  desc: string;
+  barColor: string;
+  descColor: string;
+  innerW: number;
+}) {
+  const labelW = 18;
+  const barW = Math.max(8, innerW - labelW - desc.length - 8);
+  const filled = Math.round((pct / 100) * barW);
+  const bar = "█".repeat(filled) + "░".repeat(barW - filled);
+  return (
+    <PopupRow w={innerW}>
+      <text fg="#888" bg={POPUP_BG}>
+        {label.padEnd(labelW)}
+      </text>
+      <text fg={barColor} bg={POPUP_BG}>
+        {bar}
+      </text>
+      <text fg={descColor} bg={POPUP_BG}>
+        {" "}
+        {desc}
+      </text>
+    </PopupRow>
+  );
+}
+
+function EntryRow({
+  label,
+  value,
+  labelColor,
+  valueColor,
+  innerW,
+}: {
+  label: string;
+  value: string;
+  labelColor?: string;
+  valueColor?: string;
+  innerW: number;
+}) {
+  return (
+    <PopupRow w={innerW}>
+      <text fg={labelColor ?? "#888"} bg={POPUP_BG}>
+        {label.padEnd(18)}
+      </text>
+      <text fg={valueColor ?? "#ccc"} bg={POPUP_BG}>
+        {value}
+      </text>
+    </PopupRow>
+  );
+}
+
+function SectionHeader({
+  label,
+  color,
+  innerW,
+}: {
+  label: string;
+  color?: string;
+  innerW: number;
+}) {
+  return (
+    <PopupRow w={innerW}>
+      <text fg={color ?? "#8B5CF6"} bg={POPUP_BG} attributes={TextAttributes.BOLD}>
+        {label}
+      </text>
+    </PopupRow>
+  );
+}
+
+function Spacer({ innerW }: { innerW: number }) {
+  return (
+    <PopupRow w={innerW}>
+      <text bg={POPUP_BG}>{""}</text>
+    </PopupRow>
+  );
+}
+
+interface Props {
+  visible: boolean;
+  initialTab?: Tab;
+  onClose: () => void;
+  chat: ChatInstance | null;
+  contextManager: ContextManager;
+  tabMgr: UseTabsReturn;
+  currentMode: string;
+  currentModeLabel: string;
+}
+
+export function StatusDashboard({
+  visible,
+  initialTab,
+  onClose,
+  chat,
+  contextManager,
+  tabMgr,
+  currentMode,
+  currentModeLabel,
+}: Props) {
+  const { width: termCols, height: termRows } = useTerminalDimensions();
+  const popupWidth = Math.min(76, Math.floor(termCols * 0.85));
+  const innerW = popupWidth - 2;
+  const maxVisible = Math.max(6, Math.floor((termRows - 2) * 0.8) - CHROME_ROWS);
+  const [tab, setTab] = useState<Tab>(initialTab ?? "Context");
+  const [scrollOffset, setScrollOffset] = useState(0);
+
+  const sb = useStatusBarStore();
+  const rm = useRepoMapStore();
+
+  useEffect(() => {
+    if (visible) {
+      setTab(initialTab ?? "Context");
+      setScrollOffset(0);
+    }
+  }, [visible, initialTab]);
+
+  const modelId = chat?.activeModel ?? "none";
+  const tu = chat?.tokenUsage ?? {
+    prompt: 0,
+    completion: 0,
+    total: 0,
+    cacheRead: 0,
+    subagentInput: 0,
+    subagentOutput: 0,
+  };
+
+  const contextLines = useMemo(() => {
+    const breakdown = contextManager.getContextBreakdown();
+    const totalChars = breakdown.reduce((sum, s) => sum + s.chars, 0);
+    const ctxWindow = sb.contextWindow > 0 ? sb.contextWindow : getModelContextInfo(modelId).tokens;
+    const apiCtx = chat?.contextTokens ?? 0;
+    const usedTokens = apiCtx > 0 ? apiCtx : Math.ceil(totalChars / 4);
+    const fillPct = Math.min(100, Math.round((usedTokens / ctxWindow) * 100));
+    const activeSections = breakdown.filter((s) => s.active && s.chars > 0);
+    const totalSysChars = activeSections.reduce((sum, s) => sum + s.chars, 0);
+
+    const lines: React.ReactNode[] = [];
+
+    lines.push(
+      <BarRow
+        key="ctx-bar"
+        label="Context Window"
+        pct={fillPct}
+        desc={`${fmtTokens(usedTokens)} / ${fmtTokens(ctxWindow)} (${String(fillPct)}%)`}
+        barColor={fillPct > 75 ? "#FF0040" : fillPct > 50 ? "#FF8C00" : "#4a7"}
+        descColor={fillPct > 75 ? "#FF0040" : fillPct > 50 ? "#FF8C00" : "#888"}
+        innerW={innerW}
+      />,
+    );
+    lines.push(
+      <EntryRow key="model" label="Model" value={getShortModelLabel(modelId)} innerW={innerW} />,
+    );
+    lines.push(<Spacer key="s1" innerW={innerW} />);
+
+    if (activeSections.length > 0) {
+      lines.push(<SectionHeader key="h-sys" label="System Prompt" innerW={innerW} />);
+      for (const s of activeSections) {
+        const sTokens = Math.ceil(s.chars / 4);
+        const sPct = totalSysChars > 0 ? Math.round((s.chars / totalSysChars) * 100) : 0;
+        lines.push(
+          <BarRow
+            key={`sp-${s.section}`}
+            label={`  ${s.section}`}
+            pct={sPct}
+            desc={`~${fmtTokens(sTokens)}`}
+            barColor={sPct > 40 ? "#FF8C00" : "#555"}
+            descColor="#666"
+            innerW={innerW}
+          />,
+        );
+      }
+      lines.push(<Spacer key="s2" innerW={innerW} />);
+    }
+
+    lines.push(<SectionHeader key="h-tok" label="Token Usage (session)" innerW={innerW} />);
+    lines.push(
+      <EntryRow
+        key="t-in"
+        label="  Input"
+        value={fmtTokens(tu.prompt)}
+        valueColor="#2d9bf0"
+        innerW={innerW}
+      />,
+    );
+    lines.push(
+      <EntryRow
+        key="t-out"
+        label="  Output"
+        value={fmtTokens(tu.completion)}
+        valueColor="#e0a020"
+        innerW={innerW}
+      />,
+    );
+    lines.push(
+      <EntryRow key="t-total" label="  Total" value={fmtTokens(tu.total)} innerW={innerW} />,
+    );
+    if (tu.subagentInput > 0 || tu.subagentOutput > 0) {
+      lines.push(
+        <EntryRow
+          key="t-sub"
+          label="  Dispatch"
+          value={`${fmtTokens(tu.subagentInput)}↑ ${fmtTokens(tu.subagentOutput)}↓`}
+          valueColor="#9B30FF"
+          innerW={innerW}
+        />,
+      );
+    }
+
+    const allTabs = tabMgr.tabs;
+    if (allTabs.length > 1) {
+      lines.push(<Spacer key="s3" innerW={innerW} />);
+      lines.push(
+        <SectionHeader
+          key="h-tabs"
+          label={`All Tabs (${String(allTabs.length)})`}
+          innerW={innerW}
+        />,
+      );
+      let grandTotal = 0;
+      for (let i = 0; i < allTabs.length; i++) {
+        const t = allTabs[i];
+        if (!t) continue;
+        const c = tabMgr.getChat(t.id);
+        const u = c?.tokenUsage ?? { prompt: 0, completion: 0, total: 0 };
+        grandTotal += u.total;
+        const isActive = u === tu;
+        lines.push(
+          <EntryRow
+            key={`tab-${t.id}`}
+            label={`  ${isActive ? "▸" : " "} Tab ${String(i + 1)}`}
+            value={
+              u.total > 0
+                ? `${fmtTokens(u.prompt)}↑ ${fmtTokens(u.completion)}↓ = ${fmtTokens(u.total)}`
+                : "—"
+            }
+            labelColor={isActive ? "#2d9bf0" : "#888"}
+            valueColor={isActive ? "#ccc" : "#666"}
+            innerW={innerW}
+          />,
+        );
+      }
+      lines.push(
+        <EntryRow key="tab-total" label="  Total" value={fmtTokens(grandTotal)} innerW={innerW} />,
+      );
+    }
+
+    if (tu.cacheRead > 0) {
+      const cachePct = tu.prompt > 0 ? Math.round((tu.cacheRead / tu.prompt) * 100) : 0;
+      lines.push(<Spacer key="s4" innerW={innerW} />);
+      lines.push(
+        <SectionHeader key="h-cache" label={`${icon("lightning")} Cache`} innerW={innerW} />,
+      );
+      lines.push(
+        <BarRow
+          key="cache-bar"
+          label="  Hit Rate"
+          pct={cachePct}
+          desc={`${String(cachePct)}%`}
+          barColor="#2d5"
+          descColor="#2d5"
+          innerW={innerW}
+        />,
+      );
+      lines.push(
+        <EntryRow
+          key="cache-hit"
+          label="  Cached"
+          value={`${fmtTokens(tu.cacheRead)} tokens`}
+          valueColor="#2d5"
+          innerW={innerW}
+        />,
+      );
+      lines.push(
+        <EntryRow
+          key="cache-new"
+          label="  New Input"
+          value={`${fmtTokens(tu.prompt - tu.cacheRead)} tokens`}
+          valueColor="#888"
+          innerW={innerW}
+        />,
+      );
+    }
+
+    return lines;
+  }, [contextManager, sb.contextWindow, modelId, tu, chat?.contextTokens, tabMgr, innerW]);
+
+  const systemLines = useMemo(() => {
+    const ctxWindow = sb.contextWindow > 0 ? sb.contextWindow : getModelContextInfo(modelId).tokens;
+    const usedTokens =
+      sb.contextTokens > 0 ? sb.contextTokens : Math.ceil((sb.chatChars + sb.subagentChars) / 4);
+    const ctxPct = ctxWindow > 0 ? Math.min(100, Math.round((usedTokens / ctxWindow) * 100)) : 0;
+    const ctxColor =
+      ctxPct < 50 ? "#4a7" : ctxPct < 70 ? "#b87333" : ctxPct < 85 ? "#FF8C00" : "#f44";
+    const lspStatus = getIntelligenceStatus();
+    const lspCount = lspStatus?.lspServers.length ?? 0;
+    const rssMB = sb.rssMB;
+    const memColor = rssMB < 2048 ? "#4a7" : rssMB < 4096 ? "#b87333" : "#f44";
+
+    const lines: React.ReactNode[] = [];
+
+    lines.push(<SectionHeader key="h-ctx" label="Context" innerW={innerW} />);
+    lines.push(
+      <BarRow
+        key="ctx-bar"
+        label="  Usage"
+        pct={ctxPct}
+        desc={`${String(ctxPct)}%`}
+        barColor={ctxColor}
+        descColor={ctxColor}
+        innerW={innerW}
+      />,
+    );
+    lines.push(
+      <EntryRow key="ctx-win" label="  Window" value={fmtTokens(ctxWindow)} innerW={innerW} />,
+    );
+    lines.push(
+      <EntryRow
+        key="ctx-comp"
+        label="  Compaction"
+        value={sb.compacting ? "active" : sb.compactionStrategy}
+        valueColor={sb.compacting ? "#5af" : "#666"}
+        innerW={innerW}
+      />,
+    );
+    lines.push(<Spacer key="s1" innerW={innerW} />);
+
+    lines.push(<SectionHeader key="h-tok" label="Tokens (session)" innerW={innerW} />);
+    lines.push(
+      <EntryRow
+        key="t-in"
+        label="  Input"
+        value={fmtTokens(sb.tokenUsage.prompt)}
+        valueColor="#2d9bf0"
+        innerW={innerW}
+      />,
+    );
+    lines.push(
+      <EntryRow
+        key="t-out"
+        label="  Output"
+        value={fmtTokens(sb.tokenUsage.completion)}
+        valueColor="#e0a020"
+        innerW={innerW}
+      />,
+    );
+    lines.push(
+      <EntryRow
+        key="t-cache"
+        label="  Cache Read"
+        value={fmtTokens(sb.tokenUsage.cacheRead)}
+        valueColor={sb.tokenUsage.cacheRead > 0 ? "#4a7" : "#666"}
+        innerW={innerW}
+      />,
+    );
+    const subTotal = sb.tokenUsage.subagentInput + sb.tokenUsage.subagentOutput;
+    if (subTotal > 0) {
+      lines.push(
+        <EntryRow
+          key="t-sub"
+          label="  Subagents"
+          value={fmtTokens(subTotal)}
+          valueColor="#9B30FF"
+          innerW={innerW}
+        />,
+      );
+    }
+    lines.push(<Spacer key="s2" innerW={innerW} />);
+
+    lines.push(<SectionHeader key="h-map" label="Soul Map" innerW={innerW} />);
+    const rmStatusColor =
+      rm.status === "ready"
+        ? "#4a7"
+        : rm.status === "scanning"
+          ? "#b87333"
+          : rm.status === "error"
+            ? "#f44"
+            : "#666";
+    lines.push(
+      <EntryRow
+        key="rm-st"
+        label="  Status"
+        value={rm.status}
+        valueColor={rmStatusColor}
+        innerW={innerW}
+      />,
+    );
+    lines.push(
+      <EntryRow key="rm-files" label="  Files" value={String(rm.files)} innerW={innerW} />,
+    );
+    lines.push(
+      <EntryRow key="rm-sym" label="  Symbols" value={String(rm.symbols)} innerW={innerW} />,
+    );
+    lines.push(<EntryRow key="rm-edge" label="  Edges" value={String(rm.edges)} innerW={innerW} />);
+    lines.push(
+      <EntryRow key="rm-db" label="  DB Size" value={fmtBytes(rm.dbSizeBytes)} innerW={innerW} />,
+    );
+    if (rm.semanticStatus !== "off") {
+      lines.push(
+        <EntryRow
+          key="rm-sem"
+          label="  Semantics"
+          value={`${rm.semanticStatus} (${String(rm.semanticCount)})`}
+          valueColor={rm.semanticStatus === "ready" ? "#4a7" : "#b87333"}
+          innerW={innerW}
+        />,
+      );
+    }
+    lines.push(<Spacer key="s3" innerW={innerW} />);
+
+    lines.push(<SectionHeader key="h-sys" label="System" innerW={innerW} />);
+    lines.push(
+      <EntryRow
+        key="sys-mem"
+        label="  Memory"
+        value={fmtMem(rssMB)}
+        valueColor={memColor}
+        innerW={innerW}
+      />,
+    );
+    lines.push(
+      <EntryRow
+        key="sys-lsp"
+        label="  LSP Standalone"
+        value={lspCount > 0 ? `${String(lspCount)} active` : "none"}
+        valueColor={lspCount > 0 ? "#2dd4bf" : "#666"}
+        innerW={innerW}
+      />,
+    );
+    lines.push(
+      <EntryRow
+        key="sys-nvim"
+        label="  LSP Neovim"
+        value={getNvimInstance() ? "active" : "not running"}
+        valueColor={getNvimInstance() ? "#57A143" : "#666"}
+        innerW={innerW}
+      />,
+    );
+    lines.push(
+      <EntryRow
+        key="sys-model"
+        label="  Model"
+        value={getShortModelLabel(modelId)}
+        innerW={innerW}
+      />,
+    );
+    lines.push(
+      <EntryRow
+        key="sys-mode"
+        label="  Mode"
+        value={currentModeLabel}
+        valueColor={currentMode === "default" ? "#666" : "#FF8C00"}
+        innerW={innerW}
+      />,
+    );
+
+    return lines;
+  }, [sb, rm, modelId, currentMode, currentModeLabel, innerW]);
+
+  const activeLines = tab === "Context" ? contextLines : systemLines;
+  const clampedScroll = Math.min(scrollOffset, Math.max(0, activeLines.length - maxVisible));
+  const visibleLines = activeLines.slice(clampedScroll, clampedScroll + maxVisible);
+
+  useKeyboard((evt) => {
+    if (!visible) return;
+
+    if (evt.name === "escape") {
+      onClose();
+      return;
+    }
+    if (evt.name === "tab") {
+      const idx = TABS.indexOf(tab);
+      setTab(TABS[(idx + 1) % TABS.length] as Tab);
+      setScrollOffset(0);
+      return;
+    }
+    if (evt.name === "up") {
+      setScrollOffset((prev) => Math.max(0, prev - 1));
+      return;
+    }
+    if (evt.name === "down") {
+      setScrollOffset((prev) => Math.min(Math.max(0, activeLines.length - maxVisible), prev + 1));
+      return;
+    }
+  });
+
+  if (!visible) return null;
+
+  return (
+    <Overlay>
+      <box
+        flexDirection="column"
+        borderStyle="rounded"
+        border={true}
+        borderColor={TAB_COLORS[tab]}
+        width={popupWidth}
+      >
+        {/* Title + tabs */}
+        <PopupRow w={innerW}>
+          <text fg={TAB_COLORS[tab]} bg={POPUP_BG}>
+            {icon("info")}{" "}
+          </text>
+          {TABS.map((t, i) => {
+            const isActive = t === tab;
+            const color = TAB_COLORS[t];
+            return (
+              <text
+                key={t}
+                fg={isActive ? color : "#555"}
+                bg={POPUP_BG}
+                attributes={isActive ? TextAttributes.BOLD : undefined}
+              >
+                {i > 0 ? " │ " : ""}
+                {isActive ? `▸ ${t}` : `  ${t}`}
+              </text>
+            );
+          })}
+        </PopupRow>
+
+        {/* Separator */}
+        <PopupRow w={innerW}>
+          <text fg="#222" bg={POPUP_BG}>
+            {"─".repeat(innerW - 4)}
+          </text>
+        </PopupRow>
+
+        {/* Content */}
+        <box
+          flexDirection="column"
+          height={Math.min(activeLines.length, maxVisible)}
+          overflow="hidden"
+        >
+          {visibleLines}
+        </box>
+
+        {/* Scroll */}
+        {activeLines.length > maxVisible && (
+          <PopupRow w={innerW}>
+            <text fg="#444" bg={POPUP_BG}>
+              {clampedScroll > 0 ? "↑ " : "  "}
+              {String(clampedScroll + 1)}-
+              {String(Math.min(clampedScroll + maxVisible, activeLines.length))}/
+              {String(activeLines.length)}
+              {clampedScroll + maxVisible < activeLines.length ? " ↓" : ""}
+            </text>
+          </PopupRow>
+        )}
+
+        {/* Footer */}
+        <PopupRow w={innerW}>
+          <text fg="#444" bg={POPUP_BG}>
+            ⇥ switch tab | ↑↓ scroll | esc close
+          </text>
+        </PopupRow>
+      </box>
+    </Overlay>
+  );
+}

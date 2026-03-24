@@ -8,8 +8,8 @@ function handleEditor(_input: string, ctx: CommandContext): void {
   ctx.toggleFocus();
 }
 
-function handleHelp(_input: string, ctx: CommandContext): void {
-  ctx.openHelp();
+function handleHelp(_input: string, _ctx: CommandContext): void {
+  useUIStore.getState().openModal("commandPalette");
 }
 
 function handleOpen(input: string, ctx: CommandContext): void {

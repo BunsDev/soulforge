@@ -24,7 +24,9 @@ interface Props {
 let _commands: Array<{ cmd: string; icon: string; desc: string }> | null = null;
 function getCommands() {
   if (!_commands) {
-    _commands = getCommandDefs().map((c) => ({ cmd: c.cmd, icon: icon(c.ic), desc: c.desc }));
+    _commands = getCommandDefs()
+      .filter((c) => !c.hidden)
+      .map((c) => ({ cmd: c.cmd, icon: icon(c.ic), desc: c.desc }));
   }
   return _commands;
 }

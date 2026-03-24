@@ -16,6 +16,7 @@ export type ModalName =
   | "routerSettings"
   | "providerSettings"
   | "commandPicker"
+  | "commandPalette"
   | "infoPopup"
   | "repoMapStatus"
   | "setup"
@@ -24,7 +25,8 @@ export type ModalName =
   | "lspStatus"
   | "lspInstall"
   | "compactionLog"
-  | "diagnosePopup";
+  | "diagnosePopup"
+  | "statusDashboard";
 
 type Modals = Record<ModalName, boolean>;
 
@@ -40,6 +42,7 @@ const INITIAL_MODALS: Modals = {
   routerSettings: false,
   providerSettings: false,
   commandPicker: false,
+  commandPalette: false,
   infoPopup: false,
   repoMapStatus: false,
   setup: false,
@@ -49,6 +52,7 @@ const INITIAL_MODALS: Modals = {
   lspInstall: false,
   compactionLog: false,
   diagnosePopup: false,
+  statusDashboard: false,
 };
 
 interface UIState {
@@ -56,6 +60,7 @@ interface UIState {
   routerSlotPicking: keyof TaskRouter | null;
   commandPickerConfig: CommandPickerConfig | null;
   infoPopupConfig: InfoPopupConfig | null;
+  statusDashboardTab: "Context" | "System";
 
   codeExpanded: Record<string, boolean>;
   changesExpanded: boolean;
@@ -95,6 +100,7 @@ export const useUIStore = create<UIState>()(
     routerSlotPicking: null,
     commandPickerConfig: null,
     infoPopupConfig: null,
+    statusDashboardTab: "Context" as const,
 
     codeExpanded: {},
     changesExpanded: false,
@@ -180,6 +186,7 @@ export function resetUIStore(): void {
     routerSlotPicking: null,
     commandPickerConfig: null,
     infoPopupConfig: null,
+    statusDashboardTab: "Context",
     codeExpanded: {},
     changesExpanded: false,
     chatStyle: "accent",

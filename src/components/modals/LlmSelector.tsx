@@ -1,6 +1,7 @@
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { memo, useEffect, useMemo, useState } from "react";
+import { fuzzyMatch } from "../../core/history/fuzzy.js";
 import { icon, providerIcon } from "../../core/icons.js";
 import { PROVIDER_CONFIGS } from "../../core/llm/models.js";
 import {
@@ -189,6 +190,8 @@ export const LlmSelector = memo(function LlmSelector({
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const [expandedSubprovider, setExpandedSubprovider] = useState<string | null>(null);
   const [spinnerIdx, setSpinnerIdx] = useState(0);
+  const [modelQuery, setModelQuery] = useState("");
+  const [subQuery, setSubQuery] = useState("");
 
   const isGrouped = isGroupedProvider(expandedProvider);
 
@@ -234,6 +237,8 @@ export const LlmSelector = memo(function LlmSelector({
       setLevel("provider");
       setExpandedProvider(null);
       setExpandedSubprovider(null);
+      setModelQuery("");
+      setSubQuery("");
       resetModelScroll();
       resetSubScroll();
     }
@@ -247,10 +252,27 @@ export const LlmSelector = memo(function LlmSelector({
     return () => clearInterval(interval);
   }, [loading]);
 
-  const currentModels =
+  const rawModels =
     isGrouped && expandedSubprovider
       ? (groupedModelsByProvider[expandedSubprovider] ?? [])
       : directModels;
+
+  const currentModels = useMemo(() => {
+    if (!modelQuery.trim()) return rawModels;
+    const q = modelQuery.toLowerCase();
+    return rawModels.filter((m) => {
+      const target = `${m.id} ${m.name ?? ""}`.toLowerCase();
+      return target.includes(q) || fuzzyMatch(q, target) !== null;
+    });
+  }, [rawModels, modelQuery]);
+
+  const filteredSubProviders = useMemo(() => {
+    if (!subQuery.trim()) return subProviders;
+    const q = subQuery.toLowerCase();
+    return subProviders.filter(
+      (s) => s.name.toLowerCase().includes(q) || s.id.toLowerCase().includes(q),
+    );
+  }, [subProviders, subQuery]);
 
   const currentError = isGrouped ? groupedError : directError;
 
@@ -266,62 +288,103 @@ export const LlmSelector = memo(function LlmSelector({
         const provider = PROVIDER_CONFIGS[providerCursor];
         if (provider) {
           setExpandedProvider(provider.id);
+          setModelQuery("");
+          setSubQuery("");
           if (provider.grouped) {
             setLevel("subprovider");
             resetSubScroll();
           } else {
             setLevel("model");
+            setModelCursor(0);
             resetModelScroll();
           }
         }
         return;
       }
-      if (evt.name === "up" || evt.name === "k") {
+      if (evt.name === "up") {
         setProviderCursor((prev) => (prev > 0 ? prev - 1 : PROVIDER_CONFIGS.length - 1));
         return;
       }
-      if (evt.name === "down" || evt.name === "j") {
+      if (evt.name === "down") {
         setProviderCursor((prev) => (prev < PROVIDER_CONFIGS.length - 1 ? prev + 1 : 0));
         return;
       }
     }
 
     if (level === "subprovider") {
-      if (evt.name === "escape" || evt.name === "left") {
+      if (evt.name === "escape") {
+        if (subQuery) {
+          setSubQuery("");
+          resetSubScroll();
+          return;
+        }
         setLevel("provider");
         setExpandedProvider(null);
         setExpandedSubprovider(null);
         return;
       }
-      if (evt.name === "return" && !groupedLoading && subProviders.length > 0) {
-        const sub = subProviders[subproviderCursor];
+      if (evt.name === "left" && !subQuery) {
+        setLevel("provider");
+        setExpandedProvider(null);
+        setExpandedSubprovider(null);
+        return;
+      }
+      if (evt.name === "return" && !groupedLoading && filteredSubProviders.length > 0) {
+        const sub = filteredSubProviders[subproviderCursor];
         if (sub) {
           setExpandedSubprovider(sub.id);
+          setSubQuery("");
+          setModelQuery("");
           setLevel("model");
+          setModelCursor(0);
           resetModelScroll();
         }
         return;
       }
-      if (evt.name === "up" || evt.name === "k") {
+      if (evt.name === "up") {
         setSubproviderCursor((prev) => {
-          const next = prev > 0 ? prev - 1 : Math.max(0, subProviders.length - 1);
+          const next = prev > 0 ? prev - 1 : Math.max(0, filteredSubProviders.length - 1);
           adjustSubScroll(next);
           return next;
         });
         return;
       }
-      if (evt.name === "down" || evt.name === "j") {
+      if (evt.name === "down") {
         setSubproviderCursor((prev) => {
-          const next = prev < subProviders.length - 1 ? prev + 1 : 0;
+          const next = prev < filteredSubProviders.length - 1 ? prev + 1 : 0;
           adjustSubScroll(next);
           return next;
         });
         return;
+      }
+      if (evt.name === "backspace" || evt.name === "delete") {
+        setSubQuery((q) => q.slice(0, -1));
+        resetSubScroll();
+        return;
+      }
+      if (evt.name && evt.name.length === 1 && !evt.ctrl && !evt.meta) {
+        setSubQuery((q) => q + evt.name);
+        resetSubScroll();
       }
     }
 
     if (level === "model") {
-      if (evt.name === "escape" || evt.name === "left") {
+      if (evt.name === "escape") {
+        if (modelQuery) {
+          setModelQuery("");
+          resetModelScroll();
+          return;
+        }
+        if (isGrouped) {
+          setLevel("subprovider");
+          setExpandedSubprovider(null);
+        } else {
+          setLevel("provider");
+          setExpandedProvider(null);
+        }
+        return;
+      }
+      if (evt.name === "left" && !modelQuery) {
         if (isGrouped) {
           setLevel("subprovider");
           setExpandedSubprovider(null);
@@ -339,7 +402,7 @@ export const LlmSelector = memo(function LlmSelector({
         }
         return;
       }
-      if (evt.name === "up" || evt.name === "k") {
+      if (evt.name === "up") {
         setModelCursor((prev) => {
           const next = prev > 0 ? prev - 1 : Math.max(0, currentModels.length - 1);
           adjustModelScroll(next);
@@ -347,13 +410,22 @@ export const LlmSelector = memo(function LlmSelector({
         });
         return;
       }
-      if (evt.name === "down" || evt.name === "j") {
+      if (evt.name === "down") {
         setModelCursor((prev) => {
           const next = prev < currentModels.length - 1 ? prev + 1 : 0;
           adjustModelScroll(next);
           return next;
         });
         return;
+      }
+      if (evt.name === "backspace" || evt.name === "delete") {
+        setModelQuery((q) => q.slice(0, -1));
+        resetModelScroll();
+        return;
+      }
+      if (evt.name && evt.name.length === 1 && !evt.ctrl && !evt.meta) {
+        setModelQuery((q) => q + evt.name);
+        resetModelScroll();
       }
     }
   });
@@ -464,14 +536,27 @@ export const LlmSelector = memo(function LlmSelector({
               {"─".repeat(innerW - 4)}
             </text>
           </PopupRow>
+          {/* Search */}
           <PopupRow w={innerW}>
-            <text fg="#666" bg={POPUP_BG}>
-              {" "}
-              esc to go back
+            <text fg="#8B5CF6" bg={POPUP_BG}>
+              {icon("search")} {"> "}
             </text>
+            <text fg="white" bg={POPUP_BG}>
+              {subQuery}
+            </text>
+            <text fg="#8B5CF6" bg={POPUP_BG}>
+              ▎
+            </text>
+            {!subQuery && (
+              <text fg="#444" bg={POPUP_BG}>
+                {" type to filter…"}
+              </text>
+            )}
           </PopupRow>
           <PopupRow w={innerW}>
-            <text>{""}</text>
+            <text fg="#222" bg={POPUP_BG}>
+              {"─".repeat(innerW - 4)}
+            </text>
           </PopupRow>
 
           {groupedError && (
@@ -488,35 +573,38 @@ export const LlmSelector = memo(function LlmSelector({
                 {SPINNER_FRAMES_FILLED[spinnerIdx]} fetching providers...
               </text>
             </PopupRow>
-          ) : subProviders.length === 0 && !groupedError ? (
+          ) : filteredSubProviders.length === 0 && !groupedError ? (
             <PopupRow w={innerW}>
               <text fg="#888" bg={POPUP_BG}>
-                {"  "}No models found — try restarting SoulForge
+                {"  "}
+                {subQuery ? "no matching providers" : "No models found — try restarting SoulForge"}
               </text>
             </PopupRow>
           ) : (
             <box
               flexDirection="column"
-              height={Math.min(subProviders.length || 1, maxVisible)}
+              height={Math.min(filteredSubProviders.length || 1, maxVisible)}
               overflow="hidden"
             >
-              {subProviders.slice(subScrollOffset, subScrollOffset + maxVisible).map((sub, vi) => (
-                <SubProviderRow
-                  key={sub.id}
-                  sub={sub}
-                  isActive={vi + subScrollOffset === subproviderCursor}
-                  modelCount={groupedModelsByProvider[sub.id]?.length ?? 0}
-                  innerW={innerW}
-                />
-              ))}
+              {filteredSubProviders
+                .slice(subScrollOffset, subScrollOffset + maxVisible)
+                .map((sub, vi) => (
+                  <SubProviderRow
+                    key={sub.id}
+                    sub={sub}
+                    isActive={vi + subScrollOffset === subproviderCursor}
+                    modelCount={groupedModelsByProvider[sub.id]?.length ?? 0}
+                    innerW={innerW}
+                  />
+                ))}
             </box>
           )}
-          {!groupedLoading && subProviders.length > maxVisible && (
+          {!groupedLoading && filteredSubProviders.length > maxVisible && (
             <PopupRow w={innerW}>
               <text fg="#555" bg={POPUP_BG}>
                 {subScrollOffset > 0 ? "↑ " : "  "}
-                {String(subproviderCursor + 1)}/{String(subProviders.length)}
-                {subScrollOffset + maxVisible < subProviders.length ? " ↓" : ""}
+                {String(subproviderCursor + 1)}/{String(filteredSubProviders.length)}
+                {subScrollOffset + maxVisible < filteredSubProviders.length ? " ↓" : ""}
               </text>
             </PopupRow>
           )}
@@ -525,8 +613,8 @@ export const LlmSelector = memo(function LlmSelector({
             <text>{""}</text>
           </PopupRow>
           <PopupRow w={innerW}>
-            <text fg="#555" bg={POPUP_BG}>
-              {"↑↓"} navigate | {"⏎"} select | esc back
+            <text fg="#444" bg={POPUP_BG}>
+              ↑↓ navigate | ⏎ select | type to search | esc back
             </text>
           </PopupRow>
         </box>
@@ -566,14 +654,27 @@ export const LlmSelector = memo(function LlmSelector({
             {"─".repeat(innerW - 4)}
           </text>
         </PopupRow>
+        {/* Search */}
         <PopupRow w={innerW}>
-          <text fg="#666" bg={POPUP_BG}>
-            {" "}
-            esc to go back
+          <text fg="#8B5CF6" bg={POPUP_BG}>
+            {icon("search")} {"> "}
           </text>
+          <text fg="white" bg={POPUP_BG}>
+            {modelQuery}
+          </text>
+          <text fg="#8B5CF6" bg={POPUP_BG}>
+            ▎
+          </text>
+          {!modelQuery && (
+            <text fg="#444" bg={POPUP_BG}>
+              {" type to filter models…"}
+            </text>
+          )}
         </PopupRow>
         <PopupRow w={innerW}>
-          <text>{""}</text>
+          <text fg="#222" bg={POPUP_BG}>
+            {"─".repeat(innerW - 4)}
+          </text>
         </PopupRow>
 
         {currentError && (
@@ -593,7 +694,8 @@ export const LlmSelector = memo(function LlmSelector({
         ) : currentModels.length === 0 && !currentError ? (
           <PopupRow w={innerW}>
             <text fg="#888" bg={POPUP_BG}>
-              {"  "}No models found — try restarting SoulForge
+              {"  "}
+              {modelQuery ? "no matching models" : "No models found — try restarting SoulForge"}
             </text>
           </PopupRow>
         ) : (
@@ -635,8 +737,8 @@ export const LlmSelector = memo(function LlmSelector({
           <text>{""}</text>
         </PopupRow>
         <PopupRow w={innerW}>
-          <text fg="#555" bg={POPUP_BG}>
-            ↑↓ navigate ⏎ select esc back
+          <text fg="#444" bg={POPUP_BG}>
+            ↑↓ navigate | ⏎ select | type to search | esc back
           </text>
         </PopupRow>
       </box>

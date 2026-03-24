@@ -1,16 +1,41 @@
 # Command Reference
 
-76 slash commands available. Press `/` in the chat input or `Ctrl+K` to open the command picker.
+76 slash commands available. Type `/` in chat or press `Ctrl+K` to open the command palette.
+
+Sub-commands (like `/proxy login`) work when typed directly but are grouped under their parent in the palette.
+
+## Keybindings
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+K` | Command palette — search all commands |
+| `Ctrl+L` | Switch LLM model |
+| `Ctrl+E` | Toggle editor panel |
+| `Ctrl+G` | Git menu |
+| `Ctrl+P` | Browse sessions |
+| `Ctrl+S` | Browse skills |
+| `Ctrl+T` | New tab |
+| `Ctrl+W` | Close tab |
+| `Ctrl+D` | Cycle forge mode |
+| `Ctrl+X` | Abort generation |
+| `Ctrl+C` | Copy selection / exit |
+| `Ctrl+O` | Expand/collapse all (code, reasoning) |
+| `Ctrl+H` | Command palette |
+| `Ctrl+[` / `]` | Prev / next tab |
+| `Ctrl+1-9` | Switch to tab N |
+| `Alt+R` | Error log |
 
 ## Models & Providers
 
 | Command | Description |
 |---------|-------------|
-| `/model` | Switch active LLM model |
-| `/models` | Browse all available models by provider |
-| `/router` | Configure per-task model routing (planning, coding, exploration, etc.) |
-| `/provider-settings` | Provider settings — thinking mode, effort, speed, context management |
+| `/models` | Switch LLM model (Ctrl+L) — search enabled |
+| `/router` | Route models by task type (planning, coding, exploration, verification) |
+| `/provider-settings` | Configure provider features — thinking mode, effort, speed, context management |
 | `/model-scope` | Toggle model persistence scope (project vs global) |
+| `/keys` | Manage API keys (LLM providers & web search) |
+| `/proxy` | Proxy — status, login, logout, install, upgrade |
+| `/web-search` | Web search API keys & settings |
 
 ## Agent & Modes
 
@@ -18,116 +43,89 @@
 |---------|-------------|
 | `/mode <name>` | Switch forge mode (default, auto, architect, socratic, challenge, plan) |
 | `/plan` | Enter plan mode — research first, then structured plan with execution |
-| `/agent-features` | Toggle agent features (de-sloppify pass, tier routing) |
+| `/agent-features` | Toggle agent features (de-sloppify, verify edits, tier routing) |
 | `/reasoning` | Toggle visibility of reasoning/thinking blocks |
 | `/verbose` | Toggle verbose tool output |
 | `/continue` | Continue from where the agent left off |
+
+## Settings
+
+| Command | Description |
+|---------|-------------|
+| `/settings` | Settings hub — all options in one place |
+| `/chat-style` | Chat layout style (accent/bubble) |
+| `/diff-style` | Diff display mode (default, sidebyside, compact) |
+| `/nerd-font` | Toggle Nerd Font icon display |
+| `/font` | Terminal font settings |
+| `/nvim-config` | Neovim config mode (default, user, none) |
+| `/vim-hints` | Toggle Neovim keybinding hints |
+| `/instructions` | Toggle instruction files (SOULFORGE.md, CLAUDE.md, etc.) |
+| `/co-author-commits` | Toggle co-author trailer on commits |
+| `/split` | Cycle editor/chat split ratio (40/50/60/70) |
 
 ## Editor
 
 | Command | Description |
 |---------|-------------|
-| `/editor` | Toggle Neovim editor panel |
-| `/open <file>` | Open a file in the editor |
-| `/split` | Cycle editor/chat split ratio |
-| `/nvim-config` | Neovim config mode (auto, user, default, none) |
+| `/editor` | Toggle editor panel (Ctrl+E) |
 | `/editor-settings` | Editor display and LSP integration settings |
-| `/vim-hints` | Toggle Neovim keybinding hints |
-| `/diff-style` | Diff display mode (default, sidebyside, compact) |
-| `/chat-style` | Chat accent style |
-| `/nerd-font` | Toggle Nerd Font icon display |
-| `/font` | Font settings |
+| `/open <file>` | Open a file in the editor |
 
 ## Git
 
 | Command | Description |
 |---------|-------------|
-| `/git` | Git operations menu (commit, push, pull, stash, log, lazygit) |
-| `/commit` | AI-assisted commit with staged file display and auto co-author |
+| `/git` | Git operations menu — commit, push, pull, stash, log, lazygit (Ctrl+G) |
+| `/commit` | AI-assisted commit with staged file display |
 | `/push` | Push to remote |
 | `/pull` | Pull from remote |
 | `/branch` | Show or create branches |
 | `/log` | Recent commit history |
 | `/diff` | Open diff in editor |
-| `/git-status` | Current working tree status |
-| `/stash` | Stash changes |
-| `/stash pop` | Pop stashed changes |
+| `/git-status` | Working tree status |
+| `/stash` | Stash changes — `pop` to restore |
 | `/init` | Initialize git repository |
 | `/lazygit` | Launch lazygit terminal UI |
-| `/co-author-commits` | Toggle co-author trailer on commits |
 
 ## Intelligence & LSP
 
 | Command | Description |
 |---------|-------------|
-| `/lsp` | LSP server status — running servers, PIDs, diagnostics per file |
-| `/lsp-install` | LSP server manager — search 200+ servers (Mason registry), install, uninstall, enable/disable |
-| `/lsp-restart` | Restart standalone LSP servers — all or filtered by language/server name |
-| `/diagnose` | Intelligence health check — probes all backends (LSP, ts-morph, tree-sitter, regex) |
-| `/repo-map` | Repo map settings and status |
-| `/web-search` | Web search configuration (API keys, page fetcher) |
-| `/keys` | Manage LLM provider API keys (Anthropic, OpenAI, Google, xAI, etc.) |
+| `/lsp` | LSP status — install, restart servers |
+| `/diagnose` | Health check — probes LSP, tree-sitter, semantic indexing |
+| `/repo-map` | Soul map settings (AST index, semantic summaries) |
+| `/context` | Context & system dashboard (Context tab) |
+| `/memory` | Memory system — scopes, view, clear |
+| `/skills` | Browse & install skills (Ctrl+S) |
 
-### LSP Install Tabs
-
-The `/lsp-install` command opens a full manager with 4 tabs:
-
-- **Search** — Browse Mason registry (200+ LSP servers, formatters, linters, DAP debuggers)
-- **Installed** — View installed servers with source (PATH, soulforge, mason)
-- **Disabled** — Toggle servers on/off without uninstalling
-- **Recommended** — Auto-suggested servers based on file types in your project
-
-Supports installation via npm, pip, cargo, go, and GitHub binaries.
-
-## Context & Memory
+## Sessions & Tabs
 
 | Command | Description |
 |---------|-------------|
-| `/compact` | Trigger context compaction (V1 or V2 strategy) |
-| `/compaction` | Switch compaction strategy (v1 LLM summary, v2 deterministic extraction) |
-| `/context` | Context budget inspector — per-section token breakdown with visual bar |
-| `/instructions` | Toggle instruction files loaded into system prompt (FORGE.md, CLAUDE.md, .cursorrules, etc.) |
-| `/memory` | Memory system — title-only memories searchable by FTS5 |
-| `/compact-v2-logs` | View compaction event history with token breakdowns |
-
-## Sessions & Export
-
-| Command | Description |
-|---------|-------------|
-| `/sessions` | Browse and restore past sessions (fuzzy search, metadata, size) |
-| `/export` | Export current tab to markdown file |
-| `/export json` | Export current tab as JSON file |
-| `/export clipboard` | Copy current tab to clipboard (markdown) |
-| `/export all` | Full diagnostic export — system prompt, core messages, chat messages, token usage |
-| `/new-tab` | Open a new tab |
-| `/close-tab` | Close current tab |
+| `/sessions` | Browse and restore past sessions (Ctrl+P) |
+| `/export` | Export chat — markdown, json, clipboard, diagnostic |
+| `/clear` | Clear chat history |
+| `/compact` | Trigger context compaction |
+| `/compaction` | Compaction strategy & pruning settings |
+| `/plan` | Toggle plan mode |
+| `/continue` | Resume interrupted generation |
+| `/new-tab` | Open a new tab (Ctrl+T) |
+| `/close-tab` | Close current tab (Ctrl+W) |
 | `/rename` | Rename current tab |
-| `/tabs` | List all open tabs |
-
-## Cross-Tab Coordination
-
-| Command | Description |
-|---------|-------------|
-| `/claims` | Show all active file claims across tabs |
-| `/unclaim <path>` | Release a file claim from current tab |
-| `/unclaim-all` | Release all claims from current tab |
-| `/force-claim <path>` | Steal a file claim from another tab |
+| `/tabs` | List open tabs |
+| `/changes` | Toggle changed files panel |
+| `/claims` | Show file claims across tabs |
 
 ## System
 
 | Command | Description |
 |---------|-------------|
-| `/setup` | Check prerequisites and install missing tools (Bun, Neovim, Nerd Fonts) |
-| `/skills` | Skills browser — search, install, and manage agent skills from community registry |
-| `/privacy` | Manage forbidden file patterns (add/remove denied paths, project/global scope) |
-| `/storage` | Storage usage breakdown and cleanup |
-| `/errors` | Browse tool execution and API error log |
-| `/status` | System status overview |
-| `/proxy` | Proxy provider status |
-| `/proxy install` | Install CLIProxyAPI |
-| `/proxy login` | Authenticate proxy with Claude |
-| `/help` | Searchable command list |
-| `/clear` | Clear chat history |
+| `/status` | System status dashboard (System tab) |
+| `/errors` | Error & tool execution log (Alt+R) |
+| `/compact-v2-logs` | Compaction event history |
+| `/storage` | Storage usage & cleanup |
+| `/setup` | Check & install prerequisites |
+| `/privacy` | Manage forbidden file patterns |
+| `/help` | Open command palette |
 | `/restart` | Restart SoulForge |
 | `/quit` | Exit SoulForge |
-| `/changes` | View files changed in current session |

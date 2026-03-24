@@ -30,11 +30,19 @@ export function useGlobalKeyboard({
 }: GlobalKeyboardParams): void {
   useKeyboard((evt) => {
     if (shutdownPhase >= 0) return;
+    const uiModals = useUIStore.getState().modals;
     if (selectIsAnyModalOpen(useUIStore.getState())) {
       if (evt.ctrl && evt.name === "c") {
         handleExit();
       }
-      evt.stopPropagation();
+      const hasOwnInput =
+        uiModals.commandPalette ||
+        uiModals.skillSearch ||
+        uiModals.sessionPicker ||
+        uiModals.errorLog ||
+        uiModals.compactionLog ||
+        uiModals.llmSelector;
+      if (!hasOwnInput) evt.stopPropagation();
       return;
     }
 
@@ -80,8 +88,10 @@ export function useGlobalKeyboard({
     if (evt.ctrl && evt.name === "d") return consume(() => cycleMode());
     if (evt.ctrl && evt.name === "g")
       return consume(() => useUIStore.getState().toggleModal("gitMenu"));
+    if (evt.ctrl && evt.name === "k")
+      return consume(() => useUIStore.getState().toggleModal("commandPalette"));
     if (evt.ctrl && evt.name === "h")
-      return consume(() => useUIStore.getState().toggleModal("helpPopup"));
+      return consume(() => useUIStore.getState().toggleModal("commandPalette"));
     if (evt.ctrl && evt.name === "p")
       return consume(() => useUIStore.getState().toggleModal("sessionPicker"));
     if (evt.meta && evt.name === "r")

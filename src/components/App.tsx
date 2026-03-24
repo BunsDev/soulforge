@@ -51,6 +51,7 @@ import { TabBar } from "./layout/TabBar.js";
 import { TabInstance } from "./layout/TabInstance.js";
 import { TokenDisplay } from "./layout/TokenDisplay.js";
 import { SimpleModalLayer } from "./ModalLayer.js";
+import { CommandPalette } from "./modals/CommandPalette.js";
 import { CommandPicker } from "./modals/CommandPicker.js";
 import { DiagnosePopup } from "./modals/DiagnosePopup.js";
 import { GitCommitModal } from "./modals/GitCommitModal.js";
@@ -58,6 +59,7 @@ import { GitMenu } from "./modals/GitMenu.js";
 import { InfoPopup } from "./modals/InfoPopup.js";
 import { LlmSelector } from "./modals/LlmSelector.js";
 import { SessionPicker } from "./modals/SessionPicker.js";
+import { StatusDashboard } from "./modals/StatusDashboard.js";
 import { EditorSettings } from "./settings/EditorSettings.js";
 import { LspInstallSearch } from "./settings/LspInstallSearch.js";
 import { ProviderSettings } from "./settings/ProviderSettings.js";
@@ -373,8 +375,11 @@ export function App({
   const modalProviderSettings = useUIStore((s) => s.modals.providerSettings);
   const modalRouterSettings = useUIStore((s) => s.modals.routerSettings);
   const modalCommandPicker = useUIStore((s) => s.modals.commandPicker);
+  const modalCommandPalette = useUIStore((s) => s.modals.commandPalette);
   const modalInfoPopup = useUIStore((s) => s.modals.infoPopup);
   const modalDiagnose = useUIStore((s) => s.modals.diagnosePopup);
+  const modalStatusDashboard = useUIStore((s) => s.modals.statusDashboard);
+  const statusDashboardTab = useUIStore((s) => s.statusDashboardTab);
   const modalRepoMapStatus = useUIStore((s) => s.modals.repoMapStatus);
   const isModalOpen = useUIStore(selectIsAnyModalOpen);
 
@@ -1106,6 +1111,15 @@ export function App({
         onClose={getCloser("routerSettings")}
       />
 
+      <CommandPalette
+        visible={modalCommandPalette}
+        onClose={getCloser("commandPalette")}
+        onExecute={(cmd) => {
+          const chat = activeChatRef.current;
+          if (chat) handleTabCommand(cmd, chat);
+        }}
+      />
+
       <CommandPicker
         visible={modalCommandPicker}
         config={commandPickerConfig}
@@ -1113,6 +1127,17 @@ export function App({
       />
 
       <InfoPopup visible={modalInfoPopup} config={infoPopupConfig} onClose={closeInfoPopup} />
+
+      <StatusDashboard
+        visible={modalStatusDashboard}
+        initialTab={statusDashboardTab}
+        onClose={getCloser("statusDashboard")}
+        chat={activeChatRef.current}
+        contextManager={contextManager}
+        tabMgr={tabMgr}
+        currentMode={activeChatRef.current?.forgeMode ?? "default"}
+        currentModeLabel={getModeLabel(activeChatRef.current?.forgeMode ?? "default")}
+      />
 
       <DiagnosePopup
         visible={modalDiagnose}

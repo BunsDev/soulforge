@@ -11,13 +11,14 @@ interface ShortcutDef {
 
 const SHORTCUTS: ShortcutDef[] = [
   { k: "^X", ic: icon("stop"), l: "Stop", tier: 1 },
-  { k: "^D", ic: icon("cog"), l: "Mode", tier: 2 },
-  { k: "^E", ic: icon("pencil"), l: "Editor", tier: 2 },
-  { k: "^G", ic: icon("git"), l: "Git", tier: 1 },
+  { k: "^K", ic: icon("lightning"), l: "Palette", tier: 1 },
   { k: "^L", ic: icon("brain_alt"), l: "LLM", tier: 1 },
+  { k: "^G", ic: icon("git"), l: "Git", tier: 1 },
+  { k: "^E", ic: icon("pencil"), l: "Editor", tier: 2 },
+  { k: "^D", ic: icon("cog"), l: "Mode", tier: 2 },
   { k: "^S", ic: icon("skills"), l: "Skills", tier: 2 },
-  { k: "⌥T", ic: icon("tabs"), l: "Tab", tier: 3 },
-  { k: "^H", ic: icon("help"), l: "Help", tier: 1 },
+  { k: "^P", ic: icon("clock_alt"), l: "Sessions", tier: 3 },
+  { k: "^T", ic: icon("tabs"), l: "Tab", tier: 3 },
   { k: "^C", ic: icon("quit"), l: "Quit", tier: 1 },
 ];
 

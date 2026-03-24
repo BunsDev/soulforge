@@ -583,6 +583,72 @@ function handleNerdFont(_input: string, ctx: CommandContext): void {
   });
 }
 
+const settingsHandlers: Record<string, (input: string, ctx: CommandContext) => void> = {
+  mode: handleMode,
+  "chat-style": handleChatStyle,
+  verbose: handleVerbose as CommandHandler,
+  reasoning: handleReasoning,
+  compaction: handleCompaction,
+  "diff-style": handleDiffStyle,
+  "agent-features": handleAgentFeatures,
+  instructions: handleInstructions as CommandHandler,
+  "nvim-config": handleNvimConfig,
+  "vim-hints": handleVimHints as CommandHandler,
+  "nerd-font": handleNerdFont,
+  font: handleFont,
+  split: handleSplit,
+  "model-scope": handleModelScope,
+};
+
+function handleSettingsHub(_input: string, ctx: CommandContext): void {
+  const mode = ctx.currentModeLabel ?? ctx.currentMode;
+  const chatStyle = ctx.chatStyle ?? "accent";
+  const verbose = ctx.verbose ? "on" : "off";
+  const reasoning = ctx.showReasoning ? "on" : "off";
+  const compaction = ctx.compactionStrategy ?? "v2";
+  const diffStyle = ctx.diffStyle ?? "default";
+  const nvimConfig = ctx.effectiveNvimConfig ?? "default";
+  const vimHints = ctx.vimHints ? "visible" : "hidden";
+
+  ctx.openCommandPicker({
+    title: "Settings",
+    icon: icon("cog"),
+    options: [
+      { value: "mode", label: `${icon("ai")} Mode`, description: mode },
+      { value: "chat-style", label: `${icon("chat_style")} Chat Style`, description: chatStyle },
+      { value: "verbose", label: `${icon("verbose")} Verbose`, description: verbose },
+      { value: "reasoning", label: `${icon("brain")} Reasoning`, description: reasoning },
+      { value: "compaction", label: `${icon("compact")} Compaction`, description: compaction },
+      { value: "diff-style", label: `${icon("git")} Diff Style`, description: diffStyle },
+      { value: "agent-features", label: `${icon("system")} Agent Features`, description: "toggle" },
+      {
+        value: "instructions",
+        label: `${icon("system")} Instructions`,
+        description: "toggle files",
+      },
+      { value: "nvim-config", label: `${icon("nvim")} Nvim Config`, description: nvimConfig },
+      { value: "vim-hints", label: `${icon("pencil")} Vim Hints`, description: vimHints },
+      { value: "nerd-font", label: `${icon("ghost")} Nerd Font`, description: "toggle" },
+      { value: "font", label: `${icon("pencil")} Terminal Font`, description: "show/set" },
+      { value: "split", label: `${icon("pencil")} Editor Split`, description: "cycle layout" },
+      { value: "model-scope", label: `${icon("cog")} Model Scope`, description: "project/global" },
+      {
+        value: "editor-settings",
+        label: `${icon("cog")} Editor Settings`,
+        description: "LSP integrations",
+      },
+    ],
+    onSelect: (value) => {
+      const handler = settingsHandlers[value];
+      if (handler) {
+        handler(`/${value}`, ctx);
+      } else if (value === "editor-settings") {
+        ctx.openEditorSettings();
+      }
+    },
+  });
+}
+
 export function register(map: Map<string, CommandHandler>): void {
   map.set("/chat-style", handleChatStyle);
   map.set("/mode", handleMode);
@@ -598,6 +664,7 @@ export function register(map: Map<string, CommandHandler>): void {
   map.set("/model-scope", handleModelScope);
   map.set("/nerd-font", handleNerdFont);
   map.set("/nerdfont", handleNerdFont);
+  map.set("/settings", handleSettingsHub);
 }
 
 export function matchConfigPrefix(cmd: string): CommandHandler | null {
