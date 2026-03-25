@@ -698,8 +698,8 @@ export function buildSubagentTools(models: SubagentModels) {
               const hasInvestigate = nonWebTasks.some((t) => t.role === "investigate");
               const allExplore = nonWebTasks.every((t) => t.role === "explore");
               const hasCode = nonWebTasks.some((t) => t.role === "code");
-              const MAX_EXPLORE_FILES = 3;
-              const MAX_CODE_FILES = 3;
+              const MAX_EXPLORE_FILES = 10;
+              const MAX_CODE_FILES = 7;
 
               if (
                 allExplore &&

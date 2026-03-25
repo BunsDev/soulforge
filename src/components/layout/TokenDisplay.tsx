@@ -43,9 +43,10 @@ const CACHE_BAR_W = 6;
 
 function buildContent(u: TokenUsage): StyledText {
   const totalInput = u.prompt + u.subagentInput;
+  const freshInput = Math.max(0, totalInput - u.cacheRead);
   const totalOutput = u.completion + u.subagentOutput;
   const chunks = [
-    fgStyle("#2d9bf0")(fmt(totalInput)),
+    fgStyle("#2d9bf0")(fmt(freshInput)),
     fgStyle("#444")("↑ "),
     fgStyle("#e0a020")(fmt(totalOutput)),
     fgStyle("#444")("↓"),

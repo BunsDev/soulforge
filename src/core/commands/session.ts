@@ -128,13 +128,7 @@ function handleContinue(_input: string, ctx: CommandContext): void {
   }
 }
 
-function handleClear(input: string, ctx: CommandContext): void {
-  const arg = input.trim().slice(6).trim();
-  const msgCount = ctx.chat.messages.length;
-  if (msgCount > 0 && arg !== "confirm" && arg !== "!") {
-    sysMsg(ctx, `This will clear ${String(msgCount)} messages. Run \`/clear confirm\` to proceed.`);
-    return;
-  }
+function handleClear(_input: string, ctx: CommandContext): void {
   ctx.chat.setMessages([]);
   ctx.chat.setCoreMessages([]);
   ctx.chat.setTokenUsage({

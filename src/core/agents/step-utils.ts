@@ -360,8 +360,9 @@ function stripOldEditArgs(messages: ModelMessage[], cutoff: number): ModelMessag
   }) as ModelMessage[];
 }
 
-/** Unused in production — retained for test coverage and possible future reactivation. */
-
+/** Compact old tool results beyond KEEP_RECENT_MESSAGES into one-line summaries.
+ *  Keeps edit tool results intact (needed for conversation coherence).
+ *  Runs on every step from step 1+ via buildPrepareStep. */
 function compactOldToolResults(
   messages: ModelMessage[],
   symbolLookup?: SymbolLookup,
@@ -440,7 +441,7 @@ export function buildPrepareStep({
   parentToolCallId,
   role,
   allTools: _allTools,
-  symbolLookup: _symbolLookup,
+  symbolLookup,
   contextWindow: ctxWindow,
   disablePruning,
 }: PrepareStepOptions): PrepareStepResult {
@@ -507,11 +508,34 @@ export function buildPrepareStep({
     }
 
     // Semantic pruning: stale reads + canceled plans + re-read stubbing
+    // Tool result compaction: old tool results → one-line summaries (keeps last KEEP_RECENT_MESSAGES full)
     if (stepNumber >= 1 && !disablePruning) {
       let msgs = result.messages ?? messages;
       msgs = semanticPrune(msgs, pathMap);
+      msgs = compactOldToolResults(msgs, symbolLookup, pathMap);
       msgs = stripOldEditArgs(msgs, msgs.length - KEEP_RECENT_MESSAGES);
       result.messages = msgs;
+    }
+
+    // Debug: dump the exact messages being sent to the API
+    // Enable with SOULFORGE_DEBUG_API=1 — writes to .soulforge/tee/
+    if (process.env.SOULFORGE_DEBUG_API) {
+      const msgs = result.messages ?? messages;
+      const dump = msgs
+        .map((m, i) => {
+          const content =
+            typeof m.content === "string"
+              ? m.content.slice(0, 500)
+              : JSON.stringify(m.content).slice(0, 500);
+          return `[${String(i)}] ${m.role} (${String(content.length)} chars): ${content}`;
+        })
+        .join("\n---\n");
+      import("../tools/tee.js").then(({ saveTee }) => {
+        saveTee(
+          `api-step-${String(stepNumber)}`,
+          `Step ${String(stepNumber)} — ${String(msgs.length)} messages\n\n${dump}`,
+        );
+      });
     }
 
     // Use the last step's input tokens as actual context size (not cumulative sum).
