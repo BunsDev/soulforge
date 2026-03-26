@@ -770,12 +770,6 @@ export const ToolCallDisplay = memo(function ToolCallDisplay({
   }
 
   // Multiple parallel calls — render with tree grouping
-  const anyRunning = visible.some((tc) => tc.state === "running");
-  const allDone = visible.every((tc) => tc.state !== "running");
-  const anyError = visible.some((tc) => tc.state === "error");
-  const headerColor = anyRunning ? "#9B30FF" : anyError ? "#f44" : "#4a7";
-  const headerIcon = anyRunning ? null : anyError ? "✗" : "✓";
-
   return (
     <box flexDirection="column">
       {visible.map((tc, i) =>

@@ -19,11 +19,7 @@ import {
 import { readFileTool } from "../tools/read-file.js";
 import { renderTaskList } from "../tools/task-list.js";
 import { normalizePath } from "./agent-bus.js";
-import {
-  compactOldToolResults,
-  KEEP_RECENT_MESSAGES,
-  pruneByTokenBudget,
-} from "./step-utils.js";
+import { pruneByTokenBudget } from "./step-utils.js";
 import { repairToolCall, sanitizeMessages } from "./stream-options.js";
 import { buildSubagentTools, type SharedCacheRef } from "./subagent-tools.js";
 
@@ -318,36 +314,12 @@ function buildForgePrepareStep(
       }
     }
 
-    // Two-layer pruning for the main agent:
-    // Layer 1: message-count pruning — summarize old tool results (keeps last 4 full)
-    // Layer 2: token-budget pruning — blank anything still over 40k protection window
+    // Token-budget pruning: blank old tool results beyond 40k protection window.
+    // No message-count pruning — it causes re-reads when the agent needs old file content.
     if (stepNumber >= 1) {
-      let msgs = result.messages ?? stripped;
-      msgs = compactOldToolResults(msgs);
-      msgs = pruneByTokenBudget(msgs);
-      // Strip old edit args (old_string/new_string) beyond recent window
-      const cutoff = msgs.length - KEEP_RECENT_MESSAGES;
-      if (cutoff > 0) {
-        msgs = msgs.map((msg, idx) => {
-          if (idx >= cutoff) return msg;
-          if (msg.role !== "assistant" || !Array.isArray(msg.content)) return msg;
-          let changed = false;
-          const content = msg.content.map((part) => {
-            if ((part as { type: string }).type !== "tool-call") return part;
-            const input = (part as { input: Record<string, unknown> }).input;
-            if (!input?.old_string && !input?.new_string && !input?.replacement) return part;
-            changed = true;
-            const slim = { ...input };
-            for (const k of ["old_string", "new_string", "replacement"] as const) {
-              if (typeof slim[k] === "string")
-                slim[k] = `[${String((slim[k] as string).length)} chars]`;
-            }
-            return { ...part, input: slim };
-          });
-          return changed ? { ...msg, content } : msg;
-        }) as typeof msgs;
-      }
-      result.messages = msgs;
+      const msgs = result.messages ?? stripped;
+      const pruned = pruneByTokenBudget(msgs);
+      if (pruned !== msgs) result.messages = pruned;
     }
 
     // Helper: append a nudge/hint to the system blocks array

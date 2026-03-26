@@ -77,6 +77,8 @@ function deferExecute<T, R>(fn: (args: T) => Promise<R>): (args: T) => Promise<R
   };
 }
 
+const coerceInt = (v: unknown) => (typeof v === "string" ? Number(v) : v);
+
 /**
 /** @internal — exported for testing */
 const GIT_MUTATING_ACTIONS = /\b(commit|stash|restore|switch|merge|rebase|cherry-pick|reset)\b/;
@@ -273,8 +275,8 @@ export function buildTools(
       description: readFileTool.description,
       inputSchema: z.object({
         path: z.string().describe("File path to read"),
-        startLine: z.number().optional().describe("Start line (1-indexed)"),
-        endLine: z.number().optional().describe("End line (1-indexed)"),
+        startLine: z.preprocess(coerceInt, z.number()).optional().describe("Start line (1-indexed)"),
+        endLine: z.preprocess(coerceInt, z.number()).optional().describe("End line (1-indexed)"),
         target: z
           .string()
           .optional()
@@ -343,7 +345,7 @@ export function buildTools(
         oldString: z.string().describe("Content to replace (empty = create new file)"),
         newString: z.string().describe("Replacement content"),
         lineStart: z
-          .number()
+          .preprocess(coerceInt, z.number())
           .optional()
           .describe(
             "RECOMMENDED: 1-indexed line number from your last read_file output. " +
@@ -351,7 +353,7 @@ export function buildTools(
               "the edit falls back to line-based replacement using this anchor. Always provide when available.",
           ),
         lineEnd: z
-          .number()
+          .preprocess(coerceInt, z.number())
           .optional()
           .describe(
             "1-indexed end line (inclusive). When both lineStart and lineEnd are set, the system replaces by line range if oldString matching fails.",
@@ -949,8 +951,8 @@ export function buildTools(
           ),
         file: z.string().optional().describe("Target file"),
         newName: z.string().optional().describe("New name for extracted symbol"),
-        startLine: z.number().optional().describe("Start line for extraction or range formatting"),
-        endLine: z.number().optional().describe("End line for extraction or range formatting"),
+        startLine: z.preprocess(coerceInt, z.number()).optional().describe("Start line for extraction or range formatting"),
+        endLine: z.preprocess(coerceInt, z.number()).optional().describe("End line for extraction or range formatting"),
         name: z
           .string()
           .optional()
@@ -986,10 +988,10 @@ export function buildTools(
           ),
         file: z.string().optional().describe("File path to analyze"),
         symbol: z.string().optional().describe("Symbol for type_info"),
-        line: z.number().optional().describe("Line number for type_info"),
-        column: z.number().optional().describe("Column number for type_info"),
-        startLine: z.number().optional().describe("Start line for code_actions range"),
-        endLine: z.number().optional().describe("End line for code_actions range"),
+        line: z.preprocess(coerceInt, z.number()).optional().describe("Line number for type_info"),
+        column: z.preprocess(coerceInt, z.number()).optional().describe("Column number for type_info"),
+        startLine: z.preprocess(coerceInt, z.number()).optional().describe("Start line for code_actions range"),
+        endLine: z.preprocess(coerceInt, z.number()).optional().describe("End line for code_actions range"),
         oldContent: z
           .string()
           .optional()
@@ -1160,8 +1162,8 @@ export function buildSubagentExploreTools(opts?: {
       description: `${readFileTool.description} Output capped at 750 lines.`,
       inputSchema: z.object({
         path: z.string().describe("File path to read"),
-        startLine: z.number().optional().describe("Start line (1-indexed)"),
-        endLine: z.number().optional().describe("End line (1-indexed)"),
+        startLine: z.preprocess(coerceInt, z.number()).optional().describe("Start line (1-indexed)"),
+        endLine: z.preprocess(coerceInt, z.number()).optional().describe("End line (1-indexed)"),
         target: z
           .string()
           .optional()
@@ -1277,10 +1279,10 @@ export function buildSubagentExploreTools(opts?: {
           ),
         file: z.string().optional().describe("File path to analyze"),
         symbol: z.string().optional().describe("Symbol for type_info"),
-        line: z.number().optional().describe("Line number for type_info"),
-        column: z.number().optional().describe("Column number for type_info"),
-        startLine: z.number().optional().describe("Start line for code_actions range"),
-        endLine: z.number().optional().describe("End line for code_actions range"),
+        line: z.preprocess(coerceInt, z.number()).optional().describe("Line number for type_info"),
+        column: z.preprocess(coerceInt, z.number()).optional().describe("Column number for type_info"),
+        startLine: z.preprocess(coerceInt, z.number()).optional().describe("Start line for code_actions range"),
+        endLine: z.preprocess(coerceInt, z.number()).optional().describe("End line for code_actions range"),
         oldContent: z
           .string()
           .optional()
@@ -1477,7 +1479,7 @@ export function buildSubagentCodeTools(opts?: {
         oldString: z.string().describe("Content to replace (empty = create new file)"),
         newString: z.string().describe("Replacement content"),
         lineStart: z
-          .number()
+          .preprocess(coerceInt, z.number())
           .optional()
           .describe(
             "RECOMMENDED: 1-indexed line number from your last read_file output. " +
@@ -1485,7 +1487,7 @@ export function buildSubagentCodeTools(opts?: {
               "the edit falls back to line-based replacement using this anchor. Always provide when available.",
           ),
         lineEnd: z
-          .number()
+          .preprocess(coerceInt, z.number())
           .optional()
           .describe(
             "1-indexed end line (inclusive). When both lineStart and lineEnd are set, the system replaces by line range if oldString matching fails.",
@@ -1603,8 +1605,8 @@ export function buildSubagentCodeTools(opts?: {
           ),
         file: z.string().optional().describe("Target file"),
         newName: z.string().optional().describe("New name for extracted symbol"),
-        startLine: z.number().optional().describe("Start line"),
-        endLine: z.number().optional().describe("End line"),
+        startLine: z.preprocess(coerceInt, z.number()).optional().describe("Start line"),
+        endLine: z.preprocess(coerceInt, z.number()).optional().describe("End line"),
         name: z.string().optional().describe("Symbol name to extract"),
         apply: z.boolean().optional().describe("Apply changes to disk (default true)"),
       }),

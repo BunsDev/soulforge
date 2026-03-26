@@ -63,6 +63,8 @@ export function useAllProviderModels(active: boolean): UseAllProviderModelsRetur
     for (const c of PROVIDER_CONFIGS) init[c.id] = { items: [], loading: true };
     setProviderData(init);
 
+    let dead = false;
+
     checkProviders()
       .then((statuses) => {
         if (dead) return;
@@ -71,8 +73,6 @@ export function useAllProviderModels(active: boolean): UseAllProviderModelsRetur
         setAvailability(map);
       })
       .catch(() => {});
-
-    let dead = false;
 
     for (const cfg of PROVIDER_CONFIGS) {
       const set = (items: ProviderModelInfo[]) => {
