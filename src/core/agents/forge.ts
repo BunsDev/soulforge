@@ -161,7 +161,7 @@ function stripRejectedDispatches(messages: ModelMessage[]): ModelMessage[] {
 function buildForgePrepareStep(
   isPlanMode: boolean,
   drainSteering?: () => string | null,
-  _repoMap?: import("../intelligence/repo-map.js").RepoMap,
+  _repoMap?: import("../workers/intelligence-client.js").IntelligenceClient,
   contextManager?: {
     buildCrossTabSection(): string | null;
     isEditorOpen(): boolean;

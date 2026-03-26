@@ -1,5 +1,4 @@
-import { existsSync, mkdirSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { mkdir, stat as statAsync, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import type { ToolResult } from "../../types";
 import { analyzeFile } from "../analysis/complexity";
@@ -120,8 +119,13 @@ export const editFileTool = {
       // Create new file
       if (oldStr === "") {
         const dir = dirname(filePath);
-        const dirCreated = !existsSync(dir);
-        mkdirSync(dir, { recursive: true });
+        let dirCreated = false;
+        try {
+          await statAsync(dir);
+        } catch {
+          dirCreated = true;
+        }
+        await mkdir(dir, { recursive: true });
         await writeFile(filePath, newStr, "utf-8");
         emitFileEdited(filePath, newStr);
         const openedInEditor = await reloadBuffer(filePath);
@@ -132,12 +136,15 @@ export const editFileTool = {
         return { success: true, output: out };
       }
 
-      if (!existsSync(filePath)) {
-        return {
-          success: false,
-          output: `File not found: ${filePath}`,
-          error: `File not found: ${filePath}`,
-        };
+      try {
+        await statAsync(filePath);
+      } catch (err: unknown) {
+        const code = (err as NodeJS.ErrnoException).code;
+        const msg =
+          code === "EACCES" || code === "EPERM"
+            ? `Permission denied: ${filePath}`
+            : `File not found: ${filePath}`;
+        return { success: false, output: msg, error: msg };
       }
 
       const content = await readBufferContent(filePath);

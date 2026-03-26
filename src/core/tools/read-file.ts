@@ -1,6 +1,6 @@
-import { existsSync, statSync } from "node:fs";
+import { stat as statAsync } from "node:fs/promises";
 import { extname, resolve } from "node:path";
-import { isBinaryFileSync } from "isbinaryfile";
+import { isBinaryFile } from "isbinaryfile";
 import type { ToolResult } from "../../types";
 import { readBufferContent } from "../editor/instance";
 import type { SymbolKind } from "../intelligence/types.js";
@@ -71,16 +71,19 @@ export const readFileTool = {
         return { success: false, output: msg, error: msg };
       }
 
-      if (!existsSync(filePath)) {
-        return {
-          success: false,
-          output: `File not found: ${filePath}`,
-          error: `File not found: ${filePath}`,
-        };
+      let fileStat: Awaited<ReturnType<typeof statAsync>>;
+      try {
+        fileStat = await statAsync(filePath);
+      } catch (err: unknown) {
+        const code = (err as NodeJS.ErrnoException).code;
+        const msg =
+          code === "EACCES" || code === "EPERM"
+            ? `Permission denied: ${filePath}`
+            : `File not found: ${filePath}`;
+        return { success: false, output: msg, error: msg };
       }
 
-      const stat = statSync(filePath);
-      if (stat.isDirectory()) {
+      if (fileStat.isDirectory()) {
         return {
           success: false,
           output: `Path is a directory: ${filePath}`,
@@ -88,7 +91,9 @@ export const readFileTool = {
         };
       }
 
-      if (isBinaryFileSync(filePath)) {
+      const stat = fileStat;
+
+      if (await isBinaryFile(filePath)) {
         const ext = extname(filePath).toLowerCase();
         const sizeStr =
           stat.size > 1024 * 1024

@@ -6,7 +6,9 @@ import { renderTaskList } from "../tools/task-list.js";
 import type { AgentBus } from "./agent-bus.js";
 import { emitSubagentStep } from "./subagent-events.js";
 
-type SymbolLookup = (absPath: string) => Array<{ name: string; kind: string; isExported: boolean }>;
+type SymbolLookup = (
+  absPath: string,
+) => Promise<Array<{ name: string; kind: string; isExported: boolean }>>;
 
 export interface PrepareStepOptions {
   bus?: AgentBus;
@@ -362,11 +364,11 @@ function stripOldEditArgs(messages: ModelMessage[], cutoff: number): ModelMessag
 
 /** Unused in production — retained for test coverage and possible future reactivation. */
 
-function compactOldToolResults(
+async function compactOldToolResults(
   messages: ModelMessage[],
   symbolLookup?: SymbolLookup,
   pathMap?: Map<string, string>,
-): ModelMessage[] {
+): Promise<ModelMessage[]> {
   if (messages.length <= KEEP_RECENT_MESSAGES) return messages;
 
   const cutoff = messages.length - KEEP_RECENT_MESSAGES;
@@ -392,16 +394,32 @@ function compactOldToolResults(
     }
   }
 
-  return messages.map((msg, idx) => {
-    if (idx >= cutoff) return msg;
-    if (msg.role !== "tool" || typeof msg.content === "string") return msg;
-    if (!Array.isArray(msg.content)) return msg;
+  const result: ModelMessage[] = [];
+  for (const [idx, msg] of messages.entries()) {
+    if (idx >= cutoff) {
+      result.push(msg);
+      continue;
+    }
+    if (msg.role !== "tool" || typeof msg.content === "string") {
+      result.push(msg);
+      continue;
+    }
+    if (!Array.isArray(msg.content)) {
+      result.push(msg);
+      continue;
+    }
 
     let changed = false;
-    const newContent = msg.content.map((part) => {
-      if (part.type !== "tool-result") return part;
-      if (EDIT_TOOLS.has(part.toolName)) return part;
-      if (!SUMMARIZABLE_TOOLS.has(part.toolName)) return part;
+    const newContent = [];
+    for (const part of msg.content) {
+      if (
+        part.type !== "tool-result" ||
+        EDIT_TOOLS.has(part.toolName) ||
+        !SUMMARIZABLE_TOOLS.has(part.toolName)
+      ) {
+        newContent.push(part);
+        continue;
+      }
       const text = extractText(part.output);
 
       let symbolHint: string | undefined;
@@ -409,7 +427,7 @@ function compactOldToolResults(
         const absPath = resolvedPathMap.get(part.toolCallId);
         if (absPath) {
           try {
-            symbolHint = formatSymbolHint(symbolLookup(absPath));
+            symbolHint = formatSymbolHint(await symbolLookup(absPath));
           } catch {}
         }
       }
@@ -418,13 +436,17 @@ function compactOldToolResults(
         symbolHint,
         args: argsMap.get(part.toolCallId),
       });
-      if (!summary) return part;
+      if (!summary) {
+        newContent.push(part);
+        continue;
+      }
       changed = true;
-      return { ...part, output: { type: "text" as const, value: summary } };
-    });
+      newContent.push({ ...part, output: { type: "text" as const, value: summary } });
+    }
 
-    return changed ? { ...msg, content: newContent } : msg;
-  }) as ModelMessage[];
+    result.push(changed ? { ...msg, content: newContent } : msg);
+  }
+  return result as ModelMessage[];
 }
 
 interface PrepareStepResult {
@@ -656,10 +678,12 @@ export function buildPrepareStep({
 export function buildSymbolLookup(repoMap?: {
   isReady: boolean;
   getCwd(): string;
-  getFileSymbols(relPath: string): Array<{ name: string; kind: string; isExported: boolean }>;
+  getFileSymbols(
+    relPath: string,
+  ): Promise<Array<{ name: string; kind: string; isExported: boolean }>>;
 }): SymbolLookup | undefined {
   if (!repoMap) return undefined;
-  return (absPath: string) => {
+  return async (absPath: string) => {
     if (!repoMap.isReady) return [];
     const cwd = repoMap.getCwd();
     let rel: string;
@@ -670,7 +694,7 @@ export function buildSymbolLookup(repoMap?: {
     } else {
       rel = absPath;
     }
-    return repoMap.getFileSymbols(rel);
+    return await repoMap.getFileSymbols(rel);
   };
 }
 
