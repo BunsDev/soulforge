@@ -188,9 +188,15 @@ function extractAllPathLikeArgs(command: string): string[] {
   return paths;
 }
 
+// Strip inline code from -e/-c flags (node -e "...", python -c "...") so the
+// forbidden guard doesn't scan code strings for sensitive keywords like "env".
+const INLINE_CODE_RE = /\s-[ec]\s+(?:"(?:[^"\\]|\\.)*"|'[^']*')/g;
+
 function checkShellForbidden(command: string): string | null {
   // Check ALL path-like arguments in the command against forbidden patterns
-  for (const arg of extractAllPathLikeArgs(command)) {
+  // Use command with inline code stripped to avoid false positives on code strings
+  const commandForPaths = command.replace(INLINE_CODE_RE, " __CODE_STRIPPED__ ");
+  for (const arg of extractAllPathLikeArgs(commandForPaths)) {
     const blocked = isForbidden(arg);
     if (blocked) return blocked;
   }
@@ -230,7 +236,8 @@ function checkShellForbidden(command: string): string | null {
   }
 
   // Block subshell / variable expansion — extract inner content and check paths
-  if (SUBSHELL_RE.test(command)) {
+  // Use stripped command so inline code (-e/-c) doesn't trigger false positives
+  if (SUBSHELL_RE.test(commandForPaths)) {
     const SENSITIVE_KW = [
       "env",
       "pem",
@@ -246,18 +253,18 @@ function checkShellForbidden(command: string): string | null {
       "shadow",
       "aws",
     ];
-    const lower = command.toLowerCase();
+    const lower = commandForPaths.toLowerCase();
     for (const kw of SENSITIVE_KW) {
       if (lower.includes(kw)) return `suspicious subshell referencing "${kw}"`;
     }
-    for (const m of command.matchAll(/\$\(([^)]+)\)/g)) {
+    for (const m of commandForPaths.matchAll(/\$\(([^)]+)\)/g)) {
       const inner = m[1] ?? "";
       for (const arg of extractAllPathLikeArgs(inner)) {
         const blocked = isForbidden(arg);
         if (blocked) return blocked;
       }
     }
-    for (const m of command.matchAll(/`([^`]+)`/g)) {
+    for (const m of commandForPaths.matchAll(/`([^`]+)`/g)) {
       const inner = m[1] ?? "";
       for (const arg of extractAllPathLikeArgs(inner)) {
         const blocked = isForbidden(arg);
