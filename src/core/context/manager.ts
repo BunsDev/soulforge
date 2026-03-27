@@ -334,7 +334,6 @@ export class ContextManager {
     const rel = absPath.startsWith(`${this.cwd}/`) ? absPath.slice(this.cwd.length + 1) : absPath;
     this.soulMapDiffChangedFiles.add(rel);
     if (this.repoMapCache) this.repoMapCache.at = 0;
-    this.warmRepoMapCache();
     this.gitContextStale = true;
   }
 

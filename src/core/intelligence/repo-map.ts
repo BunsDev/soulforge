@@ -9,7 +9,7 @@ import {
   jaccardSimilarity,
   tokenize,
 } from "./clone-detection.js";
-import { COMMON_LOCAL_NAMES, IDENTIFIER_KEYWORDS } from "./repo-map-constants.js";
+import { IDENTIFIER_KEYWORDS } from "./repo-map-constants.js";
 import {
   barrelToDir,
   collectFiles,
@@ -291,6 +291,24 @@ export class RepoMap {
     this.backfillSummaryPaths();
     this.cleanOrphanedSummaries();
 
+    // Migration: add qualified_name to symbols
+    try {
+      this.db.run("ALTER TABLE symbols ADD COLUMN qualified_name TEXT");
+    } catch {}
+    try {
+      this.db.run("CREATE INDEX IF NOT EXISTS idx_symbols_qname ON symbols(qualified_name)");
+    } catch {}
+
+    // Migration: add is_barrel flag to files
+    try {
+      this.db.run("ALTER TABLE files ADD COLUMN is_barrel INTEGER NOT NULL DEFAULT 0");
+    } catch {}
+
+    // Migration: add confidence tier to edges
+    try {
+      this.db.run("ALTER TABLE edges ADD COLUMN confidence INTEGER NOT NULL DEFAULT 1");
+    } catch {}
+
     this.rebuildFts();
   }
 
@@ -487,6 +505,8 @@ export class RepoMap {
         await this.buildCallGraph();
         await tick();
         await this.buildEdges();
+        this.linkTestFiles();
+        this.rescueOrphans();
         this.onProgress?.(-2, -2);
         await tick();
         await this.computePageRank();
@@ -681,7 +701,84 @@ export class RepoMap {
       });
       tx();
 
-      // Re-link orphaned LLM summaries to new symbol IDs (by file_path + symbol_name)
+      // Compute scope-qualified names from line-range containment
+      // e.g. AgentBus.dispatch, DependencyFailedError (top-level stays unqualified)
+      {
+        const CONTAINER_KINDS = new Set(["class", "interface", "module", "namespace", "enum"]);
+        const fileSyms = this.db
+          .query<
+            { id: number; name: string; kind: string; line: number; end_line: number },
+            [number]
+          >("SELECT id, name, kind, line, end_line FROM symbols WHERE file_id = ? ORDER BY line ASC")
+          .all(fileId);
+        const containers = fileSyms.filter(
+          (s) => CONTAINER_KINDS.has(s.kind) && s.end_line > s.line,
+        );
+        if (containers.length > 0) {
+          const updateQname = this.db.prepare(
+            "UPDATE symbols SET qualified_name = ? WHERE id = ?",
+          );
+          const qTx = this.db.transaction(() => {
+            for (const sym of fileSyms) {
+              let enclosing: (typeof containers)[number] | undefined;
+              let bestSpan = Infinity;
+              for (const c of containers) {
+                if (c.id === sym.id) continue;
+                if (c.line <= sym.line && c.end_line >= sym.end_line) {
+                  const span = c.end_line - c.line;
+                  if (span < bestSpan) {
+                    bestSpan = span;
+                    enclosing = c;
+                  }
+                }
+              }
+              if (enclosing) {
+                updateQname.run(`${enclosing.name}.${sym.name}`, sym.id);
+              }
+            }
+          });
+          qTx();
+        }
+      }
+
+      // Detect barrel files structurally:
+      // A barrel file re-exports from other files with no/minimal original definitions.
+      // Key signal: imported specifiers that also appear in the file's exports.
+      {
+        const BARREL_RE = /\/(index\.(ts|js|tsx|mts|mjs)|__init__\.py|mod\.rs|lib\.rs)$/;
+        const hasBarrelName = BARREL_RE.test(relPath);
+
+        // Count re-exports: imports whose specifiers are also in the export list
+        let reexportCount = 0;
+        for (const imp of outline.imports) {
+          if (!imp.source.startsWith(".")) continue;
+          if (imp.specifiers.some((s) => s === "*")) {
+            reexportCount++;
+            continue;
+          }
+          for (const s of imp.specifiers) {
+            if (exportedNames.has(s)) reexportCount++;
+          }
+        }
+
+        // Original definitions: non-trivial symbols defined in this file
+        const originalDefs = outline.symbols.filter(
+          (s) => s.kind !== "variable" && s.kind !== "constant",
+        ).length;
+
+        let isBarrel = false;
+        if (hasBarrelName && originalDefs <= 2) isBarrel = true;
+        else if (
+          reexportCount >= 3 &&
+          originalDefs / (reexportCount + originalDefs + 1) < 0.2
+        )
+          isBarrel = true;
+
+        this.db
+          .query("UPDATE files SET is_barrel = ? WHERE id = ?")
+          .run(isBarrel ? 1 : 0, fileId);
+      }
+
       // Re-link orphaned LLM summaries to new symbol IDs (by file_path + symbol_name)
       this.db
         .query(
@@ -877,8 +974,7 @@ export class RepoMap {
           id &&
           id.length > 3 &&
           id.length < 60 &&
-          !IDENTIFIER_KEYWORDS.has(id) &&
-          !COMMON_LOCAL_NAMES.has(id)
+          !IDENTIFIER_KEYWORDS.has(id)
         ) {
           ids.add(id);
         }
@@ -1218,7 +1314,98 @@ export class RepoMap {
     const tick = () => new Promise<void>((r) => setTimeout(r, 1));
     this.db.run("DELETE FROM edges");
 
-    const rows = this.db
+    const totalFiles =
+      this.db.query<{ c: number }, []>("SELECT COUNT(*) AS c FROM files").get()?.c ?? 1;
+    const logTotal = Math.log(totalFiles);
+
+    const edgeMap = new Map<string, { weight: number; confidence: number }>();
+
+    const addEdge = (src: number, tgt: number, w: number, conf: number) => {
+      const key = `${String(src)}:${String(tgt)}`;
+      const existing = edgeMap.get(key);
+      if (existing) {
+        existing.weight += w;
+        if (conf > existing.confidence) existing.confidence = conf;
+      } else {
+        edgeMap.set(key, { weight: w, confidence: conf });
+      }
+    };
+
+    // Phase 1a: Import-proven edges (confidence=3)
+    // Refs with import_source set are from actual import/export statements.
+    const trueImportRows = this.db
+      .query<
+        { source_file_id: number; target_file_id: number; name: string; ref_count: number },
+        []
+      >(
+        `SELECT r.file_id AS source_file_id, r.source_file_id AS target_file_id,
+                r.name, COUNT(*) AS ref_count
+         FROM refs r
+         WHERE r.source_file_id IS NOT NULL
+           AND r.import_source IS NOT NULL
+           AND r.file_id != r.source_file_id
+           AND r.name != '*'
+         GROUP BY r.file_id, r.source_file_id, r.name`,
+      )
+      .all();
+
+    for (let i = 0; i < trueImportRows.length; i++) {
+      const row = trueImportRows[i] as (typeof trueImportRows)[number];
+      addEdge(row.source_file_id, row.target_file_id, Math.sqrt(row.ref_count) * 3, 3);
+      if (i % 500 === 499) await tick();
+    }
+
+    // Pre-compute ref document frequency for IDF (used in Phase 1b and Phase 2)
+    // Count ALL refs per name (not just unresolved) to catch identifiers like "install"
+    // that resolveIdentifierRefs() resolved but are actually generic words.
+    const refDfMap = new Map<string, number>();
+    const dfRows = this.db
+      .query<{ name: string; ref_df: number }, []>(
+        "SELECT name, COUNT(DISTINCT file_id) AS ref_df FROM refs GROUP BY name",
+      )
+      .all();
+    for (const row of dfRows) refDfMap.set(row.name, row.ref_df);
+
+    // Phase 1b: Identifier-resolved edges (confidence=1)
+    // Refs resolved by resolveIdentifierRefs() — source_file_id set but no import_source.
+    // These include star-export expansions (legitimate) and identifier matching (noisy).
+    // Apply IDF dampening to prevent false positives like "install" → soulforge.rb.
+    const identResolvedRows = this.db
+      .query<
+        { source_file_id: number; target_file_id: number; name: string; ref_count: number },
+        []
+      >(
+        `SELECT r.file_id AS source_file_id, r.source_file_id AS target_file_id,
+                r.name, COUNT(*) AS ref_count
+         FROM refs r
+         WHERE r.source_file_id IS NOT NULL
+           AND r.import_source IS NULL
+           AND r.file_id != r.source_file_id
+           AND r.name != '*'
+         GROUP BY r.file_id, r.source_file_id, r.name`,
+      )
+      .all();
+
+    for (let i = 0; i < identResolvedRows.length; i++) {
+      const row = identResolvedRows[i] as (typeof identResolvedRows)[number];
+      const refDf = refDfMap.get(row.name) ?? 1;
+      // Skip identifiers referenced in >5% of files — too generic for cross-file inference
+      if (refDf > totalFiles * 0.05) continue;
+      const idf = Math.log((totalFiles - refDf + 0.5) / (refDf + 0.5));
+      if (idf <= 0) continue;
+      let w = Math.sqrt(row.ref_count) * Math.max(0.1, idf / logTotal);
+      // Single-word non-compound identifiers are likely generic (install, parse, render)
+      const isCompound = /[a-z][A-Z]/.test(row.name) || row.name.includes("_");
+      if (!isCompound && row.name.length < 10) w *= 0.1;
+      if (row.name.startsWith("_")) w *= 0.1;
+      addEdge(row.source_file_id, row.target_file_id, w, 1);
+      if (i % 500 === 499) await tick();
+    }
+
+    // Phase 2: Inferred edges (confidence=1) — unique exports only + BM25 IDF
+    await tick();
+
+    const inferredRows = this.db
       .query<
         {
           source_file_id: number;
@@ -1229,50 +1416,105 @@ export class RepoMap {
         },
         []
       >(
-        `SELECT r.file_id AS source_file_id,
-                COALESCE(r.source_file_id, s.file_id) AS target_file_id,
+        `SELECT r.file_id AS source_file_id, s.file_id AS target_file_id,
                 r.name, COUNT(*) AS ref_count,
-                (SELECT COUNT(*) FROM symbols s2 WHERE s2.name = r.name AND s2.is_exported = 1) AS def_count
+                (SELECT COUNT(DISTINCT s2.file_id) FROM symbols s2
+                 WHERE s2.name = r.name AND s2.is_exported = 1) AS def_count
          FROM refs r
-         JOIN symbols s ON r.name = s.name
-           AND (r.source_file_id IS NULL OR r.source_file_id = s.file_id)
-         WHERE r.file_id != COALESCE(r.source_file_id, s.file_id)
-           AND s.is_exported = 1
-         GROUP BY r.file_id, COALESCE(r.source_file_id, s.file_id), r.name`,
+         JOIN symbols s ON r.name = s.name AND s.is_exported = 1
+         WHERE r.source_file_id IS NULL AND r.import_source IS NULL
+           AND r.file_id != s.file_id
+         GROUP BY r.file_id, s.file_id, r.name
+         HAVING def_count = 1`,
       )
       .all();
 
-    const totalFiles =
-      this.db.query<{ c: number }, []>("SELECT COUNT(*) AS c FROM files").get()?.c ?? 1;
+    for (let i = 0; i < inferredRows.length; i++) {
+      const row = inferredRows[i] as (typeof inferredRows)[number];
+      const refDf = refDfMap.get(row.name) ?? 1;
+      // BM25-style IDF: negative = appears in >50% of files, skip
+      const idf = Math.log((totalFiles - refDf + 0.5) / (refDf + 0.5));
+      if (idf <= 0) continue;
 
-    const edgeWeights = new Map<string, number>();
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i] as (typeof rows)[number];
-      const name = row.name;
-      // IDF: symbols defined in many files are generic (low specificity)
-      const idf = Math.log(totalFiles / Math.max(1, row.def_count));
-      let mul = Math.max(0.5, idf / Math.log(totalFiles));
-      const isCamelOrSnake = /[a-z][A-Z]/.test(name) || name.includes("_");
-      if (isCamelOrSnake && name.length >= 8) mul *= 3;
-      if (name.startsWith("_")) mul *= 0.1;
-      const w = Math.sqrt(row.ref_count) * mul;
+      let w = Math.sqrt(row.ref_count) * Math.max(0.1, idf / logTotal);
+      const isCamelOrSnake = /[a-z][A-Z]/.test(row.name) || row.name.includes("_");
+      if (isCamelOrSnake && row.name.length >= 8) w *= 2;
+      if (row.name.startsWith("_")) w *= 0.1;
 
-      const key = `${String(row.source_file_id)}:${String(row.target_file_id)}`;
-      edgeWeights.set(key, (edgeWeights.get(key) ?? 0) + w);
+      addEdge(row.source_file_id, row.target_file_id, w, 1);
       if (i % 500 === 499) await tick();
     }
 
-    const insert = this.db.prepare(
-      "INSERT OR REPLACE INTO edges (source_file_id, target_file_id, weight) VALUES (?, ?, ?)",
+    // Phase 3: Co-change edges (confidence=2) — only where no import edge exists
+    const cochangeRows = this.db
+      .query<{ file_id_a: number; file_id_b: number; count: number }, []>(
+        "SELECT file_id_a, file_id_b, count FROM cochanges WHERE count >= 3",
+      )
+      .all();
+
+    for (const row of cochangeRows) {
+      const w = Math.log(row.count);
+      for (const [src, tgt] of [
+        [row.file_id_a, row.file_id_b],
+        [row.file_id_b, row.file_id_a],
+      ] as const) {
+        const key = `${String(src)}:${String(tgt)}`;
+        if (!edgeMap.has(key)) {
+          edgeMap.set(key, { weight: w, confidence: 2 });
+        }
+      }
+    }
+
+    await tick();
+
+    // Barrel passthrough: resolve edges through barrel files to actual sources
+    const barrelIds = new Set(
+      this.db
+        .query<{ id: number }, []>("SELECT id FROM files WHERE is_barrel = 1")
+        .all()
+        .map((r) => r.id),
     );
-    const entries = [...edgeWeights.entries()];
+    if (barrelIds.size > 0) {
+      const barrelSources = new Map<number, Array<{ source_file_id: number; cnt: number }>>();
+      for (const bid of barrelIds) {
+        const sources = this.db
+          .query<{ source_file_id: number; cnt: number }, [number]>(
+            `SELECT r.source_file_id, COUNT(*) as cnt FROM refs r
+             WHERE r.file_id = ? AND r.source_file_id IS NOT NULL AND r.source_file_id != r.file_id
+             GROUP BY r.source_file_id`,
+          )
+          .all(bid);
+        if (sources.length > 0) barrelSources.set(bid, sources);
+      }
+
+      const additions: Array<[number, number, number, number]> = [];
+      for (const [key, edge] of edgeMap) {
+        const [src, tgt] = key.split(":").map(Number) as [number, number];
+        const sources = barrelSources.get(tgt);
+        if (!sources) continue;
+        for (const s of sources) {
+          if (s.source_file_id === src) continue;
+          additions.push([src, s.source_file_id, edge.weight * 0.8, edge.confidence]);
+        }
+        edge.weight *= 0.3;
+      }
+      for (const [src, tgt, w, conf] of additions) {
+        addEdge(src, tgt, w, conf);
+      }
+    }
+
+    // Insert all edges
+    const insert = this.db.prepare(
+      "INSERT OR REPLACE INTO edges (source_file_id, target_file_id, weight, confidence) VALUES (?, ?, ?, ?)",
+    );
+    const entries = [...edgeMap.entries()];
     const BATCH = 200;
     for (let i = 0; i < entries.length; i += BATCH) {
       const batch = entries.slice(i, i + BATCH);
       const tx = this.db.transaction(() => {
-        for (const [key, weight] of batch) {
+        for (const [key, edge] of batch) {
           const [src, tgt] = key.split(":");
-          insert.run(Number(src), Number(tgt), weight);
+          insert.run(Number(src), Number(tgt), edge.weight, edge.confidence);
         }
       });
       try {
@@ -1282,6 +1524,116 @@ export class RepoMap {
       }
       if (i + BATCH < entries.length) await tick();
     }
+  }
+
+  private linkTestFiles(): void {
+    const testFiles = this.db
+      .query<{ id: number; path: string }, []>(
+        `SELECT f.id, f.path FROM files f
+         WHERE (f.path LIKE '%.test.%' OR f.path LIKE '%.spec.%'
+           OR f.path LIKE '%_test.%' OR f.path LIKE '%_spec.%'
+           OR f.path LIKE 'tests/%' OR f.path LIKE 'test/%'
+           OR f.path LIKE '%/__tests__/%')
+         AND NOT EXISTS (SELECT 1 FROM edges WHERE source_file_id = f.id)`,
+      )
+      .all();
+
+    if (testFiles.length === 0) return;
+    const insert = this.db.prepare(
+      "INSERT OR IGNORE INTO edges (source_file_id, target_file_id, weight, confidence) VALUES (?, ?, 1.0, 1)",
+    );
+
+    const tx = this.db.transaction(() => {
+      for (const t of testFiles) {
+        const subject = this.findSubjectFile(t.path);
+        if (!subject) continue;
+        const row = this.db
+          .query<{ id: number }, [string]>("SELECT id FROM files WHERE path = ?")
+          .get(subject);
+        if (row) insert.run(t.id, row.id);
+      }
+    });
+    tx();
+  }
+
+  private findSubjectFile(testPath: string): string | null {
+    // foo.test.ts → foo.ts, foo_test.go → foo.go, test_foo.py → foo.py
+    const stripped = testPath
+      .replace(/\.(test|spec)\.(ts|tsx|js|jsx|py|rb|rs|java|kt)$/, ".$2")
+      .replace(/_test\.(go|py|rb)$/, ".$1")
+      .replace(/_spec\.(rb)$/, ".$1")
+      .replace(/^test_(.+\.py)$/, "$1");
+    if (stripped !== testPath) {
+      if (this.db.query("SELECT 1 FROM files WHERE path = ?").get(stripped)) return stripped;
+    }
+    // tests/foo.test.ts → src/foo.ts
+    const mirrors: Array<[RegExp, string]> = [
+      [/^tests\//, "src/"],
+      [/^test\//, "src/"],
+      [/\/__tests__\//, "/"],
+    ];
+    for (const [pat, rep] of mirrors) {
+      const candidate = stripped.replace(pat, rep);
+      if (candidate !== stripped) {
+        if (this.db.query("SELECT 1 FROM files WHERE path = ?").get(candidate)) return candidate;
+      }
+    }
+    // Last resort: basename match
+    const base = stripped.split("/").pop();
+    if (base) {
+      const row = this.db
+        .query<{ path: string }, [string]>(
+          "SELECT path FROM files WHERE path LIKE ? AND path NOT LIKE '%.test.%' AND path NOT LIKE '%.spec.%' LIMIT 1",
+        )
+        .get(`%/${base}`);
+      if (row) return row.path;
+    }
+    return null;
+  }
+
+  private rescueOrphans(): void {
+    const orphans = this.db
+      .query<{ id: number; path: string }, []>(
+        `SELECT f.id, f.path FROM files f
+         WHERE f.line_count > 0
+           AND f.language NOT IN ('unknown','css','html')
+           AND NOT EXISTS (SELECT 1 FROM edges WHERE source_file_id = f.id OR target_file_id = f.id)`,
+      )
+      .all();
+
+    if (orphans.length === 0) return;
+    const insertEdge = this.db.prepare(
+      "INSERT OR IGNORE INTO edges (source_file_id, target_file_id, weight, confidence) VALUES (?, ?, ?, ?)",
+    );
+
+    const tx = this.db.transaction(() => {
+      for (const o of orphans) {
+        // Try co-change partner
+        const partner = this.db
+          .query<{ pid: number; count: number }, [number, number, number]>(
+            `SELECT CASE WHEN file_id_a = ? THEN file_id_b ELSE file_id_a END AS pid, count
+             FROM cochanges WHERE (file_id_a = ? OR file_id_b = ?) ORDER BY count DESC LIMIT 1`,
+          )
+          .get(o.id, o.id, o.id);
+        if (partner && partner.count >= 2) {
+          insertEdge.run(o.id, partner.pid, Math.log(partner.count), 2);
+          continue;
+        }
+        // Directory sibling fallback
+        const dir = o.path.substring(0, o.path.lastIndexOf("/"));
+        if (!dir) continue;
+        const sibling = this.db
+          .query<{ id: number }, [string, number, string]>(
+            `SELECT id FROM files WHERE path LIKE ? || '/%' AND id != ?
+             AND path NOT LIKE ? || '/%/%' ORDER BY pagerank DESC LIMIT 1`,
+          )
+          .get(dir, o.id, dir);
+        if (sibling) {
+          insertEdge.run(o.id, sibling.id, 0.5, 1);
+        }
+      }
+    });
+    tx();
   }
 
   private async computePageRank(personalization?: Map<number, number>): Promise<void> {
@@ -2211,6 +2563,8 @@ export class RepoMap {
       await this.buildCallGraph();
       await tick();
       await this.buildEdges();
+      this.linkTestFiles();
+      this.rescueOrphans();
       await tick();
       await this.computePageRank();
     } catch {
@@ -2283,14 +2637,19 @@ export class RepoMap {
     // [NEW] marks files modified within the last 48h — recency signal, not session memory
     const recentCutoff = Date.now() - 48 * 60 * 60 * 1000;
 
-    // Re-export detection: find line-1 symbols that are re-exports from other files
+    // Re-export detection: use structural is_barrel flag instead of line===1 heuristic
     const reexportSources = new Map<number, Map<string, number>>(); // file_id → source_path → count
     {
-      const reexportSymIds = allSymbols
-        .filter((s) => s.line === 1 && s.is_exported)
-        .map((s) => s.file_id);
-      if (reexportSymIds.length > 0) {
-        const fileIdSet = [...new Set(reexportSymIds)];
+      const barrelFileIds = this.db
+        .query<{ id: number }, []>("SELECT id FROM files WHERE is_barrel = 1")
+        .all()
+        .map((r) => r.id);
+      // Also include files with line-1 re-exported symbols (legacy star-export expansions)
+      const lineOneFileIds = [
+        ...new Set(allSymbols.filter((s) => s.line === 1 && s.is_exported).map((s) => s.file_id)),
+      ];
+      const fileIdSet = [...new Set([...barrelFileIds, ...lineOneFileIds])];
+      if (fileIdSet.length > 0) {
         const ph = fileIdSet.map(() => "?").join(",");
         const rows = this.db
           .query<{ file_id: number; source_path: string; cnt: number }, number[]>(

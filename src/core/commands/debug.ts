@@ -16,6 +16,10 @@ function handleSetup(_input: string, ctx: CommandContext): void {
 }
 
 function handleLsp(_input: string, ctx: CommandContext): void {
+  ctx.openLspInstall();
+}
+
+function handleLspStatus(_input: string, ctx: CommandContext): void {
   ctx.openLspStatus();
 }
 
@@ -41,6 +45,8 @@ export function register(map: Map<string, CommandHandler>): void {
   map.set("/diagnose", handleDiagnose);
   map.set("/setup", handleSetup);
   map.set("/lsp", handleLsp);
+  map.set("/lsp-status", handleLspStatus);
+  map.set("/lsp status", handleLspStatus);
   map.set("/lsp-install", handleLspInstall);
   map.set("/lsp install", handleLspInstall);
   map.set("/lsp-restart", handleLspRestart);

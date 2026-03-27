@@ -44,6 +44,7 @@ interface Props {
   saveToScope: (patch: Partial<AppConfig>, toScope: ConfigScope, fromScope?: ConfigScope) => void;
   detectScope: (key: string) => ConfigScope;
   disabledServers: string[];
+  initialTab?: Tab;
 }
 
 function methodLabel(status: PackageStatus): string {
@@ -94,8 +95,9 @@ export const LspInstallSearch = memo(function LspInstallSearch({
   saveToScope,
   detectScope,
   disabledServers,
+  initialTab = "installed",
 }: Props) {
-  const [tab, setTab] = useState<Tab>("search");
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("All");
   const [allStatus, setAllStatus] = useState<PackageStatus[]>([]);
@@ -132,7 +134,7 @@ export const LspInstallSearch = memo(function LspInstallSearch({
   // Load registry on open
   useEffect(() => {
     if (!visible) return;
-    setTab("search");
+    setTab(initialTab);
     setQuery("");
     resetScroll();
     setCategoryFilter("All");
