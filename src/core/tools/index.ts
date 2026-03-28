@@ -298,14 +298,19 @@ export function buildTools(
       : null;
 
   let sequentialReads = 0;
-  const READ_NUDGE_SOFT = 4;
-  const READ_NUDGE_HARD = 7;
+  let sequentialReadFiles = new Set<string>();
+  const READ_NUDGE_SOFT = 6;
+  const READ_NUDGE_HARD = 10;
+  const REREAD_NUDGE = 3; // nudge after 3 re-reads of already-seen files
   const NUDGE_SOFT =
-    "\n\n---\n[You have read enough files. Start editing now, or use soul_grep/navigate instead of more reads.]";
+    "\n\n<system-reminder>You have read many files. Start editing, or use soul_grep/navigate for remaining questions.</system-reminder>";
   const NUDGE_HARD =
-    "\n\n---\n[STOP reading. You have the context. Start editing or call project to verify. Do not read more files.]";
+    "\n\n<system-reminder>Start editing or call project to verify. You have sufficient context.</system-reminder>";
+  const NUDGE_REREAD =
+    "\n\n<system-reminder>You already read this file. Use the content you have — skip re-reads.</system-reminder>";
   const resetReadCounter = () => {
     sequentialReads = 0;
+    sequentialReadFiles = new Set();
   };
 
   // Mechanical re-read blocking — returns stub if agent already has full content in context
@@ -392,7 +397,14 @@ export function buildTools(
         }
 
         sequentialReads++;
+        const isReread = sequentialReadFiles.has(normPath);
+        sequentialReadFiles.add(normPath);
         if (result.success) {
+          // Re-reading a file already in context is almost always wasteful
+          if (isReread && (readCountPerFile.get(normPath) ?? 0) >= REREAD_NUDGE) {
+            return { ...result, output: result.output + NUDGE_REREAD };
+          }
+          // Many sequential reads of different files — gentle reminder after 6, firm after 10
           if (sequentialReads >= READ_NUDGE_HARD) {
             return { ...result, output: result.output + NUDGE_HARD };
           }
@@ -445,7 +457,7 @@ export function buildTools(
         if (!result.success && result.error === "old_string not found" && warning) {
           return {
             success: false,
-            output: `CONTENTION: File ${args.path} was modified by another tab. Your edit is based on stale content. Do not retry — inform the user this file is contested.`,
+            output: `CONTENTION: File ${args.path} was modified by another tab. Your edit is based on stale content. Inform the user this file is contested.`,
             error: "contested",
           };
         }
@@ -1946,7 +1958,7 @@ export function buildSubagentCodeTools(opts?: {
         if (!result.success && result.error === "old_string not found" && warning) {
           return {
             success: false,
-            output: `CONTENTION: File ${args.path} was modified by another tab. Your edit is based on stale content. Do not retry — inform the user this file is contested.`,
+            output: `CONTENTION: File ${args.path} was modified by another tab. Your edit is based on stale content. Inform the user this file is contested.`,
             error: "contested",
           };
         }

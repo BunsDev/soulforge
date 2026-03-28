@@ -14,6 +14,11 @@ import type { WorkingStateManager } from "./working-state.js";
  *    verification pass that sees everything.
  * 3. Merge and return the final summary string.
  */
+export interface V2SummaryResult {
+  summary: string;
+  usage?: { inputTokens: number; outputTokens: number };
+}
+
 export async function buildV2Summary(opts: {
   wsm: WorkingStateManager;
   olderMessages: ModelMessage[];
@@ -23,7 +28,7 @@ export async function buildV2Summary(opts: {
   skipLlm?: boolean;
   abortSignal?: AbortSignal;
   ioClient?: IOClient;
-}): Promise<string> {
+}): Promise<V2SummaryResult> {
   const { wsm, olderMessages, model, providerOptions, headers, skipLlm, abortSignal, ioClient } =
     opts;
 
@@ -42,7 +47,7 @@ export async function buildV2Summary(opts: {
   // extraction already captured the important context. Saves ~2k tokens.
   const RICH_STATE_THRESHOLD = 15;
   if (skipLlm || !model || wsm.slotCount() >= RICH_STATE_THRESHOLD) {
-    return structuredState;
+    return { summary: structuredState };
   }
 
   let convoText: string;
@@ -57,8 +62,9 @@ export async function buildV2Summary(opts: {
   }
 
   let gapFill: string | undefined;
+  let llmUsage: { inputTokens: number; outputTokens: number } | undefined;
   try {
-    const result = await generateText({
+    const genResult = await generateText({
       model,
       temperature: 0,
       maxOutputTokens: 2048,
@@ -92,17 +98,22 @@ export async function buildV2Summary(opts: {
         "Be concise but thorough. Include specific details (file names, error messages, code snippets) not vague summaries.",
       ].join("\n"),
     });
-    gapFill = result.text;
+    gapFill = genResult.text;
+    const gu = genResult.usage;
+    if (gu) llmUsage = { inputTokens: gu.inputTokens ?? 0, outputTokens: gu.outputTokens ?? 0 };
   } catch (err: unknown) {
     logBackgroundError("compaction-summarize", err instanceof Error ? err.message : String(err));
-    return structuredState;
+    return { summary: structuredState };
   }
 
   if (!gapFill || gapFill.trim() === "COMPLETE" || gapFill.trim().length < 20) {
-    return structuredState;
+    return { summary: structuredState, usage: llmUsage };
   }
 
-  return `${structuredState}\n\n## Additional Details\n${gapFill.trim()}`;
+  return {
+    summary: `${structuredState}\n\n## Additional Details\n${gapFill.trim()}`,
+    usage: llmUsage,
+  };
 }
 
 export function buildFullConvoText(messages: ModelMessage[], charBudget: number): string {

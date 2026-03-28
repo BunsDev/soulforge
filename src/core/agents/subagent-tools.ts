@@ -17,6 +17,7 @@ import {
   runAgentTask,
   selectModel,
   sleep,
+  stripContextManagement,
 } from "./agent-runner.js";
 import { runDesloppify, runEvaluator, runVerifier } from "./agent-verification.js";
 import { createCodeAgent } from "./code.js";
@@ -136,9 +137,9 @@ export function buildStepCallbacks(parentToolCallId: string, agentId?: string, m
           toolUses: acc.toolUses,
           stepCount: acc.stepCount,
           tokenUsage: { input: acc.input, output: acc.output, total: acc.input + acc.output },
-            cacheHits: acc.cacheRead,
-          });
-        }
+          cacheHits: acc.cacheRead,
+        });
+      }
     },
     _acc: acc,
     _steps: steps,
@@ -176,7 +177,7 @@ export function createAgent(
     task.role === "explore" || task.role === "investigate" || models.readOnly === true;
   const { model } = selectModel(task, models);
   const tier = detectTaskTier(task);
-  let subagentProviderOptions = models.providerOptions;
+  let subagentProviderOptions = stripContextManagement(models.providerOptions);
   if (useExplore && subagentProviderOptions) {
     const patched: Record<string, unknown> = {};
     for (const [provider, val] of Object.entries(subagentProviderOptions)) {
@@ -265,7 +266,7 @@ export function buildSubagentTools(models: SubagentModels) {
       description:
         "Dispatch parallel subagents for multi-file tasks. " +
         "Use when: 7+ files, or 2+ independent tasks that can run in parallel. " +
-        "Do NOT use for ≤6 files — read/edit directly instead. " +
+        "For ≤6 files, prefer direct read/edit instead. " +
         "Each task MUST name specific files and symbols. Split by file ownership. " +
         "Roles: explore (read-only), investigate (broad analysis), code (edits).",
       inputSchema: z.object({

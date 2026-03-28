@@ -119,6 +119,8 @@ function buildForgePrepareStep(
 
     const result: {
       messages?: ModelMessage[];
+      model?: LanguageModel;
+      providerOptions?: ProviderOptions;
     } = {};
 
     // Soul Map snapshot + skills are in the system prompt (instructions).
@@ -133,9 +135,7 @@ function buildForgePrepareStep(
     // [6] Plan mode nudges — hint only, no activeTools forcing
     if (isPlanMode && stepNumber >= PLAN_NUDGE_STEP && !hasPlanToolCall(messages)) {
       if (stepNumber >= PLAN_FORCE_STEP) {
-        hints.push(
-          "You have done enough research. Call plan NOW with everything you have. Do not read more files.",
-        );
+        hints.push("Call plan NOW with everything you have. You have enough context.");
       } else {
         hints.push(
           "You have gathered substantial context. Start assembling the plan — call plan when ready.",
@@ -233,7 +233,7 @@ function buildForgePrepareStep(
       for (const [, entry] of callCounts) {
         if (entry.count >= LOOP_THRESHOLD) {
           hints.push(
-            `🔁 LOOP DETECTED: ${entry.toolName} called ${String(entry.count)} times with identical arguments. Results have not changed. Do NOT call it again. Act on the results you already have or try a different approach.`,
+            `🔁 ${entry.toolName} called ${String(entry.count)}× with identical arguments — same result each time. Use the result you already have, or try a different tool/approach.`,
           );
           break;
         }
@@ -410,7 +410,6 @@ interface ForgeAgentOptions {
     trivial?: LanguageModel;
     desloppify?: LanguageModel;
     verify?: LanguageModel;
-    editing?: LanguageModel;
   };
   webSearchModel?: LanguageModel;
   onApproveWebSearch?: (query: string) => Promise<boolean>;
@@ -556,6 +555,15 @@ export function createForgeAgent({
     return undefined;
   };
 
+  const wrappedProviderOptions = {
+    ...providerOptions,
+    anthropic: {
+      ...(((providerOptions as Record<string, unknown>)?.anthropic as Record<string, unknown>) ??
+        {}),
+      cacheControl: { type: "ephemeral" },
+    },
+  } as ProviderOptions;
+
   return new ToolLoopAgent({
     id: "forge",
     model,
@@ -580,14 +588,7 @@ export function createForgeAgent({
     },
     prepareStep: buildForgePrepareStep(forgeMode === "plan", drainSteering, contextManager, tabId),
     experimental_repairToolCall: repairToolCall,
-    providerOptions: {
-      ...providerOptions,
-      anthropic: {
-        ...(((providerOptions as Record<string, unknown>)?.anthropic as Record<string, unknown>) ??
-          {}),
-        cacheControl: { type: "ephemeral" },
-      },
-    } as ProviderOptions,
+    providerOptions: wrappedProviderOptions,
     ...(headers ? { headers } : {}),
   });
 }

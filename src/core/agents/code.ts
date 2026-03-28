@@ -16,7 +16,7 @@ Workflow: read_file → multi_edit → done. 3 steps typical, 5 max.
 - On edit failure: re-read once, retry with exact text from that read
 - Compound tools: rename_symbol, move_symbol, refactor — do the complete job
 
-Do NOT: re-read to verify, explore unrelated files, grep when you have target paths, use sequential edit_file on the same file.
+Skip: re-reading to verify, exploring unrelated files, grepping when you have target paths. Use multi_edit for same-file changes.
 
 OUTPUT: Concise summary of what changed. Name files and modifications.`;
 }

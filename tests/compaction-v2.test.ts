@@ -279,8 +279,8 @@ describe("buildV2Summary", () => {
       olderMessages: [],
       skipLlm: true,
     });
-    expect(result).toContain("## Task\ntest task");
-    expect(result).toContain("use v2");
+    expect(result.summary).toContain("## Task\ntest task");
+    expect(result.summary).toContain("use v2");
   });
 
   test("returns serialized state when no model provided", async () => {
@@ -290,7 +290,7 @@ describe("buildV2Summary", () => {
       wsm,
       olderMessages: [],
     });
-    expect(result).toContain("## Task");
+    expect(result.summary).toContain("## Task");
   });
 
   test("skips gap-fill when state is rich (>= 15 slots)", async () => {
@@ -307,16 +307,16 @@ describe("buildV2Summary", () => {
       olderMessages: [userMsg("do stuff"), assistantMsg("doing stuff")],
       // No model = no LLM call possible, but the threshold check should trigger first
     });
-    expect(result).toContain("## Task");
-    expect(result).toContain("## Key Decisions");
-    expect(result).toContain("## Files Touched");
-    expect(result).not.toContain("## Additional Context");
+    expect(result.summary).toContain("## Task");
+    expect(result.summary).toContain("## Key Decisions");
+    expect(result.summary).toContain("## Files Touched");
+    expect(result.summary).not.toContain("## Additional Context");
   });
 
   test("empty WSM produces empty string", async () => {
     const wsm = new WorkingStateManager();
     const result = await buildV2Summary({ wsm, olderMessages: [], skipLlm: true });
-    expect(result).toBe("");
+    expect(result.summary).toBe("");
   });
 });
 
@@ -380,7 +380,7 @@ describe("integration: full extraction cycle", () => {
 
     wsm.addDecision("use jwt maxAge for timeout enforcement");
 
-    const summary = await buildV2Summary({ wsm, olderMessages: [], skipLlm: true });
+    const { summary } = await buildV2Summary({ wsm, olderMessages: [], skipLlm: true });
 
     expect(summary).toContain("authentication timeout bug");
     expect(summary).toContain("src/auth.ts");

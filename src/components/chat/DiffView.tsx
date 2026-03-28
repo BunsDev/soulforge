@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
-import { memo, useMemo } from "react";
+import { readFile } from "node:fs/promises";
+import { memo, useEffect, useMemo, useState } from "react";
 import { computeDiff, langFromPath } from "../../core/diff.js";
 import { icon } from "../../core/icons.js";
 import { getSyntaxStyle, getTSClient } from "../../core/utils/syntax.js";
@@ -82,15 +82,19 @@ export const DiffView = memo(function DiffView({
   errorMessage,
   mode = "default",
 }: Props) {
-  const startLine = useMemo(() => {
-    try {
-      const content = readFileSync(filePath, "utf-8");
-      const idx = content.indexOf(newString);
-      if (idx >= 0) return content.slice(0, idx).split("\n").length;
-      const idx2 = content.indexOf(oldString);
-      if (idx2 >= 0) return content.slice(0, idx2).split("\n").length;
-    } catch {}
-    return 1;
+  const [startLine, setStartLine] = useState(1);
+  useEffect(() => {
+    let cancelled = false;
+    readFile(filePath, "utf-8")
+      .then((content) => {
+        if (cancelled) return;
+        const idx = content.indexOf(newString);
+        if (idx >= 0) { setStartLine(content.slice(0, idx).split("\n").length); return; }
+        const idx2 = content.indexOf(oldString);
+        if (idx2 >= 0) { setStartLine(content.slice(0, idx2).split("\n").length); return; }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, [filePath, oldString, newString]);
 
   const computed = useMemo(() => {

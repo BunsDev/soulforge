@@ -17,7 +17,7 @@ export const SHARED_RULES = `
 # Conventions
 - Mimic existing code style, imports, and patterns. Check neighboring files before creating new ones.
 - Never assume a library is available — check imports and package files first.
-- Do not add comments unless the code is complex and requires context.
-- Follow security best practices. Never introduce code that exposes secrets.
+- Add comments only when the code is complex and requires context.
+- Follow security best practices. Keep secrets out of code.
 
-NEVER commit changes unless the user explicitly asks you to.`;
+Only commit changes when the user explicitly asks you to.`;

@@ -619,7 +619,7 @@ export function buildPrepareStep({
       if (repeated) {
         const existing = result.system ?? "";
         result.system =
-          `${existing}\n\n🔁 LOOP DETECTED: ${repeated.toolName} called ${String(repeated.count)} times with identical arguments. Results have not changed. Do NOT call it again. Act on the results you already have or try a different approach.`.trim();
+          `${existing}\n\n🔁 ${repeated.toolName} called ${String(repeated.count)}× with identical arguments — same result each time. Use the result you already have, or try a different tool/approach.`.trim();
       }
     }
 
@@ -630,8 +630,8 @@ export function buildPrepareStep({
       if (remaining <= 1) {
         // LAST STEP — force text-only response. No more tool calls.
         const hint = isExplore
-          ? "Write your final text summary NOW. Name files, line numbers, exact values found. No more tool calls."
-          : "Apply edits with multi_edit NOW then write a summary of what you changed. Last chance.";
+          ? "Write your final text summary NOW. Name files, line numbers, exact values found."
+          : "Apply edits with multi_edit NOW, then summarize what you changed.";
         result.system = `${existing}\n\n🛑 FINAL STEP. ${hint}`.trim();
         result.toolChoice = "none";
         result.activeTools = [];
@@ -643,15 +643,15 @@ export function buildPrepareStep({
             content: [
               {
                 type: "text" as const,
-                text: `This is your FINAL step. Do not call any tools. Write a concise text summary: what you found or changed, which files, key details.`,
+                text: `FINAL step — write your text summary now: what you found or changed, which files, key details.`,
               },
             ],
           },
         ];
       } else if (remaining <= 2) {
         const hint = isExplore
-          ? "Write your text summary NOW. Name files, line numbers, exact values. No more tool calls."
-          : "Apply edits with multi_edit NOW then write a summary of what you changed. Last chance.";
+          ? "Write your text summary NOW. Name files, line numbers, exact values."
+          : "Apply edits with multi_edit NOW, then summarize what you changed.";
         result.system = `${existing}\n\n🛑 ${String(remaining)} steps left. ${hint}`.trim();
         if (!isExplore) {
           result.activeTools = ["edit_file", "multi_edit", "done", "report_finding"];
@@ -659,7 +659,7 @@ export function buildPrepareStep({
       } else {
         const hint = isExplore
           ? "Write your text summary soon. Name files, line numbers, exact values found."
-          : "Apply your edits NOW with multi_edit. No more reading.";
+          : "Apply your edits NOW with multi_edit.";
         result.system =
           `${existing}\n\n⚠ Step ${String(stepNumber)}/${String(maxSteps)} — ${String(remaining)} steps left. ${hint}`.trim();
       }

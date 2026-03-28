@@ -35,10 +35,10 @@ export function TokenDisplay() {
       useStatusBarStore.subscribe((state) => {
         const usage = state.tokenUsage;
         const breakdown = usage.modelBreakdown;
-          const rawCost =
-            breakdown && Object.keys(breakdown).length > 0
-              ? computeTotalCostFromBreakdown(breakdown)
-              : 0;
+        const rawCost =
+          breakdown && Object.keys(breakdown).length > 0
+            ? computeTotalCostFromBreakdown(breakdown)
+            : 0;
         costRef.current = Math.round(rawCost * 100);
         const totalInput = usage.prompt + usage.subagentInput + usage.cacheRead + usage.cacheWrite;
         cacheHitRef.current = totalInput > 0 ? Math.round((usage.cacheRead / totalInput) * 100) : 0;

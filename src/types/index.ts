@@ -20,8 +20,6 @@ export interface TaskRouter {
   desloppify: string | null;
   /** Model for post-dispatch verification specialist */
   verify: string | null;
-  /** Model for edit steps in the main agent loop (switches after first edit) */
-  editing: string | null;
   default: string | null;
 }
 

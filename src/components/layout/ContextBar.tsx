@@ -104,6 +104,7 @@ export function ContextBar({ contextManager }: Props) {
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentPctRef = useRef(0);
   const compactFrameRef = useRef(0);
+  const wasCompactingRef = useRef(false);
   const workerRef = useRef<WorkerIndicator>({ intel: "idle", io: "idle" });
   const renderedContentRef = useRef(buildContent(0, false, false));
 
@@ -171,6 +172,8 @@ export function ContextBar({ contextManager }: Props) {
       const store = useStatusBarStore.getState();
       const isCompacting = store.compacting;
       if (isCompacting) compactFrameRef.current++;
+      const wasCompacting = wasCompactingRef.current;
+      wasCompactingRef.current = isCompacting;
       const pct = approach(currentPctRef.current, target.pct);
       const wk = workerRef.current;
       const wkChanged =
@@ -178,7 +181,15 @@ export function ContextBar({ contextManager }: Props) {
         wk.intel === "restarting" ||
         wk.io === "crashed" ||
         wk.io === "restarting";
-      if (pct === currentPctRef.current && !target.flash && !isCompacting && !wkChanged) return;
+      const compactChanged = isCompacting !== wasCompacting;
+      if (
+        pct === currentPctRef.current &&
+        !target.flash &&
+        !isCompacting &&
+        !compactChanged &&
+        !wkChanged
+      )
+        return;
       currentPctRef.current = pct;
       try {
         const content = buildContent(

@@ -67,12 +67,12 @@ describe("family prompt content", () => {
 
   test("all family prompts prohibit unsolicited commits", () => {
     for (const prompt of [CLAUDE_PROMPT, OPENAI_PROMPT, GOOGLE_PROMPT, DEFAULT_PROMPT]) {
-      expect(prompt).toContain("NEVER commit");
+      expect(prompt).toContain("Only commit changes when the user explicitly asks you to");
     }
   });
 
   test("claude prompt has zero-filler instructions", () => {
-    expect(CLAUDE_PROMPT).toContain("Do NOT summarize");
+    expect(CLAUDE_PROMPT).toContain("Skip summaries");
   });
 
   test("openai prompt has agent framing", () => {
@@ -109,19 +109,21 @@ describe("buildSystemPrompt assembly", () => {
   test("includes family prompt for the model", () => {
     const prompt = buildSystemPrompt(baseOpts());
     expect(prompt).toContain("Forge");
-    expect(prompt).toContain("Do NOT summarize"); // claude-specific
+    expect(prompt).toContain("Skip summaries"); // claude-specific
   });
 
   test("includes tool guidance when repo map is ready", () => {
     const prompt = buildSystemPrompt(baseOpts({ hasRepoMap: true }));
     expect(prompt).toContain("Soul Map");
-    expect(prompt).toContain("minimize the number of steps");
+    expect(prompt).toContain("Decision flow");
   });
 
   test("includes no-map guidance when repo map not ready", () => {
     const prompt = buildSystemPrompt(baseOpts({ hasRepoMap: false }));
     expect(prompt).toContain("minimize the number of steps");
-    expect(prompt).not.toContain("Soul Map");
+    // Soul Map is mentioned in the claude family prompt itself, so it appears regardless
+      // The key difference is no-map guidance lacks the Decision flow section
+      expect(prompt).not.toContain("Decision flow");
   });
 
   test("skips tool guidance for minimal context windows", () => {
@@ -177,7 +179,7 @@ describe("buildSystemPrompt assembly", () => {
   test("uses correct family for different models", () => {
     const claude = buildSystemPrompt(baseOpts({ modelId: "anthropic/claude-opus-4" }));
     const openai = buildSystemPrompt(baseOpts({ modelId: "openai/gpt-4o" }));
-    expect(claude).toContain("Do NOT summarize"); // claude-specific
+    expect(claude).toContain("Skip summaries"); // claude-specific
     expect(openai).toContain("keep going until"); // openai-specific
   });
 });

@@ -1,33 +1,200 @@
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
+import { memo } from "react";
 import { icon } from "../../core/icons.js";
 import { usePopupScroll } from "../../hooks/usePopupScroll.js";
 import type { TaskRouter } from "../../types/index.js";
 import type { ConfigScope } from "../layout/shared.js";
 import { CONFIG_SCOPES, Overlay, POPUP_BG, POPUP_HL, PopupRow } from "../layout/shared.js";
 
-const MAX_POPUP_WIDTH = 70;
-const CHROME_ROWS = 10;
+const MAX_POPUP_WIDTH = 76;
+const CHROME_ROWS = 12;
 
-interface SlotItem {
+// ── Section / slot definitions ──────────────────────────────────────────
+
+interface SlotRow {
+  kind: "slot";
   key: keyof TaskRouter;
   label: string;
-  desc: string;
+  hint: string;
 }
 
-const SLOTS: SlotItem[] = [
-  { key: "planning", label: "Planning", desc: "[main] plan mode & plan tool" },
-  { key: "coding", label: "Coding", desc: "[dispatch] code subagents" },
-  { key: "exploration", label: "Exploration", desc: "[dispatch] explore/investigate subagents" },
-  { key: "webSearch", label: "Web Search", desc: "[dispatch] web search subagent" },
-  { key: "compact", label: "Compact", desc: "[main] context compaction summarizer" },
-  { key: "semantic", label: "Semantic", desc: "[main] soul map summary generation" },
-  { key: "trivial", label: "Trivial", desc: "[dispatch] small single-file tasks (fast/cheap)" },
-  { key: "desloppify", label: "De-sloppify", desc: "[dispatch] cleanup pass after code agents" },
-  { key: "verify", label: "Verify", desc: "[dispatch] adversarial review after code agents" },
-  { key: "editing", label: "Editing", desc: "[main] switches after first edit tool call" },
-  { key: "default", label: "Default", desc: "[main][dispatch] fallback for all" },
+interface SectionRow {
+  kind: "section";
+  title: string;
+  subtitle: string;
+}
+
+type ListRow = SlotRow | SectionRow;
+
+const ROWS: ListRow[] = [
+  // ── Main Agent ──
+  {
+    kind: "section",
+    title: "Main Agent",
+    subtitle: "Model that handles your conversation",
+  },
+  {
+    kind: "slot",
+    key: "default",
+    label: "Default",
+    hint: "Fallback model for everything",
+  },
+  {
+    kind: "slot",
+    key: "planning",
+    label: "Plan Mode",
+    hint: "Used when in /plan or /architect mode",
+  },
+
+  // ── Dispatch Agents ──
+  {
+    kind: "section",
+    title: "Dispatch Agents",
+    subtitle: "Models for parallel subagents spawned by dispatch",
+  },
+  {
+    kind: "slot",
+    key: "coding",
+    label: "Code Agent",
+    hint: "Writes & edits code",
+  },
+  {
+    kind: "slot",
+    key: "exploration",
+    label: "Explore Agent",
+    hint: "Reads, searches & investigates",
+  },
+  {
+    kind: "slot",
+    key: "webSearch",
+    label: "Web Agent",
+    hint: "Searches the web & fetches pages",
+  },
+  {
+    kind: "slot",
+    key: "trivial",
+    label: "Quick Tasks",
+    hint: "Fast/cheap model for simple single-file tasks",
+  },
+  {
+    kind: "slot",
+    key: "desloppify",
+    label: "Cleanup Pass",
+    hint: "Post-dispatch polish & style fixes",
+  },
+  {
+    kind: "slot",
+    key: "verify",
+    label: "Review Pass",
+    hint: "Adversarial review after code agents",
+  },
+
+  // ── Background ──
+  {
+    kind: "section",
+    title: "Background",
+    subtitle: "Internal tasks — usually fine on defaults",
+  },
+  {
+    kind: "slot",
+    key: "compact",
+    label: "Compaction",
+    hint: "Summarizes old context when conversation grows long",
+  },
+  {
+    kind: "slot",
+    key: "semantic",
+    label: "Soul Map",
+    hint: "Generates symbol summaries for the repo map",
+  },
 ];
+
+// Flat list of only selectable (slot) rows, with their index into ROWS
+const SELECTABLE: { row: SlotRow; rowIdx: number }[] = ROWS.reduce<
+  { row: SlotRow; rowIdx: number }[]
+>((acc, r, i) => {
+  if (r.kind === "slot") acc.push({ row: r, rowIdx: i });
+  return acc;
+}, []);
+
+// ── Sub-components ──────────────────────────────────────────────────────
+
+const SectionHeader = memo(function SectionHeader({
+  title,
+  subtitle,
+  innerW,
+}: {
+  title: string;
+  subtitle: string;
+  innerW: number;
+}) {
+  const lineW = Math.max(0, innerW - title.length - 5);
+  return (
+    <>
+      <PopupRow w={innerW}>
+        <text bg={POPUP_BG}>{""}</text>
+      </PopupRow>
+      <PopupRow w={innerW}>
+        <text bg={POPUP_BG} fg="#8B5CF6" attributes={TextAttributes.BOLD}>
+          {title}
+        </text>
+        <text bg={POPUP_BG} fg="#2a2a40">
+          {" "}
+          {"─".repeat(lineW)}
+        </text>
+      </PopupRow>
+      <PopupRow w={innerW}>
+        <text bg={POPUP_BG} fg="#555">
+          {subtitle}
+        </text>
+      </PopupRow>
+    </>
+  );
+});
+
+const SlotRowView = memo(function SlotRowView({
+  slot,
+  modelId,
+  activeModel,
+  selected,
+  innerW,
+}: {
+  slot: SlotRow;
+  modelId: string | null;
+  activeModel: string;
+  selected: boolean;
+  innerW: number;
+}) {
+  const bg = selected ? POPUP_HL : POPUP_BG;
+  const displayModel = modelId ?? activeModel;
+  const isCustom = !!modelId;
+  const labelW = 16;
+  const modelMaxW = Math.max(10, innerW - labelW - 8);
+  const truncModel =
+    displayModel.length > modelMaxW ? `${displayModel.slice(0, modelMaxW - 3)}...` : displayModel;
+
+  return (
+    <PopupRow bg={bg} w={innerW}>
+      <text bg={bg} fg={selected ? "#9B30FF" : "#444"}>
+        {selected ? "› " : "  "}
+      </text>
+      <text
+        bg={bg}
+        fg={selected ? "white" : "#bbb"}
+        attributes={selected ? TextAttributes.BOLD : undefined}
+      >
+        {slot.label.padEnd(labelW)}
+      </text>
+      <text bg={bg} fg={isCustom ? "#2d5" : "#555"}>
+        {isCustom ? "" : "↳ "}
+        {truncModel}
+      </text>
+    </PopupRow>
+  );
+});
+
+// ── Main component ──────────────────────────────────────────────────────
 
 interface Props {
   visible: boolean;
@@ -51,42 +218,41 @@ export function RouterSettings({
   onClose,
 }: Props) {
   const { width: termCols, height: termRows } = useTerminalDimensions();
-  const containerRows = termRows - 2;
-  const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.8));
+  const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.85));
   const innerW = popupWidth - 2;
-  const maxVisible = Math.max(4, Math.floor(containerRows * 0.8) - CHROME_ROWS);
+  const maxVisible = Math.max(6, termRows - CHROME_ROWS);
   const { cursor, setCursor, scrollOffset, adjustScroll } = usePopupScroll(maxVisible);
 
   useKeyboard((evt) => {
     if (!visible) return;
-    if (evt.name === "escape") {
+    if (evt.name === "escape" || evt.name === "q") {
       onClose();
       return;
     }
-    if (evt.name === "up") {
+    if (evt.name === "up" || evt.name === "k") {
       setCursor((c) => {
-        const next = c > 0 ? c - 1 : SLOTS.length - 1;
+        const next = c > 0 ? c - 1 : SELECTABLE.length - 1;
         adjustScroll(next);
         return next;
       });
       return;
     }
-    if (evt.name === "down") {
+    if (evt.name === "down" || evt.name === "j") {
       setCursor((c) => {
-        const next = c < SLOTS.length - 1 ? c + 1 : 0;
+        const next = c < SELECTABLE.length - 1 ? c + 1 : 0;
         adjustScroll(next);
         return next;
       });
       return;
     }
     if (evt.name === "return") {
-      const slot = SLOTS[cursor];
-      if (slot) onPickSlot(slot.key);
+      const sel = SELECTABLE[cursor];
+      if (sel) onPickSlot(sel.row.key);
       return;
     }
     if (evt.name === "d" || evt.name === "delete" || evt.name === "backspace") {
-      const slot = SLOTS[cursor];
-      if (slot) onClearSlot(slot.key);
+      const sel = SELECTABLE[cursor];
+      if (sel) onClearSlot(sel.row.key);
       return;
     }
     if (evt.name === "left" || evt.name === "right") {
@@ -102,6 +268,31 @@ export function RouterSettings({
 
   if (!visible) return null;
 
+  // Build the visible rows — we render ALL rows (sections + slots) but only
+  // slots are selectable. We need to figure out which ROWS are visible based
+  // on the scroll window over SELECTABLE items.
+  const visibleSelectableStart = scrollOffset;
+  const visibleSelectableEnd = Math.min(scrollOffset + maxVisible, SELECTABLE.length);
+
+  // Find the ROWS range that covers the visible selectable items
+  const firstRowIdx =
+    visibleSelectableStart < SELECTABLE.length
+      ? (SELECTABLE[visibleSelectableStart]?.rowIdx ?? 0)
+      : 0;
+  const lastRowIdx =
+    visibleSelectableEnd > 0
+      ? (SELECTABLE[visibleSelectableEnd - 1]?.rowIdx ?? ROWS.length - 1)
+      : ROWS.length - 1;
+
+  // Include section headers that appear before the first visible slot
+  let renderStart = firstRowIdx;
+  while (renderStart > 0 && ROWS[renderStart - 1]?.kind === "section") {
+    renderStart--;
+  }
+
+  const selectedSlot = SELECTABLE[cursor];
+  const selectedHint = selectedSlot?.row.hint ?? "";
+
   return (
     <Overlay>
       <box
@@ -111,6 +302,7 @@ export function RouterSettings({
         borderColor="#8B5CF6"
         width={popupWidth}
       >
+        {/* ── Title ── */}
         <PopupRow w={innerW}>
           <text bg={POPUP_BG} fg="#9B30FF" attributes={TextAttributes.BOLD}>
             {icon("router")}
@@ -119,70 +311,80 @@ export function RouterSettings({
             {" "}
             Task Router
           </text>
+          <text bg={POPUP_BG} fg="#555">
+            {" — assign models to different tasks"}
+          </text>
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#333">
+          <text bg={POPUP_BG} fg="#2a2a40">
             {"─".repeat(innerW - 2)}
           </text>
         </PopupRow>
 
-        <box flexDirection="column" height={Math.min(SLOTS.length, maxVisible)} overflow="hidden">
-          {SLOTS.slice(scrollOffset, scrollOffset + maxVisible).map((slot, vi) => {
-            const i = vi + scrollOffset;
-            const isSelected = i === cursor;
-            const bg = isSelected ? POPUP_HL : POPUP_BG;
-            const modelId = router?.[slot.key] ?? null;
-            const displayModel = modelId ?? `(${activeModel})`;
-            const isDefault = !modelId;
+        {/* ── Scrollable body ── */}
+        <box flexDirection="column" overflow="hidden">
+          {ROWS.slice(renderStart, lastRowIdx + 1).map((row, _vi) => {
+            if (row.kind === "section") {
+              return (
+                <SectionHeader
+                  key={row.title}
+                  title={row.title}
+                  subtitle={row.subtitle}
+                  innerW={innerW}
+                />
+              );
+            }
+            // Find which selectable index this slot corresponds to
+            const selIdx = SELECTABLE.findIndex((s) => s.row.key === row.key);
+            const isSelected = selIdx === cursor;
+            const modelId = router?.[row.key] ?? null;
             return (
-              <PopupRow key={slot.key} bg={bg} w={innerW}>
-                <text bg={bg} fg={isSelected ? "#FF0040" : "#555"}>
-                  {isSelected ? "› " : "  "}
-                </text>
-                <text
-                  bg={bg}
-                  fg={isSelected ? "white" : "#aaa"}
-                  attributes={isSelected ? TextAttributes.BOLD : undefined}
-                >
-                  {slot.label.padEnd(14)}
-                </text>
-                <text bg={bg} fg={isDefault ? "#555" : "#2d5"}>
-                  {displayModel.length > 28 ? `${displayModel.slice(0, 25)}...` : displayModel}
-                </text>
-              </PopupRow>
+              <SlotRowView
+                key={row.key}
+                slot={row}
+                modelId={modelId}
+                activeModel={activeModel}
+                selected={isSelected}
+                innerW={innerW}
+              />
             );
           })}
         </box>
-        {SLOTS.length > maxVisible && (
+
+        {/* ── Scroll indicator ── */}
+        {SELECTABLE.length > maxVisible && (
           <PopupRow w={innerW}>
             <text fg="#555" bg={POPUP_BG}>
+              {"  "}
               {scrollOffset > 0 ? "↑ " : "  "}
-              {String(cursor + 1)}/{String(SLOTS.length)}
-              {scrollOffset + maxVisible < SLOTS.length ? " ↓" : ""}
+              {String(cursor + 1)}/{String(SELECTABLE.length)}
+              {visibleSelectableEnd < SELECTABLE.length ? " ↓" : ""}
             </text>
           </PopupRow>
         )}
 
+        {/* ── Selected slot hint ── */}
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG}>{""}</text>
-        </PopupRow>
-
-        <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#555">
-            {SLOTS[cursor]?.desc ?? ""}
-          </text>
-        </PopupRow>
-
-        <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#333">
+          <text bg={POPUP_BG} fg="#2a2a40">
             {"─".repeat(innerW - 2)}
           </text>
         </PopupRow>
-
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#555">
-            {"Scope: "}
+          <text bg={POPUP_BG} fg="#888">
+            {selectedHint}
+          </text>
+        </PopupRow>
+
+        {/* ── Scope selector ── */}
+        <PopupRow w={innerW}>
+          <text bg={POPUP_BG} fg="#2a2a40">
+            {"─".repeat(innerW - 2)}
+          </text>
+        </PopupRow>
+        <PopupRow w={innerW}>
+          <text bg={POPUP_BG} fg="#666">
+            {"Scope "}
           </text>
           {CONFIG_SCOPES.map((s) => (
             <text
@@ -191,15 +393,15 @@ export function RouterSettings({
               fg={s === scope ? "#8B5CF6" : "#444"}
               attributes={s === scope ? TextAttributes.BOLD : undefined}
             >
-              {s === scope ? `[${s}]` : ` ${s} `}
-              {"  "}
+              {s === scope ? ` [${s}] ` : `  ${s}  `}
             </text>
           ))}
         </PopupRow>
 
+        {/* ── Keybindings ── */}
         <PopupRow w={innerW}>
           <text bg={POPUP_BG} fg="#555">
-            {"↑↓"} navigate | {"⏎"} pick model | d default | {"← →"} scope | esc close
+            {"↑↓"} navigate {"│"} {"⏎"} pick model {"│"} d reset {"│"} {"←→"} scope {"│"} esc close
           </text>
         </PopupRow>
       </box>

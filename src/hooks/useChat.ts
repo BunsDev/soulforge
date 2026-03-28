@@ -84,7 +84,10 @@ export interface TokenUsage {
   lastStepInput: number;
   lastStepOutput: number;
   lastStepCacheRead: number;
-  modelBreakdown: Record<string, { input: number; output: number; cacheRead: number; cacheWrite: number }>;
+  modelBreakdown: Record<
+    string,
+    { input: number; output: number; cacheRead: number; cacheWrite: number }
+  >;
 }
 
 const ZERO_USAGE: TokenUsage = {
@@ -585,13 +588,18 @@ export function useChat({
 
   // Sync tokenUsage to statusbar store when this tab becomes visible (tab switch)
   useEffect(() => {
-    if (visible) useStatusBarStore.getState().setTokenUsage(tokenUsageRef.current, activeModel);
+    if (visible) {
+      useStatusBarStore.getState().setTokenUsage(tokenUsageRef.current, activeModel);
+      useStatusBarStore.getState().setCompacting(isCompactingRef.current);
+    }
   }, [visible, activeModel]);
 
   const coreMessagesRef = useRef(coreMessages);
   coreMessagesRef.current = coreMessages;
   const activeModelRef = useRef(activeModel);
   activeModelRef.current = activeModel;
+  const effectiveConfigRef = useRef(effectiveConfig);
+  effectiveConfigRef.current = effectiveConfig;
   const [isCompacting, setIsCompacting] = useState(false);
   const isCompactingRef = useRef(false);
   const compactAbortRef = useRef<AbortController | null>(null);
@@ -811,6 +819,7 @@ export function useChat({
         const { providerOptions, headers } = buildProviderOptions(compactModelId, effectiveConfig);
 
         let summary: string;
+        let compactUsage: { inputTokens: number; outputTokens: number } | undefined;
 
         if (isV2 && workingStateRef.current) {
           // The working state was built incrementally during the conversation.
@@ -829,7 +838,7 @@ export function useChat({
           try {
             ioClient = getIOClient();
           } catch {}
-          summary = await buildV2Summary({
+          const v2Result = await buildV2Summary({
             wsm,
             olderMessages,
             model: compactionCfg?.llmExtraction !== false ? model : undefined,
@@ -839,6 +848,8 @@ export function useChat({
             abortSignal: compactAbort.signal,
             ioClient,
           });
+          summary = v2Result.summary;
+          compactUsage = v2Result.usage;
           wsm.reset();
         } else {
           const formatMessage = (m: ModelMessage, charLimit: number) => {
@@ -868,7 +879,7 @@ export function useChat({
 
           const convoText = olderMessages.map((m) => formatMessage(m, 6000)).join("\n\n");
 
-          const { text: v1Summary } = await generateText({
+          const v1Result = await generateText({
             model,
             temperature: 0,
             maxOutputTokens: 8192,
@@ -915,7 +926,13 @@ export function useChat({
               convoText,
             ].join("\n"),
           });
-          summary = v1Summary;
+          summary = v1Result.text;
+          const v1u = v1Result.usage;
+          if (v1u)
+            compactUsage = {
+              inputTokens: v1u.inputTokens ?? 0,
+              outputTokens: v1u.outputTokens ?? 0,
+            };
         }
 
         if (!summary || summary.trim().length < 50) {
@@ -1014,7 +1031,23 @@ export function useChat({
         const estimatedTokens = Math.ceil(afterChars / charsPerToken);
         setContextTokens(0);
         setStreamingChars(0);
-        setTokenUsage({ ...ZERO_USAGE, prompt: estimatedTokens, total: estimatedTokens });
+        setTokenUsage((prev) => {
+          let bd = prev.modelBreakdown;
+          if (compactUsage) {
+            bd = accumulateModelUsage(bd, compactModelId, {
+              input: compactUsage.inputTokens,
+              output: compactUsage.outputTokens,
+              cacheRead: 0,
+              cacheWrite: 0,
+            });
+          }
+          return {
+            ...ZERO_USAGE,
+            prompt: estimatedTokens,
+            total: estimatedTokens,
+            modelBreakdown: bd,
+          };
+        });
 
         setMessages((prev) => [
           ...prev,
@@ -1274,6 +1307,9 @@ export function useChat({
 
   const handleSubmit = useCallback(
     async (input: string) => {
+      // Read current config via ref — effectiveConfig object is NOT in deps
+      // (new object every render would force constant callback recreation)
+      const effectiveConfig = effectiveConfigRef.current;
       // Concurrency guard — prevent dual-stream corruption if called while streaming
       if (abortRef.current) return;
 
@@ -1366,25 +1402,25 @@ export function useChat({
         if (deltaIn > 0 || deltaOut > 0 || deltaCache > 0) {
           const base = baseTokenUsageRef.current;
           const subModelId = event.modelId ?? "unknown";
-            const newUsage: TokenUsage = {
+          const newUsage: TokenUsage = {
             ...base,
             total: base.total + deltaIn + deltaOut,
             subagentInput: base.subagentInput + deltaIn,
             subagentOutput: base.subagentOutput + deltaOut,
-              cacheRead: base.cacheRead + (deltaCache > 0 ? deltaCache : 0),
-              modelBreakdown: accumulateModelUsage(base.modelBreakdown, subModelId, {
-                input: deltaIn,
-                output: deltaOut,
-                cacheRead: deltaCache > 0 ? deltaCache : 0,
-              }),
-            };
-            pendingTokenUsage.current = newUsage;
-            baseTokenUsageRef.current = newUsage;
-            updateSubagentChars();
-            toolCallsDirty.current = true;
-            queueMicrotaskFlush();
-          }
-        });
+            cacheRead: base.cacheRead + (deltaCache > 0 ? deltaCache : 0),
+            modelBreakdown: accumulateModelUsage(base.modelBreakdown, subModelId, {
+              input: deltaIn,
+              output: deltaOut,
+              cacheRead: deltaCache > 0 ? deltaCache : 0,
+            }),
+          };
+          pendingTokenUsage.current = newUsage;
+          baseTokenUsageRef.current = newUsage;
+          updateSubagentChars();
+          toolCallsDirty.current = true;
+          queueMicrotaskFlush();
+        }
+      });
 
       const unsubMultiAgent = onMultiAgentEvent((event) => {
         if (event.type === "agent-done" && event.agentId) {
@@ -1407,7 +1443,10 @@ export function useChat({
 
       try {
         setIsLoading(true);
-        const taskType = detectTaskType(input);
+        const currentMode = forgeModeRef.current;
+        const isPlanning =
+          currentMode === "plan" || currentMode === "architect" || planModeRef.current;
+        const taskType = isPlanning ? "planning" : detectTaskType(input);
         const modelId = resolveTaskModel(
           taskType,
           effectiveConfig.taskRouter,
@@ -1423,14 +1462,12 @@ export function useChat({
         const trivialModelId = tr?.trivial ?? undefined;
         const desloppifyModelId = tr?.desloppify ?? undefined;
         const verifyModelId = tr?.verify ?? undefined;
-        const editingModelId = tr?.editing ?? undefined;
         const hasSubagentModels =
           explorationModelId ||
           codingModelId ||
           trivialModelId ||
           desloppifyModelId ||
-          verifyModelId ||
-          editingModelId;
+          verifyModelId;
         const subagentModels = hasSubagentModels
           ? {
               exploration: explorationModelId ? resolveModel(explorationModelId) : undefined,
@@ -1438,7 +1475,6 @@ export function useChat({
               trivial: trivialModelId ? resolveModel(trivialModelId) : undefined,
               desloppify: desloppifyModelId ? resolveModel(desloppifyModelId) : undefined,
               verify: verifyModelId ? resolveModel(verifyModelId) : undefined,
-              editing: editingModelId ? resolveModel(editingModelId) : undefined,
             }
           : undefined;
         const webSearchModel = webSearchModelId ? resolveModel(webSearchModelId) : undefined;
@@ -2446,7 +2482,6 @@ export function useChat({
       sessionManager,
       interactiveCallbacks,
       cwd,
-      effectiveConfig,
       flushStreamState,
       queueMicrotaskFlush,
       getWorkspaceSnapshot,
@@ -2472,6 +2507,7 @@ export function useChat({
       compactAbortRef.current = null;
       isCompactingRef.current = false;
       setIsCompacting(false);
+      if (visibleRef.current) useStatusBarStore.getState().setCompacting(false);
       setMessages((prev) => [
         ...prev,
         {

@@ -86,7 +86,6 @@ const DEFAULT_TASK_ROUTER: TaskRouter = {
   trivial: null,
   desloppify: null,
   verify: null,
-  editing: null,
   default: null,
 };
 

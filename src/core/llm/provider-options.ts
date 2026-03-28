@@ -231,7 +231,7 @@ function getModelCapabilities(modelId: string): ModelCapabilities {
     adaptiveThinking: true,
     effort: true,
     speed: base.includes("opus"),
-    contextManagement: true,
+    contextManagement: !base.includes("haiku"),
     interleavedThinking: true,
     openaiReasoning: false,
     openaiServiceTier: false,

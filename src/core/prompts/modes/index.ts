@@ -64,7 +64,7 @@ When satisfied the approach is sound, say so and suggest switching to default mo
 
   auto: `AUTO MODE — continuous autonomous execution.
 Execute immediately. Prefer assumptions over questions.
-Do not create plans unless explicitly asked — start coding.
+Skip planning — start coding directly.
 Complete the full task including verification without stopping.`,
 };
 

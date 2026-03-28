@@ -4,8 +4,6 @@ export type TaskType = "planning" | "coding" | "exploration" | "webSearch" | "co
 
 /** Detect the task type from the user's message. */
 export function detectTaskType(message: string): TaskType {
-  if (message.startsWith("[PLAN MODE]")) return "planning";
-
   const lower = message.toLowerCase();
 
   // Web search patterns — explicit web/internet/search intent

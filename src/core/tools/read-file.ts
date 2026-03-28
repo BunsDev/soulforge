@@ -28,7 +28,7 @@ export const readFileTool = {
   description:
     "[TIER-1] Read file contents with line numbers. Use Soul Map :line numbers to jump directly to symbols. " +
     "Supports startLine/endLine ranges, or target + name for AST-based symbol extraction. " +
-    "TIPS: Read ALL needed files in a single parallel call. NEVER re-read a file you already have.",
+    "Read ALL needed files in a single parallel call. Use content you already have — skip re-reads.",
   execute: async (args: ReadFileArgs): Promise<ToolResult> => {
     try {
       const filePath = resolve(args.path);

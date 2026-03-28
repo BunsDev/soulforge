@@ -10,7 +10,11 @@ import { getProxyPid } from "../../core/proxy/lifecycle.js";
 import type { ChatInstance } from "../../hooks/useChat.js";
 import type { UseTabsReturn } from "../../hooks/useTabs.js";
 import { useRepoMapStore } from "../../stores/repomap.js";
-import { computeModelCost, computeTotalCostFromBreakdown, useStatusBarStore } from "../../stores/statusbar.js";
+import {
+  computeModelCost,
+  computeTotalCostFromBreakdown,
+  useStatusBarStore,
+} from "../../stores/statusbar.js";
 import { useWorkerStore } from "../../stores/workers.js";
 import { Overlay, POPUP_BG, PopupRow } from "../layout/shared.js";
 
@@ -85,6 +89,7 @@ function EntryRow({
   valueColor,
   innerW,
   labelW = 14,
+  rightAlign,
 }: {
   label: string;
   value: string;
@@ -92,14 +97,17 @@ function EntryRow({
   valueColor?: string;
   innerW: number;
   labelW?: number;
+  rightAlign?: boolean;
 }) {
+  const valueW = innerW - labelW - 2;
+  const displayValue = rightAlign ? value.padStart(valueW) : value;
   return (
     <PopupRow w={innerW}>
       <text fg={labelColor ?? "#888"} bg={POPUP_BG}>
         {label.padEnd(labelW)}
       </text>
       <text fg={valueColor ?? "#ccc"} bg={POPUP_BG}>
-        {value}
+        {displayValue}
       </text>
     </PopupRow>
   );
@@ -216,7 +224,9 @@ export function StatusDashboard({
     const isApi = sb.contextTokens > 0;
     const charEstimate = (systemChars + sb.chatChars + sb.subagentChars) / 4;
     const chatCharsDelta = Math.max(0, sb.chatChars - (sb.chatCharsAtSnapshot ?? 0));
-      const usedTokens = Math.round(isApi ? sb.contextTokens + (chatCharsDelta + sb.subagentChars) / 4 : charEstimate);
+    const usedTokens = Math.round(
+      isApi ? sb.contextTokens + (chatCharsDelta + sb.subagentChars) / 4 : charEstimate,
+    );
     const fillPct =
       usedTokens > 0 ? Math.min(100, Math.max(1, Math.round((usedTokens / ctxWindow) * 100))) : 0;
     const activeSections = breakdown.filter((s) => s.active && s.chars > 0);
@@ -275,12 +285,15 @@ export function StatusDashboard({
       const cachePct =
         allInput > 0 ? Math.min(100, Math.round((tu.cacheRead / allInput) * 100)) : 0;
 
+      const tokLabelW = 18;
       lines.push(
         <EntryRow
           key="t-in"
           label="  Input"
           value={fmtTokens(uncachedInput)}
           valueColor="#2d9bf0"
+          labelW={tokLabelW}
+          rightAlign
           innerW={innerW}
         />,
       );
@@ -291,6 +304,8 @@ export function StatusDashboard({
             label="    Main"
             value={fmtTokens(tu.prompt)}
             valueColor="#5a8abf"
+            labelW={tokLabelW}
+            rightAlign
             innerW={innerW}
           />,
         );
@@ -300,6 +315,8 @@ export function StatusDashboard({
             label="    Dispatch"
             value={fmtTokens(tu.subagentInput)}
             valueColor="#9B30FF"
+            labelW={tokLabelW}
+            rightAlign
             innerW={innerW}
           />,
         );
@@ -311,6 +328,8 @@ export function StatusDashboard({
           label="  Output"
           value={fmtTokens(totalOutput)}
           valueColor="#e0a020"
+          labelW={tokLabelW}
+          rightAlign
           innerW={innerW}
         />,
       );
@@ -321,6 +340,8 @@ export function StatusDashboard({
             label="    Main"
             value={fmtTokens(tu.completion)}
             valueColor="#b89030"
+            labelW={tokLabelW}
+            rightAlign
             innerW={innerW}
           />,
         );
@@ -330,6 +351,8 @@ export function StatusDashboard({
             label="    Dispatch"
             value={fmtTokens(tu.subagentOutput)}
             valueColor="#9B30FF"
+            labelW={tokLabelW}
+            rightAlign
             innerW={innerW}
           />,
         );
@@ -353,6 +376,8 @@ export function StatusDashboard({
             label="  Cache Write"
             value={fmtTokens(tu.cacheWrite)}
             valueColor="#e0a020"
+            labelW={tokLabelW}
+            rightAlign
             innerW={innerW}
           />,
         );
@@ -364,54 +389,64 @@ export function StatusDashboard({
             label="    Uncached"
             value={fmtTokens(uncachedInput)}
             valueColor="#888"
+            labelW={tokLabelW}
+            rightAlign
             innerW={innerW}
           />,
         );
       }
 
       lines.push(
-        <EntryRow key="t-total" label="  Total" value={fmtTokens(tu.total)} innerW={innerW} />,
+        <EntryRow
+          key="t-total"
+          label="  Total"
+          value={fmtTokens(tu.total)}
+          labelW={tokLabelW}
+          rightAlign
+          innerW={innerW}
+        />,
       );
 
       const breakdown = tu.modelBreakdown ?? {};
       const breakdownEntries = Object.entries(breakdown).sort(
         ([midA, a], [midB, b]) => computeModelCost(midB, b) - computeModelCost(midA, a),
-        );
-        const totalCost =
-          breakdownEntries.length > 0
-            ? computeTotalCostFromBreakdown(breakdown)
-            : 0;
-        if (totalCost > 0) {
-          const fmtCost = (c: number) => (c < 0.01 ? `${c.toFixed(3)}` : `${c.toFixed(2)}`);
-          lines.push(<Spacer key="s-cost" innerW={innerW} />);
+      );
+      const totalCost = breakdownEntries.length > 0 ? computeTotalCostFromBreakdown(breakdown) : 0;
+      if (totalCost > 0) {
+        const fmtCost = (c: number) => (c < 0.01 ? `${c.toFixed(3)}` : `${c.toFixed(2)}`);
+        lines.push(<Spacer key="s-cost" innerW={innerW} />);
         lines.push(<SectionHeader key="h-cost" label="Cost Breakdown" innerW={innerW} />);
-          for (const [mid, usage] of breakdownEntries) {
-            const c = computeModelCost(mid, usage);
-            if (c <= 0) continue;
-            const pct = Math.round((c / totalCost) * 100);
-            const shortId = mid.length > 22 ? `${mid.slice(0, 21)}…` : mid;
-            lines.push(
-              <EntryRow
-                key={`cost-${mid}`}
-                label={`  ${shortId}`}
-                value={`${fmtCost(c)}  (${String(pct)}%)`}
-                valueColor="#ccc"
-                labelW={24}
-                innerW={innerW}
-              />,
-            );
-          }
+        const costLabelW = Math.min(30, innerW - 20);
+        for (const [mid, usage] of breakdownEntries) {
+          const c = computeModelCost(mid, usage);
+          if (c <= 0) continue;
+          const pct = Math.round((c / totalCost) * 100);
+          const maxModelW = costLabelW - 4;
+          const shortId = mid.length > maxModelW ? `${mid.slice(0, maxModelW - 1)}…` : mid;
           lines.push(
             <EntryRow
-              key="cost-total"
-              label="  Total"
-              value={fmtCost(totalCost)}
-              valueColor="#e0a020"
-              labelW={24}
+              key={`cost-${mid}`}
+              label={`  ${shortId}`}
+              value={`${fmtCost(c)}  (${String(pct)}%)`}
+              valueColor="#ccc"
+              labelW={costLabelW}
+              rightAlign
               innerW={innerW}
             />,
           );
         }
+        lines.push(
+          <EntryRow
+            key="cost-total"
+            label="  Total"
+            value={fmtCost(totalCost)}
+            valueColor="#e0a020"
+            labelW={costLabelW}
+            rightAlign
+            innerW={innerW}
+          />,
+        );
+      }
     }
 
     const allTabs = tabMgr.tabs;
@@ -473,6 +508,7 @@ export function StatusDashboard({
     sb.chatChars,
     sb.contextTokens,
     sb.subagentChars,
+    sb.chatCharsAtSnapshot,
   ]);
 
   const systemLines = useMemo(() => {
