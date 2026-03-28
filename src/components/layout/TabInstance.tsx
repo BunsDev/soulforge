@@ -234,7 +234,7 @@ export const TabInstance = memo(function TabInstance({
   const prevLoading = useRef(chat.isLoading);
   useEffect(() => {
     const coordinator = getWorkspaceCoordinator();
-    setTabActivity(tabId, { isLoading: chat.isLoading });
+    setTabActivity(tabId, { isLoading: chat.isLoading, isCompacting: chat.isCompacting });
     // Mark unread if loading finished while tab is in background
     if (prevLoading.current && !chat.isLoading && !visible) {
       setTabActivity(tabId, { hasUnread: true });
@@ -246,7 +246,7 @@ export const TabInstance = memo(function TabInstance({
       coordinator.markActive(tabId);
     }
     prevLoading.current = chat.isLoading;
-  }, [chat.isLoading, tabId, setTabActivity, visible]);
+  }, [chat.isLoading, chat.isCompacting, tabId, setTabActivity, visible]);
 
   // Signal attention when tab is waiting for user input (plan review or question)
   useEffect(() => {

@@ -94,9 +94,10 @@ function buildContent(
 interface Props {
   contextManager: ContextManager;
   modelId: string;
+  suppressCompacting?: boolean;
 }
 
-export function ContextBar({ contextManager }: Props) {
+export function ContextBar({ contextManager, suppressCompacting }: Props) {
   const textRef = useRef<TextRenderable>(null);
 
   const targetRef = useRef<BarTarget>({ pct: 0, live: false, flash: false });
@@ -106,6 +107,8 @@ export function ContextBar({ contextManager }: Props) {
   const compactFrameRef = useRef(0);
   const wasCompactingRef = useRef(false);
   const workerRef = useRef<WorkerIndicator>({ intel: "idle", io: "idle" });
+  const suppressCompactingRef = useRef(suppressCompacting);
+  suppressCompactingRef.current = suppressCompacting;
   const renderedContentRef = useRef(buildContent(0, false, false));
 
   const computeTarget = useCallback(
@@ -170,7 +173,7 @@ export function ContextBar({ contextManager }: Props) {
     const timer = setInterval(() => {
       const target = targetRef.current;
       const store = useStatusBarStore.getState();
-      const isCompacting = store.compacting;
+      const isCompacting = suppressCompactingRef.current ? false : store.compacting;
       if (isCompacting) compactFrameRef.current++;
       const wasCompacting = wasCompactingRef.current;
       wasCompactingRef.current = isCompacting;

@@ -34,6 +34,8 @@ interface ProjectProfile {
   test: string | null;
   build: string | null;
   lint: string | null;
+  /** Combined format+lint fix command (e.g. biome check --write --unsafe). Covers both in one pass. */
+  formatAndLint: string | null;
   typecheck: string | null;
   run: string | null;
   format: string | null;
@@ -44,6 +46,7 @@ export async function detectProfile(cwd: string): Promise<ProjectProfile> {
     test: null,
     build: null,
     lint: null,
+    formatAndLint: null,
     typecheck: null,
     run: null,
     format: null,
@@ -79,6 +82,7 @@ export async function detectProfile(cwd: string): Promise<ProjectProfile> {
       : null;
     profile.run = scripts.dev ? "bun run dev" : scripts.start ? "bun run start" : null;
     profile.format = scripts.format ? "bun run format" : await detectJsFormatter(cwd, "bunx");
+    profile.formatAndLint = await detectFormatAndLint(cwd, "bunx");
     return profile;
   }
 
@@ -107,6 +111,7 @@ export async function detectProfile(cwd: string): Promise<ProjectProfile> {
       : null;
     profile.run = scripts.dev ? `${run} dev` : scripts.start ? `${run} start` : null;
     profile.format = scripts.format ? `${run} format` : await detectJsFormatter(cwd, "npx");
+    profile.formatAndLint = await detectFormatAndLint(cwd, "npx");
     return profile;
   }
 
@@ -414,6 +419,24 @@ async function detectJsFormatter(cwd: string, runner = ""): Promise<string | nul
     (await has("prettier.config.mjs"))
   )
     return `${run}prettier --write`;
+  return null;
+}
+
+/** Detect a combined format+lint fix command (biome check --write --unsafe chains both). */
+async function detectFormatAndLint(cwd: string, runner = ""): Promise<string | null> {
+  const has = async (f: string) => {
+    try {
+      await access(join(cwd, f));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const run = runner ? `${runner} ` : "";
+  if ((await has("biome.json")) || (await has("biome.jsonc"))) {
+    // Chain: check --write --unsafe fixes format+lint, then lint --write --unsafe catches remaining lint autofixes
+    return `${run}biome check --write --unsafe && ${run}biome lint --write --unsafe`;
+  }
   return null;
 }
 
@@ -764,6 +787,7 @@ export const projectTool = {
     const profile = await detectProfile(cwd);
 
     let command: string | null = null;
+    let formatCoversLint = false;
 
     switch (args.action) {
       case "test": {
@@ -777,14 +801,16 @@ export const projectTool = {
         command = profile.build;
         break;
       case "format": {
-        // Prefer dedicated formatter; fall back to lint with fix flags
-        command = profile.format ?? profile.lint;
-        if (command && !profile.format && !args.raw) {
+        // Prefer formatAndLint (fixes both lint + format in one pass), then dedicated formatter, then lint --fix
+        const isCombo = !!profile.formatAndLint;
+        command = profile.formatAndLint ?? profile.format ?? profile.lint;
+        if (command && !isCombo && !profile.format && !args.raw) {
           command = applyFixFlag(command);
         }
         if (command && args.file) {
           command = `${command} ${shellQuote(args.file)}`;
         }
+        formatCoversLint = isCombo;
         break;
       }
       case "lint": {
@@ -915,9 +941,12 @@ export const projectTool = {
             error: issues,
           };
         }
+        const passMsg = formatCoversLint
+          ? `${cmdLabel} — formatted & linted, all clean. No need to re-check.\n${truncated}`
+          : `${cmdLabel} — passed.\n${truncated}`;
         return {
           success: true,
-          output: `${cmdLabel} — passed.\n${truncated}`,
+          output: passMsg,
         };
       }
       const flagHint =

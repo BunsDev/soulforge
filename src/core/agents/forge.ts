@@ -366,6 +366,11 @@ export function createForgeAgent({
     activeDeferredTools,
   });
 
+  // miniForge: share the forge system prompt with subagents for Anthropic prefix cache hits
+  const forgeInstructions = isAnthropicNative(modelId)
+    ? buildInstructions(contextManager, modelId)
+    : undefined;
+
   const subagentTools = isRestricted
     ? {
         dispatch: buildSubagentTools({
@@ -383,6 +388,7 @@ export function createForgeAgent({
           skills,
           disablePruning,
           tabId: tabId ?? contextManager.getTabId() ?? undefined,
+          forgeInstructions,
         }).dispatch,
       }
     : buildSubagentTools({
@@ -403,6 +409,7 @@ export function createForgeAgent({
         skills,
         disablePruning,
         tabId: tabId ?? contextManager.getTabId() ?? undefined,
+        forgeInstructions,
       });
 
   const cachedReadFile =

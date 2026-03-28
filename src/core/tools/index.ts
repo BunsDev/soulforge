@@ -1363,6 +1363,12 @@ export function buildTools(
           "show",
           "unstage",
           "restore",
+          "stage",
+          "tag",
+          "cherry_pick",
+          "rebase",
+          "reset",
+          "blame",
         ]),
         staged: z
           .boolean()
@@ -1381,25 +1387,29 @@ export function buildTools(
           .nullable()
           .optional()
           .transform(nullToUndef)
-          .describe("For commit/stash: message"),
+          .describe("For commit/stash/tag: message"),
         files: z
           .array(z.string())
           .nullable()
           .optional()
           .transform(nullToUndef)
-          .describe("For commit/unstage/restore: files"),
+          .describe(
+            "For commit/unstage/restore/stage/reset: files. Stage with no files stages all (-A).",
+          ),
         sub_action: z
           .string()
           .nullable()
           .optional()
           .transform(nullToUndef)
-          .describe("For stash: push|pop|list|show|drop. For branch: list|create|switch|delete"),
+          .describe(
+            "For stash: push|pop|list|show|drop. For branch: list|create|switch|delete. For tag: list|create|delete. For rebase: start|abort|continue|skip",
+          ),
         name: z
           .string()
           .nullable()
           .optional()
           .transform(nullToUndef)
-          .describe("For branch: branch name"),
+          .describe("For branch/tag: name"),
         index: z
           .number()
           .nullable()
@@ -1417,10 +1427,52 @@ export function buildTools(
           .nullable()
           .optional()
           .transform(nullToUndef)
-          .describe("For show: commit hash or ref (default: HEAD)"),
+          .describe(
+            "For show/cherry_pick/rebase/reset/tag: commit hash, branch, or ref (default: HEAD)",
+          ),
+        file: z
+          .string()
+          .nullable()
+          .optional()
+          .transform(nullToUndef)
+          .describe("For blame: file path"),
+        mode: z
+          .string()
+          .nullable()
+          .optional()
+          .transform(nullToUndef)
+          .describe("For reset: soft|mixed|hard (default: mixed)"),
+        startLine: z
+          .number()
+          .nullable()
+          .optional()
+          .transform(nullToUndef)
+          .describe("For blame: start line"),
+        endLine: z
+          .number()
+          .nullable()
+          .optional()
+          .transform(nullToUndef)
+          .describe("For blame: end line"),
+        flags: z
+          .array(z.string())
+          .nullable()
+          .optional()
+          .transform(nullToUndef)
+          .describe(
+            "Extra flags passed to the git command (e.g. ['--interactive', '--onto', 'main'])",
+          ),
       }),
       execute: deferExecute(async (args) => {
-        const mutating = ["pull", "stash", "restore", "branch"].includes(args.action);
+        const mutating = [
+          "pull",
+          "stash",
+          "restore",
+          "branch",
+          "reset",
+          "cherry_pick",
+          "rebase",
+        ].includes(args.action);
         if (mutating) resetReadCache();
         return gitTool.execute(args, opts?.tabId);
       }),

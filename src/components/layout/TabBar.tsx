@@ -11,6 +11,7 @@ interface TabBarProps {
   onSwitch: (id: string) => void;
   getActivity: (id: string) => TabActivity;
   getMode: (id: string) => ForgeMode;
+  getModelLabel: (id: string) => string | null;
 }
 
 function truncateLabel(str: string, max: number): string {
@@ -25,17 +26,21 @@ export function TabBar({
   onSwitch: _onSwitch,
   getActivity,
   getMode,
+  getModelLabel,
 }: TabBarProps) {
   const [spinFrame, setSpinFrame] = useState(0);
 
   const activities = new Map(tabs.map((t) => [t.id, getActivity(t.id)]));
-  const hasLoading = tabs.some((t) => activities.get(t.id)?.isLoading);
+  const hasBusy = tabs.some((t) => {
+    const a = activities.get(t.id);
+    return a?.isLoading || a?.isCompacting;
+  });
 
   useEffect(() => {
-    if (!hasLoading) return;
+    if (!hasBusy) return;
     const timer = setInterval(() => setSpinFrame((f) => (f + 1) % SPINNER_FRAMES.length), 80);
     return () => clearInterval(timer);
-  }, [hasLoading]);
+  }, [hasBusy]);
 
   return (
     <box flexShrink={0} paddingX={1} height={1} flexDirection="row">
@@ -55,35 +60,43 @@ export function TabBar({
         const tabModeColor = getModeColor(tabMode);
 
         const isLoading = activity?.isLoading ?? false;
+        const isCompacting = activity?.isCompacting ?? false;
         const hasError = activity?.hasError ?? false;
         const hasUnread = activity?.hasUnread ?? false;
         const needsAttention = activity?.needsAttention ?? false;
 
-        // bracket color: attention=orange, loading=purple pulse, error=red, active=red, default=dim
+        // bracket color: attention=orange, compacting=blue, loading=purple, error=red, active=red, default=dim
         const bracketColor = needsAttention
           ? "#F59E0B"
-          : isLoading
-            ? "#8B5CF6"
-            : hasError
-              ? "#a55"
-              : isActive
-                ? "#FF0040"
-                : "#444";
+          : isCompacting
+            ? "#5af"
+            : isLoading
+              ? "#8B5CF6"
+              : hasError
+                ? "#a55"
+                : isActive
+                  ? "#FF0040"
+                  : "#444";
 
         const numColor = isActive
           ? "#FF0040"
           : needsAttention
             ? "#F59E0B"
-            : isLoading
-              ? "#8B5CF6"
-              : "#666";
+            : isCompacting
+              ? "#5af"
+              : isLoading
+                ? "#8B5CF6"
+                : "#666";
         const labelColor = isActive ? "#ccc" : hasUnread ? "#b87333" : "#555";
 
         return (
           <box key={tab.id} flexDirection="row">
             {i > 0 && <text fg="#2a2a2a"> │ </text>}
             {needsAttention && !isActive && <text fg="#F59E0B">? </text>}
-            {isLoading && !needsAttention && (
+            {isCompacting && !needsAttention && (
+              <text fg="#5af">{SPINNER_FRAMES[spinFrame] ?? "⠋"} </text>
+            )}
+            {isLoading && !isCompacting && !needsAttention && (
               <text fg="#8B5CF6">{SPINNER_FRAMES[spinFrame] ?? "⠋"} </text>
             )}
             <text fg={bracketColor}>[</text>
@@ -100,6 +113,11 @@ export function TabBar({
                 <text fg={isActive ? tabModeColor : "#555"}>]</text>
               </>
             )}
+            {(() => {
+              const modelLabel = getModelLabel(tab.id);
+              if (!modelLabel) return null;
+              return <text fg={isActive ? "#777" : "#444"}> {truncateLabel(modelLabel, 16)}</text>;
+            })()}
             {(activity?.editedFileCount ?? 0) > 0 && (
               <text fg="#4a7">
                 {" "}

@@ -1,6 +1,7 @@
 import type { ProviderOptions } from "@ai-sdk/provider-utils";
 import { type LanguageModel, RetryError } from "ai";
 import { logBackgroundError } from "../../stores/errors.js";
+import { isAnthropicNative } from "../llm/provider-options.js";
 import { taskListTool } from "../tools/task-list.js";
 import {
   type AgentBus,
@@ -16,6 +17,8 @@ import {
   synthesizeDoneFromResults,
   writeAgentContext,
 } from "./agent-results.js";
+import { codeBase } from "./code.js";
+import { exploreBase, investigateBase } from "./explore.js";
 import { emitMultiAgentEvent } from "./subagent-events.js";
 import {
   autoPostCompletionSummary,
@@ -265,6 +268,34 @@ export async function runAgentTask(
 
   if (task.returnFormat) {
     enrichedPrompt += `\n\n--- Return format: ${task.returnFormat} ---\n${RETURN_FORMAT_INSTRUCTIONS[task.returnFormat]}`;
+  }
+
+  // miniForge: when using forge system prompt, inject role instructions into the user message
+  const useMiniForge =
+    models.forgeInstructions != null &&
+    isAnthropicNative(selectedModelId) &&
+    taskTier !== "trivial";
+  if (useMiniForge) {
+    const isCode = task.role === "code";
+    const isInvestigate = task.role === "investigate";
+    const hasPreloaded = enrichedPrompt.includes("--- Preloaded file contents");
+
+    let rolePreamble: string;
+    if (isCode) {
+      rolePreamble = codeBase(hasPreloaded);
+      rolePreamble +=
+        "\nOwnership: you own files you edit first. check_edit_conflicts before touching another agent's file.\nIf another agent owns the file: report_finding with the exact edit instead.\nCoordination: report_finding after significant changes (paths, what changed, new exports). Peer findings appear in tool results.";
+    } else if (isInvestigate) {
+      rolePreamble = investigateBase();
+      rolePreamble +=
+        "\nCoordination: report_finding after discoveries — especially shared symbols/configs with peer targets. check_findings for peer detail.";
+    } else {
+      rolePreamble = exploreBase();
+      rolePreamble +=
+        "\nCoordination: report_finding after discoveries — especially shared symbols/configs with peer targets. check_findings for peer detail.";
+    }
+
+    enrichedPrompt = `[Role: ${task.role} agent]\n${rolePreamble}\n\n[Task]\n${enrichedPrompt}`;
   }
 
   let lastError: unknown;

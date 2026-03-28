@@ -32,6 +32,8 @@ export interface ToolResult {
   outlineOnly?: boolean;
   /** Files edited by dispatch tool — used by /changes panel to track per-tab edits */
   filesEdited?: string[];
+  /** Whether dispatch used miniForge (shared forge system prompt for cache hits) */
+  miniForge?: boolean;
 }
 
 export type PlanStepStatus = "pending" | "active" | "done" | "skipped";

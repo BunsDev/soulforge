@@ -336,6 +336,146 @@ export async function gitSwitchBranch(
   return { ok, output: stdout };
 }
 
+export async function gitTag(
+  cwd: string,
+  subAction?: string,
+  name?: string,
+  message?: string,
+  ref?: string,
+): Promise<{ ok: boolean; output: string }> {
+  const action = subAction ?? "list";
+  switch (action) {
+    case "list": {
+      const { ok, stdout } = await run(["tag", "-l", "--sort=-creatordate"], cwd);
+      return { ok, output: stdout || "No tags." };
+    }
+    case "create": {
+      if (!name) return { ok: false, output: "Tag name required" };
+      const args = message
+        ? ["tag", "-a", name, "-m", message, ...(ref ? [ref] : [])]
+        : ["tag", name, ...(ref ? [ref] : [])];
+      const { ok, stdout } = await run(args, cwd);
+      return { ok, output: stdout || `Created tag ${name}` };
+    }
+    case "delete": {
+      if (!name) return { ok: false, output: "Tag name required" };
+      const { ok, stdout } = await run(["tag", "-d", name], cwd);
+      return { ok, output: stdout || `Deleted tag ${name}` };
+    }
+    default:
+      return { ok: false, output: `Unknown tag action: ${action}` };
+  }
+}
+
+export async function gitCherryPick(
+  cwd: string,
+  ref: string,
+  flags?: string[],
+): Promise<{ ok: boolean; output: string }> {
+  const { ok, stdout } = await run(["cherry-pick", ...(flags ?? []), ref], cwd, 15_000);
+  return { ok, output: stdout || (ok ? `Cherry-picked ${ref}` : `Failed to cherry-pick ${ref}`) };
+}
+
+export async function gitRebase(
+  cwd: string,
+  subAction?: string,
+  ref?: string,
+  flags?: string[],
+): Promise<{ ok: boolean; output: string }> {
+  const action = subAction ?? "start";
+  switch (action) {
+    case "abort": {
+      const { ok, stdout } = await run(["rebase", "--abort"], cwd, 15_000);
+      return { ok, output: stdout || "Rebase aborted." };
+    }
+    case "continue": {
+      const { ok, stdout } = await run(["rebase", "--continue"], cwd, 15_000);
+      return { ok, output: stdout || "Rebase continued." };
+    }
+    case "skip": {
+      const { ok, stdout } = await run(["rebase", "--skip"], cwd, 15_000);
+      return { ok, output: stdout || "Skipped commit." };
+    }
+    default: {
+      if (!ref) return { ok: false, output: "Ref/branch required for rebase" };
+      const { ok, stdout } = await run(["rebase", ...(flags ?? []), ref], cwd, 30_000);
+      return { ok, output: stdout || (ok ? `Rebased onto ${ref}` : `Rebase failed`) };
+    }
+  }
+}
+
+export async function gitReset(
+  cwd: string,
+  ref?: string,
+  mode?: string,
+  files?: string[],
+): Promise<{ ok: boolean; output: string }> {
+  if (files && files.length > 0) {
+    const { ok, stdout } = await run(["reset", ref ?? "HEAD", "--", ...files], cwd);
+    return { ok, output: stdout || `Reset ${String(files.length)} file(s)` };
+  }
+  const flag = mode === "hard" ? "--hard" : mode === "soft" ? "--soft" : "--mixed";
+  const { ok, stdout } = await run(["reset", flag, ref ?? "HEAD"], cwd);
+  return { ok, output: stdout || `Reset ${flag} to ${ref ?? "HEAD"}` };
+}
+
+export async function gitBlame(
+  cwd: string,
+  file: string,
+  startLine?: number,
+  endLine?: number,
+): Promise<{ ok: boolean; output: string }> {
+  const args = ["blame", "--porcelain"];
+  if (startLine != null && endLine != null) {
+    args.push(`-L${String(startLine)},${String(endLine)}`);
+  } else if (startLine != null) {
+    args.push(`-L${String(startLine)},`);
+  }
+  args.push(file);
+  const { ok, stdout } = await run(args, cwd, 10_000);
+  if (!ok) return { ok, output: stdout || `Failed to blame ${file}` };
+
+  // Parse porcelain output into a compact readable format
+  const lines: string[] = [];
+  const commits = new Map<string, { author: string; date: string; summary: string }>();
+  const outputLines = stdout.split("\n");
+  for (let i = 0; i < outputLines.length; i++) {
+    const line = outputLines[i] ?? "";
+    const headerMatch = line.match(/^([0-9a-f]{40}) \d+ (\d+)/);
+    if (headerMatch) {
+      const hash = headerMatch[1] ?? "";
+      const lineNo = headerMatch[2] ?? "";
+      if (!commits.has(hash)) {
+        const info = { author: "", date: "", summary: "" };
+        for (let j = i + 1; j < outputLines.length; j++) {
+          const l = outputLines[j] ?? "";
+          if (l.startsWith("author ")) info.author = l.slice(7);
+          else if (l.startsWith("author-time ")) {
+            const ts = Number.parseInt(l.slice(12), 10);
+            info.date = new Date(ts * 1000).toISOString().slice(0, 10);
+          } else if (l.startsWith("summary ")) info.summary = l.slice(8);
+          else if (l.startsWith("\t")) break;
+        }
+        commits.set(hash, info);
+      }
+      const c = commits.get(hash) ?? { author: "", date: "", summary: "" };
+      // Find the content line (starts with \t)
+      let content = "";
+      for (let j = i + 1; j < outputLines.length; j++) {
+        const ol = outputLines[j] ?? "";
+        if (ol.startsWith("\t")) {
+          content = ol.slice(1);
+          break;
+        }
+      }
+      lines.push(
+        `${lineNo.padStart(4)} ${hash.slice(0, 8)} ${c.date} ${c.author.padEnd(15).slice(0, 15)} ${content}`,
+      );
+    }
+  }
+  return { ok: true, output: lines.join("\n") || "No blame output." };
+}
+
 export async function buildGitContext(cwd: string): Promise<string | null> {
   const status = await getGitStatus(cwd);
   if (!status.isRepo) return null;

@@ -13,6 +13,7 @@ export interface Tab {
 
 export interface TabActivity {
   isLoading: boolean;
+  isCompacting: boolean;
   hasUnread: boolean;
   hasError: boolean;
   needsAttention: boolean;
@@ -53,6 +54,7 @@ export interface UseTabsReturn {
 
 const DEFAULT_ACTIVITY: TabActivity = {
   isLoading: false,
+  isCompacting: false,
   hasUnread: false,
   hasError: false,
   needsAttention: false,

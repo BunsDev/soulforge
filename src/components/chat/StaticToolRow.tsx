@@ -346,7 +346,13 @@ export function buildLiveToolRowProps(
 export function buildFinalToolRowProps(tc: {
   name: string;
   args: Record<string, unknown>;
-  result?: { success: boolean; output: string; error?: string; backend?: string };
+  result?: {
+    success: boolean;
+    output: string;
+    error?: string;
+    backend?: string;
+    miniForge?: boolean;
+  };
 }): StaticToolRowProps {
   const toolDisplay = resolveToolDisplay(tc.name);
   const argsJson = JSON.stringify(tc.args);
@@ -398,13 +404,17 @@ export function buildFinalToolRowProps(tc: {
     isEdit && tc.result?.success && resultJson ? formatResult(tc.name, resultJson) : undefined;
 
   // Suffix
-  const { suffix, suffixColor } = computeSuffix(
+  let { suffix, suffixColor } = computeSuffix(
     tc.name,
     resultJson,
     tc.result ?? null,
     isEdit,
     !!editResultText,
   );
+  // Dispatch: rewrite "agents" → "mini-forges" when miniForge path was used
+  if (tc.name === "dispatch" && tc.result?.miniForge && suffix) {
+    suffix = suffix.replace(/\bagents?\b/g, (m) => (m === "agent" ? "mini-forge" : "mini-forges"));
+  }
 
   // Diff
   const diff = tc.result ? extractEditDiff(tc.name, tc.args, tc.result) : null;

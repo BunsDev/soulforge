@@ -6,10 +6,14 @@ import {
   getGitLog,
   getGitStatus,
   gitAdd,
+  gitBlame,
+  gitCherryPick,
   gitCommit,
   gitCreateBranch,
   gitPull,
   gitPush,
+  gitRebase,
+  gitReset,
   gitRestore,
   gitShow,
   gitStash,
@@ -18,6 +22,7 @@ import {
   gitStashPop,
   gitStashShow,
   gitSwitchBranch,
+  gitTag,
   gitUnstage,
   run,
 } from "../git/status.js";
@@ -66,7 +71,13 @@ type GitAction =
   | "branch"
   | "show"
   | "unstage"
-  | "restore";
+  | "restore"
+  | "stage"
+  | "tag"
+  | "cherry_pick"
+  | "rebase"
+  | "reset"
+  | "blame";
 
 interface GitArgs {
   action: GitAction;
@@ -79,17 +90,25 @@ interface GitArgs {
   index?: number;
   amend?: boolean;
   ref?: string;
+  file?: string;
+  mode?: string;
+  startLine?: number;
+  endLine?: number;
+  flags?: string[];
 }
 
 export const gitTool = {
   name: "git" as const,
   description:
-    "Git operations: status, diff, log, commit (with amend), push, pull, stash, branch, show (view commit), unstage, restore.",
+    "Git operations: status, diff, log, commit (with amend), push, pull, stash, branch, show (view commit), unstage, restore, stage, tag, cherry_pick, rebase, reset, blame.",
   execute: async (args: GitArgs, tabId?: string): Promise<ToolResult> => {
     const destructive =
       args.action === "commit" ||
       args.action === "stash" ||
       args.action === "restore" ||
+      args.action === "reset" ||
+      args.action === "cherry_pick" ||
+      args.action === "rebase" ||
       (args.action === "branch" && args.sub_action === "switch");
 
     if (destructive && tabId) {
@@ -141,6 +160,24 @@ export const gitTool = {
         break;
       case "restore":
         result = await execRestore(args.files);
+        break;
+      case "stage":
+        result = await execStage(args.files);
+        break;
+      case "tag":
+        result = await execTag(args.sub_action, args.name, args.message, args.ref);
+        break;
+      case "cherry_pick":
+        result = await execCherryPick(args.ref, args.flags);
+        break;
+      case "rebase":
+        result = await execRebase(args.sub_action, args.ref, args.flags);
+        break;
+      case "reset":
+        result = await execReset(args.ref, args.mode, args.files);
+        break;
+      case "blame":
+        result = await execBlame(args.file, args.startLine, args.endLine);
         break;
       default:
         result = {
@@ -344,4 +381,60 @@ async function execRestore(files?: string[]): Promise<ToolResult> {
   }
   const result = await gitRestore(cwd, files);
   return { success: result.ok, output: result.output };
+}
+
+async function execStage(files?: string[]): Promise<ToolResult> {
+  const targets = files && files.length > 0 ? files : ["-A"];
+  const ok = await gitAdd(cwd, targets);
+  if (!ok) return { success: false, output: "Failed to stage files", error: "staging failed" };
+  const label = targets[0] === "-A" ? "all files" : `${String(files?.length ?? 0)} file(s)`;
+  return { success: true, output: `Staged ${label}` };
+}
+
+async function execTag(
+  subAction?: string,
+  name?: string,
+  message?: string,
+  ref?: string,
+): Promise<ToolResult> {
+  const result = await gitTag(cwd, subAction, name, message, ref);
+  return { success: result.ok, output: result.output, error: result.ok ? undefined : "tag failed" };
+}
+
+async function execCherryPick(ref?: string, flags?: string[]): Promise<ToolResult> {
+  if (!ref) return { success: false, output: "Commit ref required", error: "missing ref" };
+  const result = await gitCherryPick(cwd, ref, flags);
+  return {
+    success: result.ok,
+    output: result.output,
+    error: result.ok ? undefined : "cherry-pick failed",
+  };
+}
+
+async function execRebase(subAction?: string, ref?: string, flags?: string[]): Promise<ToolResult> {
+  const result = await gitRebase(cwd, subAction, ref, flags);
+  return {
+    success: result.ok,
+    output: result.output,
+    error: result.ok ? undefined : "rebase failed",
+  };
+}
+
+async function execReset(ref?: string, mode?: string, files?: string[]): Promise<ToolResult> {
+  const result = await gitReset(cwd, ref, mode, files);
+  return {
+    success: result.ok,
+    output: result.output,
+    error: result.ok ? undefined : "reset failed",
+  };
+}
+
+async function execBlame(file?: string, startLine?: number, endLine?: number): Promise<ToolResult> {
+  if (!file) return { success: false, output: "File path required", error: "missing file" };
+  const result = await gitBlame(cwd, file, startLine, endLine);
+  return {
+    success: result.ok,
+    output: await capGitOutput(result.output, "blame"),
+    error: result.ok ? undefined : "blame failed",
+  };
 }

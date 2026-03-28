@@ -8,7 +8,7 @@ import { buildBusTools } from "./bus-tools.js";
 import { buildPrepareStep, buildSymbolLookup } from "./step-utils.js";
 import { repairToolCall } from "./stream-options.js";
 
-function exploreBase(): string {
+export function exploreBase(): string {
   return `Explore agent. Read-only research. Tool results are authoritative.
 
 Use the cheapest tool first:
@@ -25,7 +25,7 @@ After reading targets, trace callers via navigate(references). Flag disconnects.
 OUTPUT: Concise text summary with file names, line numbers, exact values. Your text is the only thing the parent sees.`;
 }
 
-function investigateBase(): string {
+export function investigateBase(): string {
   return `Investigation agent. Broad cross-cutting analysis.
 
 Quantify before reading: soul_grep(count), soul_analyze, soul_impact first.
@@ -53,6 +53,7 @@ interface ExploreAgentOptions {
   disablePruning?: boolean;
   role?: "explore" | "investigate";
   tabId?: string;
+  forgeInstructions?: string;
 }
 
 export function createExploreAgent(model: LanguageModel, options?: ExploreAgentOptions) {
@@ -95,13 +96,15 @@ export function createExploreAgent(model: LanguageModel, options?: ExploreAgentO
     tools: allTools,
     instructions: {
       role: "system" as const,
-      content: (() => {
-        const isInvestigate = options?.role === "investigate";
-        const base = isInvestigate ? investigateBase() : exploreBase();
-        return hasBus
-          ? `${base}\nCoordination: report_finding after discoveries — especially shared symbols/configs with peer targets. check_findings for peer detail.`
-          : base;
-      })(),
+      content: options?.forgeInstructions
+        ? options.forgeInstructions
+        : (() => {
+            const isInvestigate = options?.role === "investigate";
+            const base = isInvestigate ? investigateBase() : exploreBase();
+            return hasBus
+              ? `${base}\nCoordination: report_finding after discoveries — especially shared symbols/configs with peer targets. check_findings for peer detail.`
+              : base;
+          })(),
       providerOptions: EPHEMERAL_CACHE,
     },
     stopWhen: stopConditions,

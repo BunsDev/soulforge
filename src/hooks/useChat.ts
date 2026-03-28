@@ -1905,6 +1905,7 @@ export function useChat({
                   backend?: string;
                   outlineOnly?: boolean;
                   filesEdited?: string[];
+                  miniForge?: boolean;
                 };
                 toolResult = {
                   success: r.success,
@@ -1913,9 +1914,20 @@ export function useChat({
                   backend: r.backend,
                   outlineOnly: r.outlineOnly,
                   filesEdited: r.filesEdited,
+                  miniForge: r.miniForge,
                 };
               } else {
                 toolResult = { success: true, output: resultStr };
+              }
+              // Dispatch tool returns DispatchOutput (no `success` field) — extract miniForge/filesEdited
+              if (
+                typeof part.output === "object" &&
+                part.output !== null &&
+                "filesEdited" in part.output
+              ) {
+                const d = part.output as { filesEdited?: string[]; miniForge?: boolean };
+                if (d.filesEdited) toolResult.filesEdited = d.filesEdited;
+                if (d.miniForge) toolResult.miniForge = true;
               }
               completedCalls.push({
                 id: part.toolCallId,

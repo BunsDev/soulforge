@@ -51,6 +51,8 @@ export interface MultiAgentEvent {
   warning?: string;
   /** Whether this agent was auto-retried */
   retried?: boolean;
+  /** Whether subagents use the forge system prompt (miniForge path) */
+  miniForge?: boolean;
 }
 
 export interface AgentStatsEvent {

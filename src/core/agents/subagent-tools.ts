@@ -8,6 +8,7 @@ import { logBackgroundError } from "../../stores/errors.js";
 import type { AgentFeatures } from "../../types/index.js";
 import { getWorkspaceCoordinator } from "../coordination/WorkspaceCoordinator.js";
 import { getModelContextWindow } from "../llm/models.js";
+import { isAnthropicNative } from "../llm/provider-options.js";
 import { isForbidden } from "../security/forbidden.js";
 // detectModelFamily removed — subagent pruning is now always disabled
 import { getActiveTaskTab } from "../tools/task-list.js";
@@ -51,6 +52,7 @@ export interface SubagentModels {
   skills?: Array<{ name: string; content: string }>;
   disablePruning?: boolean;
   tabId?: string;
+  forgeInstructions?: string;
 }
 
 function formatToolArgs(toolCall: { toolName: string; input?: unknown }): string {
@@ -180,7 +182,18 @@ export function createAgent(
     task.role === "explore" || task.role === "investigate" || models.readOnly === true;
   const { model } = selectModel(task, models);
   const tier = detectTaskTier(task);
-  let subagentProviderOptions = stripContextManagement(models.providerOptions);
+  const modelId =
+    typeof model === "object" && "modelId" in model ? String(model.modelId) : "unknown";
+
+  // miniForge: share forge system prompt for Anthropic prefix cache hits.
+  // Trivial tier uses a cheaper model (different cache namespace), so skip.
+  const useMiniForge =
+    models.forgeInstructions != null && isAnthropicNative(modelId) && tier !== "trivial";
+
+  let subagentProviderOptions = useMiniForge
+    ? models.providerOptions
+    : stripContextManagement(models.providerOptions);
+
   if (useExplore && subagentProviderOptions) {
     const patched: Record<string, unknown> = {};
     for (const [provider, val] of Object.entries(subagentProviderOptions)) {
@@ -192,9 +205,9 @@ export function createAgent(
     }
     subagentProviderOptions = patched as ProviderOptions;
   }
-  const modelId =
-    typeof model === "object" && "modelId" in model ? String(model.modelId) : "unknown";
+
   const contextWindow = getModelContextWindow(modelId);
+  const forgeInstructions = useMiniForge ? models.forgeInstructions : undefined;
   const opts = {
     bus,
     agentId: task.agentId,
@@ -209,6 +222,7 @@ export function createAgent(
     disablePruning: models.disablePruning,
     role: task.role === "investigate" ? ("investigate" as const) : ("explore" as const),
     tabId: models.tabId,
+    forgeInstructions,
   };
   const hasPreloadedFiles = !useExplore && task.task.includes("--- Preloaded file contents");
   const agent = useExplore
@@ -1108,6 +1122,7 @@ export function buildSubagentTools(models: SubagentModels) {
               reads,
               filesEdited: edited,
               output: singleOutput + dependentWarning,
+              miniForge: models.forgeInstructions != null,
             } satisfies DispatchOutput;
           }
 
@@ -1115,6 +1130,7 @@ export function buildSubagentTools(models: SubagentModels) {
             parentToolCallId: toolCallId,
             type: "dispatch-start",
             totalAgents: tasks.length,
+            miniForge: models.forgeInstructions != null,
           });
 
           const taskIds = new Set(tasks.map((t) => t.agentId));
@@ -1216,6 +1232,7 @@ export function buildSubagentTools(models: SubagentModels) {
             totalAgents: tasks.length,
             completedAgents: bus.completedAgentIds.length,
             findingCount: bus.findingCount,
+            miniForge: models.forgeInstructions != null,
           });
 
           const results = bus.getAllResults();
@@ -1331,6 +1348,7 @@ export function buildSubagentTools(models: SubagentModels) {
             reads: allReads,
             filesEdited: editedPaths,
             output: sections.join("\n") + dependentWarning,
+            miniForge: models.forgeInstructions != null,
           } satisfies DispatchOutput;
         } finally {
           if (activeTabId && !editingDone) getWorkspaceCoordinator().agentFinished(activeTabId);

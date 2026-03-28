@@ -19,7 +19,7 @@ import { getWorkspaceCoordinator } from "../core/coordination/WorkspaceCoordinat
 import { setEditorRequestCallback } from "../core/editor/instance.js";
 import { icon, providerIcon, UI_ICONS } from "../core/icons.js";
 import { runIntelligenceHealthCheck } from "../core/intelligence/index.js";
-import { fetchOpenRouterMetadata } from "../core/llm/models.js";
+import { fetchOpenRouterMetadata, getShortModelLabel } from "../core/llm/models.js";
 import { notifyProviderSwitch } from "../core/llm/provider.js";
 import { initForbidden } from "../core/security/forbidden.js";
 import { SessionManager } from "../core/sessions/manager.js";
@@ -963,7 +963,11 @@ export function App({
             </>
           )}
           <text fg="#333">│</text>
-          <ContextBar contextManager={contextManager} modelId={activeModelForHeader} />
+          <ContextBar
+            contextManager={contextManager}
+            modelId={activeModelForHeader}
+            suppressCompacting={tabMgr.tabCount > 1}
+          />
           <text fg="#333">│</text>
           <TokenDisplay />
         </box>
@@ -980,6 +984,14 @@ export function App({
             getMode={(id) =>
               id === tabMgr.activeTabId ? forgeMode : (tabMgr.getChat(id)?.forgeMode ?? "default")
             }
+            getModelLabel={(id) => {
+              const model =
+                id === tabMgr.activeTabId
+                  ? activeModelForHeader
+                  : (tabMgr.getChat(id)?.activeModel ?? null);
+              if (!model || model === "none") return null;
+              return getShortModelLabel(model);
+            }}
           />
         </box>
       ) : !editorVisible ? (

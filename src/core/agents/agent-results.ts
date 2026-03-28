@@ -17,6 +17,7 @@ export interface DispatchOutput {
   reads: FileReadRecord[];
   filesEdited: string[];
   output: string;
+  miniForge?: boolean;
 }
 
 type AgentResult = {

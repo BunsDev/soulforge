@@ -528,14 +528,18 @@ const ToolRow = memo(
         suffix = ` → rejected — ${dispatchRejection}`;
         suffixColor = "#d9a020";
       } else if (tc.state === "running") {
+        const isMini = multiProgress?.miniForge;
+        const agentNoun = isMini ? "mini-forges" : "agents";
         const parts: string[] = [];
         if (seconds != null && seconds > 0) parts.push(formatDuration(seconds));
-        if (total > 0) parts.push(`${String(done)}/${String(total)} agents`);
+        if (total > 0) parts.push(`${String(done)}/${String(total)} ${agentNoun}`);
         if (multiProgress && multiProgress.findingCount > 0)
           parts.push(`${String(multiProgress.findingCount)} findings`);
         suffix = parts.length > 0 ? ` · ${parts.join(" · ")}` : "";
       } else if (tc.state === "done") {
-        suffix = ` → ${String(done)}/${String(total)} agents`;
+        const isMini = multiProgress?.miniForge;
+        const agentNoun = isMini ? "mini-forges" : "agents";
+        suffix = ` → ${String(done)}/${String(total)} ${agentNoun}`;
       }
     } else if (tc.state === "running" && seconds != null && seconds > 0) {
       suffix = ` ${formatDuration(seconds)}`;

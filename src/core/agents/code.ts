@@ -8,7 +8,7 @@ import { buildBusTools } from "./bus-tools.js";
 import { buildPrepareStep, buildSymbolLookup } from "./step-utils.js";
 import { repairToolCall } from "./stream-options.js";
 
-function codeBase(hasPreloadedFiles: boolean): string {
+export function codeBase(hasPreloadedFiles: boolean): string {
   if (hasPreloadedFiles) {
     return `Code agent. Make specific edits. Target files and changes are in the task.
 
@@ -49,6 +49,7 @@ interface CodeAgentOptions {
   disablePruning?: boolean;
   tabId?: string;
   hasPreloadedFiles?: boolean;
+  forgeInstructions?: string;
 }
 
 export function createCodeAgent(model: LanguageModel, options?: CodeAgentOptions) {
@@ -91,12 +92,14 @@ export function createCodeAgent(model: LanguageModel, options?: CodeAgentOptions
     tools: allTools,
     instructions: {
       role: "system" as const,
-      content: (() => {
-        const base = codeBase(options?.hasPreloadedFiles ?? false);
-        return hasBus
-          ? `${base}\nOwnership: you own files you edit first. check_edit_conflicts before touching another agent's file.\nIf another agent owns the file: report_finding with the exact edit instead.\nCoordination: report_finding after significant changes (paths, what changed, new exports). Peer findings appear in tool results.`
-          : base;
-      })(),
+      content: options?.forgeInstructions
+        ? options.forgeInstructions
+        : (() => {
+            const base = codeBase(options?.hasPreloadedFiles ?? false);
+            return hasBus
+              ? `${base}\nOwnership: you own files you edit first. check_edit_conflicts before touching another agent's file.\nIf another agent owns the file: report_finding with the exact edit instead.\nCoordination: report_finding after significant changes (paths, what changed, new exports). Peer findings appear in tool results.`
+              : base;
+          })(),
       providerOptions: EPHEMERAL_CACHE,
     },
     stopWhen: stopConditions,

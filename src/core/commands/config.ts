@@ -418,11 +418,12 @@ async function handleInstructions(_input: string, ctx: CommandContext): Promise<
     INSTRUCTION_SOURCES.map((s: { id: string; label: string; files: string[] }) => {
       const enabled = currentEnabled.has(s.id);
       const found = loadedIds.has(s.id);
-      const status = enabled ? (found ? "on (loaded)" : "on (file not found)") : "off";
+      const suffix = enabled ? (found ? "" : " (not found)") : "";
       return {
         value: s.id,
-        label: `${s.label}: ${status}`,
-        description: s.files.join(", "),
+        icon: enabled ? "✓" : " ",
+        color: enabled ? (found ? "#2d5" : "#F59E0B") : "#555",
+        label: `${s.label}${suffix}`,
       };
     });
 
