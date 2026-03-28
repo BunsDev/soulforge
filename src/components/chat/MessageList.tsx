@@ -11,6 +11,7 @@ import {
   useState,
 } from "react";
 import { icon } from "../../core/icons.js";
+import { getThemeTokens, type ThemeTokens, useTheme } from "../../core/theme/index.js";
 import { resolveToolDisplay, TOOL_ICONS, TOOL_LABELS } from "../../core/tool-display.js";
 import type {
   ChatMessage,
@@ -19,6 +20,7 @@ import type {
   PlanOutput,
   ToolCall,
 } from "../../types/index.js";
+import { Spinner } from "../layout/shared.js";
 import { StructuredPlanView } from "../plan/StructuredPlanView.js";
 import { Markdown, useCodeExpanded } from "./Markdown.js";
 import { ReasoningBlock } from "./ReasoningBlock.js";
@@ -33,10 +35,7 @@ function useReasoningExpanded(): boolean {
 const REVEAL_INTERVAL = 30;
 const MAX_REVEAL_STEPS = 15;
 const CURSOR_CHAR = "\u2588"; // █
-const USER_COLOR = "#00BFFF";
-const ASSISTANT_COLOR = "#9B30FF";
-const SYSTEM_COLOR = "#555";
-const ERROR_COLOR = "#f44";
+
 export const RAIL_BORDER = {
   topLeft: "▌",
   topRight: "▌",
@@ -66,8 +65,6 @@ function formatTime(ts: number): string {
     minute: "2-digit",
   });
 }
-
-const RETRY_COLOR = "#fa0";
 
 function cleanErrorDetail(msg: string): string {
   let cleaned = msg.replace(/\[([^\]]+)\]\([^)]+\)/g, "");
@@ -105,6 +102,7 @@ function parseRetry(text: string): { attempt: string; reason: string; delay: str
 }
 
 function SystemMessage({ msg, animate = true }: { msg: ChatMessage; animate?: boolean }) {
+  const t = useTheme();
   const time = formatTime(msg.timestamp);
   const text = msg.content;
   const isError =
@@ -118,8 +116,8 @@ function SystemMessage({ msg, animate = true }: { msg: ChatMessage; animate?: bo
       ? `${categorizeError(retry.reason).category.toLowerCase()} — waiting ~${retry.delay}s`
       : text;
 
-  const railColor = isError ? ERROR_COLOR : retry ? RETRY_COLOR : SYSTEM_COLOR;
-  const textColor = isError ? "#e88" : retry ? "#777" : "#777";
+  const railColor = isError ? t.error : retry ? t.warning : t.textMuted;
+  const textColor = isError ? t.error : t.textSecondary;
 
   const chunkSize = Math.max(1, Math.ceil(displayText.length / MAX_REVEAL_STEPS));
   const totalSteps = Math.ceil(displayText.length / chunkSize);
@@ -161,20 +159,20 @@ function SystemMessage({ msg, animate = true }: { msg: ChatMessage; animate?: bo
     >
       <box flexDirection="row">
         {isError ? (
-          <text fg={ERROR_COLOR} attributes={TextAttributes.BOLD}>
+          <text fg={t.error} attributes={TextAttributes.BOLD}>
             {headerIcon} {headerLabel}
           </text>
         ) : retry ? (
-          <text fg="#da0" attributes={TextAttributes.BOLD}>
+          <text fg={t.warning} attributes={TextAttributes.BOLD}>
             {headerIcon} {headerLabel}
           </text>
         ) : (
-          <text fg={SYSTEM_COLOR}>
+          <text fg={t.textMuted}>
             {headerIcon ? `${headerIcon} ` : ""}
             {headerLabel}
           </text>
         )}
-        <text fg="#333"> · {time}</text>
+        <text fg={t.textFaint}> · {time}</text>
       </box>
       {lines.map((line, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: stable line order
@@ -209,6 +207,7 @@ function ToolCallRow({
   tc: ToolCall;
   diffStyle?: "default" | "sidebyside" | "compact";
 }) {
+  const t = useTheme();
   const expanded = useCodeExpanded();
   const errorsExpanded = useReasoningExpanded();
   const props = buildFinalToolRowProps(tc);
@@ -228,9 +227,9 @@ function ToolCallRow({
       <box flexDirection="column" flexShrink={0}>
         <StaticToolRow {...props} />
         <box paddingLeft={3} height={1} flexShrink={0}>
-          <text truncate fg="#a55">
+          <text truncate fg={t.error}>
             {errorPreview}
-            {hasMore ? <span fg="#555"> /errors for full</span> : null}
+            {hasMore ? <span fg={t.textMuted}> /errors for full</span> : null}
           </text>
         </box>
       </box>
@@ -241,13 +240,14 @@ function ToolCallRow({
 }
 
 function CollapsedToolGroup({ calls }: { calls: ToolCall[] }) {
+  const t = useTheme();
   const count = calls.length;
   const allOk = calls.every((tc) => tc.result?.success);
   return (
     <box height={1} flexShrink={0}>
       <text truncate>
-        <span fg={allOk ? "#4a7" : "#f44"}>{allOk ? "✓" : "✗"} </span>
-        <span fg="#777">
+        <span fg={allOk ? t.success : t.error}>{allOk ? "✓" : "✗"} </span>
+        <span fg={t.textSecondary}>
           {String(count)} tool call{count > 1 ? "s" : ""} (
           {calls.map((tc) => TOOL_LABELS[tc.name] ?? tc.name).join(", ")})
         </span>
@@ -279,6 +279,7 @@ function parsePlanResult(tc: ToolCall): { file?: string; resultStr?: string } {
 }
 
 function WritePlanCall({ tc }: { tc: ToolCall }) {
+  const t = useTheme();
   const plan = parsePlanFromArgs(tc);
   const expanded = useCodeExpanded();
   const { file: planFile, resultStr } = parsePlanResult(tc);
@@ -309,7 +310,7 @@ function WritePlanCall({ tc }: { tc: ToolCall }) {
           flexShrink={0}
           border
           borderStyle="rounded"
-          borderColor="#333"
+          borderColor={t.border}
           marginTop={1}
           paddingX={1}
         >
@@ -324,7 +325,7 @@ const TRUNCATE_THRESHOLD = 10;
 const TRUNCATE_HEAD = 4;
 const TRUNCATE_TAIL = 4;
 
-function truncateUserContent(content: string, expanded: boolean): ReactNode {
+function truncateUserContent(content: string, expanded: boolean, t: ThemeTokens): ReactNode {
   const lines = content.split("\n");
   if (expanded || lines.length <= TRUNCATE_THRESHOLD) {
     return <text>{content}</text>;
@@ -335,7 +336,7 @@ function truncateUserContent(content: string, expanded: boolean): ReactNode {
   return (
     <box flexDirection="column">
       <text>{head}</text>
-      <text fg="#555">
+      <text fg={t.textMuted}>
         {"// <+"}
         {String(hidden)}
         {" lines> //"}
@@ -355,10 +356,11 @@ function parsePlanTitle(content: string): string {
 }
 
 const UserMessageAccent = memo(function UserMessageAccent({ msg }: { msg: ChatMessage }) {
+  const t = useTheme();
   const time = formatTime(msg.timestamp);
   const expanded = useReasoningExpanded();
   const isPlan = isPlanExecution(msg.content);
-  const borderColor = USER_COLOR;
+  const borderColor = t.info;
 
   if (isPlan && !expanded) {
     const title = parsePlanTitle(msg.content);
@@ -373,20 +375,20 @@ const UserMessageAccent = memo(function UserMessageAccent({ msg }: { msg: ChatMe
         paddingLeft={2}
         paddingRight={1}
         paddingY={1}
-        backgroundColor="#0a1218"
+        backgroundColor={t.bgUser}
       >
         <box flexDirection="row">
           <text fg={borderColor} attributes={TextAttributes.BOLD}>
             You
           </text>
-          <text fg="#333"> · {time}</text>
+          <text fg={t.textFaint}> · {time}</text>
         </box>
         <box height={1}>
           <text truncate>
-            <span fg={USER_COLOR}>{TOOL_ICONS.plan} </span>
-            <span fg="#ccc">Execute plan: {title}</span>
-            <span fg="#555"> ({String(lineCount)} lines)</span>
-            <span fg="#333"> ^O</span>
+            <span fg={t.info}>{TOOL_ICONS.plan} </span>
+            <span fg={t.textPrimary}>Execute plan: {title}</span>
+            <span fg={t.textMuted}> ({String(lineCount)} lines)</span>
+            <span fg={t.textFaint}> ^O</span>
           </text>
         </box>
       </box>
@@ -403,21 +405,22 @@ const UserMessageAccent = memo(function UserMessageAccent({ msg }: { msg: ChatMe
       paddingLeft={2}
       paddingRight={1}
       paddingY={1}
-      backgroundColor="#0a1218"
+      backgroundColor={t.bgUser}
     >
       <box flexDirection="row">
         <text fg={borderColor} attributes={TextAttributes.BOLD}>
           You
         </text>
-        <text fg="#333"> · {time}</text>
-        {msg.isSteering && <text fg="#FF8C00"> · steering</text>}
+        <text fg={t.textFaint}> · {time}</text>
+        {msg.isSteering && <text fg={t.warning}> · steering</text>}
       </box>
-      {truncateUserContent(msg.content, expanded)}
+      {truncateUserContent(msg.content, expanded, t)}
     </box>
   );
 });
 
 const UserMessageBubble = memo(function UserMessageBubble({ msg }: { msg: ChatMessage }) {
+  const t = useTheme();
   const time = formatTime(msg.timestamp);
   const expanded = useReasoningExpanded();
 
@@ -426,14 +429,14 @@ const UserMessageBubble = memo(function UserMessageBubble({ msg }: { msg: ChatMe
       <box
         borderStyle="rounded"
         border={true}
-        borderColor={USER_COLOR}
+        borderColor={t.info}
         paddingX={2}
         paddingY={1}
-        backgroundColor="#0a1218"
+        backgroundColor={t.bgUser}
       >
-        {truncateUserContent(msg.content, expanded)}
+        {truncateUserContent(msg.content, expanded, t)}
       </box>
-      <text fg="#555"> You · {time}</text>
+      <text fg={t.textMuted}> You · {time}</text>
     </box>
   );
 });
@@ -444,6 +447,7 @@ function renderSegments(
   diffStyle: "default" | "sidebyside" | "compact" = "default",
   showReasoning = true,
   reasoningExpanded = false,
+  t: ThemeTokens = getThemeTokens(),
 ) {
   let firstToolsIdx = -1;
   for (let k = 0; k < segments.length; k++) {
@@ -469,7 +473,7 @@ function renderSegments(
         <box key={`text-${i}`} flexDirection="column" marginTop={needsGap ? 1 : 0}>
           {isFinalAnswer && (
             <box height={1} flexShrink={0} marginBottom={1}>
-              <text fg="#333" truncate>
+              <text fg={t.textFaint} truncate>
                 {"─".repeat(60)}
               </text>
             </box>
@@ -499,28 +503,44 @@ function renderSegments(
           marginTop={needsGap ? 1 : 0}
           border={["left"]}
           borderStyle="heavy"
-          borderColor={allDone ? "#4a7" : "#00BFFF"}
+          borderColor={allDone ? t.success : t.info}
           paddingLeft={1}
         >
           <text truncate>
-            <span fg={allDone ? "#4a7" : "#00BFFF"}>{TOOL_ICONS.plan} </span>
-            <span fg="#ccc" attributes={TextAttributes.BOLD}>
+            <span fg={allDone ? t.success : t.info}>{TOOL_ICONS.plan} </span>
+            <span fg={t.textPrimary} attributes={TextAttributes.BOLD}>
               {seg.plan.title}{" "}
             </span>
-            <span fg="#555">
+            <span fg={t.textMuted}>
               {String(doneSteps)}/{String(totalSteps)}
             </span>
           </text>
           {seg.plan.steps.map((step) => {
             const isDone = step.status === "done";
+            const isActive = step.status === "active";
             const isSkipped = step.status === "skipped";
-            const stepIcon = isDone ? "✓" : isSkipped ? "⊘" : "○";
-            const stepColor = isDone ? "#4a7" : isSkipped ? "#444" : "#555";
+            const stepColor = isDone
+              ? t.success
+              : isActive
+                ? t.brand
+                : isSkipped
+                  ? t.textDim
+                  : t.textMuted;
+            const stepTextColor = isDone ? t.textSecondary : isActive ? t.textPrimary : t.textMuted;
             return (
               <box key={step.id} height={1} flexShrink={0}>
                 <text truncate>
-                  <span fg={stepColor}>{stepIcon} </span>
-                  <span fg={isDone ? "#888" : "#666"}>{step.label}</span>
+                  {isActive ? (
+                    <>
+                      <Spinner />
+                      <span> </span>
+                    </>
+                  ) : (
+                    <span fg={stepColor}>{isDone ? "✓" : isSkipped ? "⊘" : "○"} </span>
+                  )}
+                  <span fg={stepTextColor} attributes={isActive ? TextAttributes.BOLD : undefined}>
+                    {step.label}
+                  </span>
                 </text>
               </box>
             );
@@ -591,11 +611,11 @@ function renderSegments(
               : "●";
             const statusColor = allDone
               ? fail === 0
-                ? "#4a7"
+                ? t.success
                 : fail === g.calls.length
-                  ? "#f44"
-                  : "#fa0"
-              : "#666";
+                  ? t.error
+                  : t.warning
+              : t.textMuted;
             const kindLabel =
               g.kind === "edits" ? "edit_file" : g.kind === "reads" ? "read_file" : "soul_grep";
             const { icon: batchIcon, iconColor } = resolveToolDisplay(kindLabel);
@@ -604,9 +624,9 @@ function renderSegments(
                 <text truncate>
                   <span fg={statusColor}>{statusIcon} </span>
                   <span fg={iconColor}>{batchIcon} </span>
-                  <span fg="#999">{label}</span>
+                  <span fg={t.textSecondary}>{label}</span>
                   {fail > 0 && ok > 0 ? (
-                    <span fg="#555">
+                    <span fg={t.textMuted}>
                       {" "}
                       ({String(ok)} ok, {String(fail)} failed)
                     </span>
@@ -642,6 +662,7 @@ const AssistantMessage = memo(function AssistantMessage({
   showReasoning?: boolean;
   reasoningExpanded?: boolean;
 }) {
+  const t = useTheme();
   const time = formatTime(msg.timestamp);
 
   const toolCallMap = useMemo(() => {
@@ -662,18 +683,18 @@ const AssistantMessage = memo(function AssistantMessage({
       flexDirection="column"
       marginBottom={1}
       border={["left"]}
-      borderColor={ASSISTANT_COLOR}
+      borderColor={t.brand}
       customBorderChars={RAIL_BORDER}
       paddingLeft={2}
       paddingY={1}
     >
       <box flexDirection="row">
-        <text fg={ASSISTANT_COLOR}>{icon("ai")} Forge</text>
-        <text fg="#333"> {time}</text>
+        <text fg={t.brand}>{icon("ai")} Forge</text>
+        <text fg={t.textFaint}> {time}</text>
       </box>
 
       {isEmpty ? (
-        <text fg="#555" attributes={TextAttributes.ITALIC}>
+        <text fg={t.textMuted} attributes={TextAttributes.ITALIC}>
           Empty response — model returned no content.
         </text>
       ) : hasSegments ? (
@@ -683,6 +704,7 @@ const AssistantMessage = memo(function AssistantMessage({
           diffStyle,
           showReasoning,
           reasoningExpanded,
+          t,
         )
       ) : (
         <>
@@ -751,6 +773,7 @@ export const MessageList = memo(function MessageList({
   diffStyle = "default",
   showReasoning = true,
 }: Props) {
+  const t = useTheme();
   const lastSystemIdx = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i]?.role === "system") return i;
@@ -762,7 +785,7 @@ export const MessageList = memo(function MessageList({
     return (
       <box flexDirection="column" paddingX={1} width="100%">
         <box marginTop={1}>
-          <text fg="#555" attributes={TextAttributes.ITALIC}>
+          <text fg={t.textMuted} attributes={TextAttributes.ITALIC}>
             No messages yet. Type below to start.
           </text>
         </box>

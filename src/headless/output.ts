@@ -6,7 +6,7 @@ export function writeEvent(event: Record<string, unknown>): void {
 }
 
 export function stderrLabel(label: string, value: string): void {
-  process.stderr.write(`${PURPLE}${label}:${RST} ${value}\n`);
+  process.stderr.write(`${PURPLE()}${label}:${RST} ${value}\n`);
 }
 
 export function stderrDim(msg: string): void {
@@ -14,11 +14,11 @@ export function stderrDim(msg: string): void {
 }
 
 export function stderrError(msg: string): void {
-  process.stderr.write(`${RED}Error:${RST} ${msg}\n`);
+  process.stderr.write(`${RED()}Error:${RST} ${msg}\n`);
 }
 
 export function stderrWarn(msg: string): void {
-  process.stderr.write(`${YELLOW}${msg}${RST}\n`);
+  process.stderr.write(`${YELLOW()}${msg}${RST}\n`);
 }
 
 export function separator(): void {

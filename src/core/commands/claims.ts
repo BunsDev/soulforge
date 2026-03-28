@@ -2,6 +2,7 @@ import { relative } from "node:path";
 import type { InfoPopupLine } from "../../components/modals/InfoPopup.js";
 import { getWorkspaceCoordinator } from "../coordination/WorkspaceCoordinator.js";
 import { icon } from "../icons.js";
+import { getThemeTokens } from "../theme/index.js";
 import type { CommandContext, CommandHandler } from "./types.js";
 import { sysMsg } from "./utils.js";
 
@@ -39,13 +40,17 @@ function handleClaims(_input: string, ctx: CommandContext): void {
         type: "entry",
         label: displayPath(f.path),
         desc: `${String(f.editCount)} edits, ${ago}`,
-        color: "#c89030",
-        descColor: "#666",
+        color: getThemeTokens().amber,
+        descColor: getThemeTokens().textMuted,
       });
     }
   }
   lines.push({ type: "spacer" });
-  lines.push({ type: "text", label: `${String(allClaims.size)} file(s) claimed`, color: "#555" });
+  lines.push({
+    type: "text",
+    label: `${String(allClaims.size)} file(s) claimed`,
+    color: getThemeTokens().textMuted,
+  });
 
   ctx.openInfoPopup({ title: "File Claims", icon: icon("lock"), lines, labelWidth: 40 });
 }

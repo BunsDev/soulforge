@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { classifyPath, type OutsideKind } from "../../core/security/outside-cwd.js";
+import { getThemeTokens } from "../../core/theme/index.js";
 import { SUBAGENT_NAMES } from "./ToolCallDisplay.js";
 
 const CWD = process.cwd();
@@ -14,7 +15,14 @@ export function formatArgs(toolName: string, args?: string): string {
     if (toolName === "edit_file" && parsed.path) return parsed.path;
     if (toolName === "multi_edit" && parsed.path) return parsed.path;
     if (toolName === "undo_edit" && parsed.path) return parsed.path;
-    if (toolName === "list_dir" && parsed.path) return parsed.path;
+    if (toolName === "list_dir" && parsed.path) {
+      if (Array.isArray(parsed.path)) {
+        const paths = parsed.path as string[];
+        const label = paths.join(", ");
+        return label.length > 60 ? `${String(paths.length)} dirs` : label;
+      }
+      return parsed.path;
+    }
     if (toolName === "rename_file") {
       if (parsed.from && parsed.to) {
         const label = `${String(parsed.from)} → ${String(parsed.to)}`;
@@ -371,9 +379,15 @@ export function detectOutsideCwd(toolName: string, args?: string): OutsideKind |
 }
 
 export const OUTSIDE_BADGE: Record<OutsideKind, { label: string; color: string }> = {
-  outside: { label: "outside", color: "#e5c07b" },
-  config: { label: "config", color: "#888" },
-  tmp: { label: "tmp", color: "#888" },
+  get outside() {
+    return { label: "outside", color: getThemeTokens().warning };
+  },
+  get config() {
+    return { label: "config", color: getThemeTokens().textSecondary };
+  },
+  get tmp() {
+    return { label: "tmp", color: getThemeTokens().textSecondary };
+  },
 };
 
 // Language-agnostic code execution detection for shell commands.

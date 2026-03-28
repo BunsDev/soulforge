@@ -419,9 +419,9 @@ export class ContextManager {
     const gen = this.getRepoMapGeneration();
     const skillCount = this.skills.size;
     const skillNames = [...this.skills.keys()].sort().join(",");
-    const memCount = (this.memoryManager.buildMemoryIndex() ?? "").length;
+    const memGen = this.memoryManager.generation;
     const mode = this.forgeMode;
-    return `${String(gen)}|${modelId}|${mode}|${String(skillCount)}:${skillNames}|${String(memCount)}`;
+    return `${String(gen)}|${modelId}|${mode}|${String(skillCount)}:${skillNames}|m${String(memGen)}`;
   }
 
   waitForRepoMap(timeoutMs = 120_000): Promise<boolean> {

@@ -1,7 +1,19 @@
 import { memo, useEffect, useState } from "react";
+import { useTheme, useThemeStore } from "../../core/theme/index.js";
 
-export const POPUP_BG = "#111122";
-export const POPUP_HL = "#1a1a3e";
+/** Reactive popup colors — auto-update when theme changes */
+export let POPUP_BG = useThemeStore.getState().tokens.bgPopup;
+export let POPUP_HL = useThemeStore.getState().tokens.bgPopupHighlight;
+useThemeStore.subscribe((s) => {
+  POPUP_BG = s.tokens.bgPopup;
+  POPUP_HL = s.tokens.bgPopupHighlight;
+});
+
+/** Hook for popup colors — use in React components */
+export function usePopupColors() {
+  const t = useTheme();
+  return { bg: t.bgPopup, hl: t.bgPopupHighlight, overlay: t.bgOverlay };
+}
 
 export type ConfigScope = "project" | "global";
 export const CONFIG_SCOPES: ConfigScope[] = ["project", "global"];
@@ -57,25 +69,27 @@ export function useSpinnerFrame(): number {
 
 export function Spinner({
   frames = SPINNER_FRAMES,
-  color = "#9B30FF",
+  color,
 }: {
   frames?: string[];
   color?: string;
 } = {}) {
+  const t = useTheme();
   const frame = useSpinnerFrame();
-  return <text fg={color}>{frames[frame % frames.length]}</text>;
+  return <text fg={color ?? t.brand}>{frames[frame % frames.length]}</text>;
 }
 
 const OVERLAY_STYLE = { opacity: 0.65 } as const;
 
 export function Overlay({ children }: { children: React.ReactNode }) {
+  const t = useTheme();
   return (
     <box position="absolute" width="100%" height="100%">
       <box
         position="absolute"
         width="100%"
         height="100%"
-        backgroundColor="#0a0812"
+        backgroundColor={t.bgOverlay}
         style={OVERLAY_STYLE}
       />
       <box
@@ -101,7 +115,8 @@ export const PopupRow = memo(function PopupRow({
   bg?: string;
   w: number;
 }) {
-  const fill = bg ?? POPUP_BG;
+  const t = useTheme();
+  const fill = bg ?? t.bgPopup;
   return (
     <box width={w} height={1} overflow="hidden">
       <box position="absolute">

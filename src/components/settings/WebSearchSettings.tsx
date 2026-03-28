@@ -10,6 +10,7 @@ import {
   type SecretKey,
   setSecret,
 } from "../../core/secrets.js";
+import { useTheme } from "../../core/theme/index.js";
 import { Overlay, POPUP_BG, POPUP_HL, PopupRow } from "../layout/shared.js";
 
 const MAX_POPUP_WIDTH = 72;
@@ -79,6 +80,7 @@ export function WebSearchSettings({ visible, onClose }: Props) {
   const innerW = popupWidth - 2;
   const maxVisible = Math.max(4, Math.floor((termRows - 2) * 0.8) - CHROME_ROWS);
 
+  const t = useTheme();
   const keys = useWebSearchStore((s) => s.keys);
   const refresh = useWebSearchStore((s) => s.refresh);
   const [cursor, setCursor] = useState(0);
@@ -245,48 +247,48 @@ export function WebSearchSettings({ visible, onClose }: Props) {
           flexDirection="column"
           borderStyle="rounded"
           border={true}
-          borderColor="#8B5CF6"
+          borderColor={t.brandAlt}
           width={popupWidth}
         >
           <PopupRow w={innerW}>
-            <text bg={POPUP_BG} fg="#9B30FF" attributes={TextAttributes.BOLD}>
+            <text bg={POPUP_BG} fg={t.brand} attributes={TextAttributes.BOLD}>
               {icon("proxy")}
             </text>
-            <text bg={POPUP_BG} fg="white" attributes={TextAttributes.BOLD}>
+            <text bg={POPUP_BG} fg={t.textPrimary} attributes={TextAttributes.BOLD}>
               {" "}
               {target?.label ?? "API Key"}
             </text>
           </PopupRow>
 
           <PopupRow w={innerW}>
-            <text bg={POPUP_BG} fg="#333">
+            <text bg={POPUP_BG} fg={t.textFaint}>
               {"─".repeat(innerW - 2)}
             </text>
           </PopupRow>
 
           <PopupRow w={innerW}>
-            <text bg={POPUP_BG} fg="#888">
+            <text bg={POPUP_BG} fg={t.textSecondary}>
               Paste your key:
             </text>
           </PopupRow>
 
           <PopupRow w={innerW}>
-            <text bg="#1a1a2e" fg="#8B5CF6">
+            <text bg={t.bgPopupHighlight} fg={t.brandAlt}>
               {masked || " "}
             </text>
-            <text bg="#1a1a2e" fg="#FF0040">
+            <text bg={t.bgPopupHighlight} fg={t.brandSecondary}>
               _
             </text>
           </PopupRow>
 
           <PopupRow w={innerW}>
-            <text bg={POPUP_BG} fg="#333">
+            <text bg={POPUP_BG} fg={t.textFaint}>
               {"─".repeat(innerW - 2)}
             </text>
           </PopupRow>
 
           <PopupRow w={innerW}>
-            <text bg={POPUP_BG} fg="#555">
+            <text bg={POPUP_BG} fg={t.textMuted}>
               {"⏎"} save | esc cancel | stored in {backendLabel}
             </text>
           </PopupRow>
@@ -301,52 +303,52 @@ export function WebSearchSettings({ visible, onClose }: Props) {
         flexDirection="column"
         borderStyle="rounded"
         border={true}
-        borderColor="#8B5CF6"
+        borderColor={t.brandAlt}
         width={popupWidth}
       >
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#9B30FF" attributes={TextAttributes.BOLD}>
+          <text bg={POPUP_BG} fg={t.brand} attributes={TextAttributes.BOLD}>
             {icon("web_search")}
           </text>
-          <text bg={POPUP_BG} fg="white" attributes={TextAttributes.BOLD}>
+          <text bg={POPUP_BG} fg={t.textPrimary} attributes={TextAttributes.BOLD}>
             {" "}
             Web Search
           </text>
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#333">
+          <text bg={POPUP_BG} fg={t.textFaint}>
             {"─".repeat(innerW - 2)}
           </text>
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#888">
+          <text bg={POPUP_BG} fg={t.textSecondary}>
             {"Search: "}
           </text>
-          <text bg={POPUP_BG} fg={hasBrave ? "#2d5" : "#888"}>
+          <text bg={POPUP_BG} fg={hasBrave ? t.success : t.textSecondary}>
             {searchLabel}
           </text>
-          <text bg={POPUP_BG} fg="#555">
+          <text bg={POPUP_BG} fg={t.textMuted}>
             {" "}
             {searchNote}
           </text>
         </PopupRow>
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#888">
+          <text bg={POPUP_BG} fg={t.textSecondary}>
             {"Reader: "}
           </text>
-          <text bg={POPUP_BG} fg={hasJina ? "#2d5" : "#888"}>
+          <text bg={POPUP_BG} fg={hasJina ? t.success : t.textSecondary}>
             {readerLabel}
           </text>
-          <text bg={POPUP_BG} fg="#555">
+          <text bg={POPUP_BG} fg={t.textMuted}>
             {" "}
             {readerNote}
           </text>
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#333">
+          <text bg={POPUP_BG} fg={t.textFaint}>
             {"─".repeat(innerW - 2)}
           </text>
         </PopupRow>
@@ -363,10 +365,10 @@ export function WebSearchSettings({ visible, onClose }: Props) {
             if (mi.type === "action") {
               return (
                 <PopupRow key={mi.id} bg={bg} w={innerW}>
-                  <text bg={bg} fg={isSelected ? "#FF0040" : "#555"}>
+                  <text bg={bg} fg={isSelected ? t.brandSecondary : t.textMuted}>
                     {isSelected ? "› " : "  "}
                   </text>
-                  <text bg={bg} fg="#e55">
+                  <text bg={bg} fg={t.error}>
                     {mi.label}
                   </text>
                 </PopupRow>
@@ -374,7 +376,7 @@ export function WebSearchSettings({ visible, onClose }: Props) {
             }
 
             const info = mi.info;
-            const statusColor = info.set ? "#2d5" : "#555";
+            const statusColor = info.set ? t.success : t.textMuted;
             const statusText = info.set
               ? info.source === "env"
                 ? `set (${mi.item.envVar})`
@@ -383,10 +385,10 @@ export function WebSearchSettings({ visible, onClose }: Props) {
 
             return (
               <PopupRow key={mi.item.id} bg={bg} w={innerW}>
-                <text bg={bg} fg={isSelected ? "#FF0040" : "#555"}>
+                <text bg={bg} fg={isSelected ? t.brandSecondary : t.textMuted}>
                   {isSelected ? "› " : "  "}
                 </text>
-                <text bg={bg} fg="white">
+                <text bg={bg} fg={t.textPrimary}>
                   {mi.item.label}
                 </text>
                 <text bg={bg} fg={statusColor}>
@@ -403,7 +405,7 @@ export function WebSearchSettings({ visible, onClose }: Props) {
           if (mi?.type === "key") {
             return (
               <PopupRow w={innerW}>
-                <text bg={POPUP_BG} fg="#666">
+                <text bg={POPUP_BG} fg={t.textMuted}>
                   {"  "}
                   {mi.item.desc}
                 </text>
@@ -414,27 +416,27 @@ export function WebSearchSettings({ visible, onClose }: Props) {
         })()}
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#333">
+          <text bg={POPUP_BG} fg={t.textFaint}>
             {"─".repeat(innerW - 2)}
           </text>
         </PopupRow>
 
         {statusMsg ? (
           <PopupRow w={innerW}>
-            <text bg={POPUP_BG} fg="#8B5CF6">
+            <text bg={POPUP_BG} fg={t.brandAlt}>
               {statusMsg}
             </text>
           </PopupRow>
         ) : (
           <PopupRow w={innerW}>
-            <text bg={POPUP_BG} fg="#555">
+            <text bg={POPUP_BG} fg={t.textMuted}>
               Storage: {backendLabel}
             </text>
           </PopupRow>
         )}
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#555">
+          <text bg={POPUP_BG} fg={t.textMuted}>
             {"↑↓"} nav | {"⏎"} set key | esc close
           </text>
         </PopupRow>

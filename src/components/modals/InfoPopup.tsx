@@ -1,6 +1,7 @@
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useEffect, useState } from "react";
+import { useTheme } from "../../core/theme/index.js";
 import { Overlay, POPUP_BG, PopupRow } from "../layout/shared.js";
 
 const CHROME_ROWS = 6;
@@ -33,6 +34,7 @@ interface Props {
 }
 
 export function InfoPopup({ visible, config, onClose }: Props) {
+  const t = useTheme();
   const { width: termCols, height: termRows } = useTerminalDimensions();
   const containerRows = termRows - 2;
   const maxWidth = config?.width ?? 68;
@@ -74,25 +76,25 @@ export function InfoPopup({ visible, config, onClose }: Props) {
         flexDirection="column"
         borderStyle="rounded"
         border={true}
-        borderColor="#8B5CF6"
+        borderColor={t.brandAlt}
         width={popupWidth}
       >
         <PopupRow w={innerW}>
           {config.icon && (
-            <text bg={POPUP_BG} fg="#9B30FF">
+            <text bg={POPUP_BG} fg={t.brand}>
               {config.icon}{" "}
             </text>
           )}
-          <text bg={POPUP_BG} fg="white" attributes={TextAttributes.BOLD}>
+          <text bg={POPUP_BG} fg={t.textPrimary} attributes={TextAttributes.BOLD}>
             {config.title}
           </text>
-          <text bg={POPUP_BG} fg="#555">
+          <text bg={POPUP_BG} fg={t.textMuted}>
             {"  "}↑↓ scroll
           </text>
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#333">
+          <text bg={POPUP_BG} fg={t.textFaint}>
             {"─".repeat(innerW - 2)}
           </text>
         </PopupRow>
@@ -108,7 +110,7 @@ export function InfoPopup({ visible, config, onClose }: Props) {
               case "header":
                 return (
                   <PopupRow key={key} w={innerW}>
-                    <text bg={POPUP_BG} fg="#8B5CF6" attributes={TextAttributes.BOLD}>
+                    <text bg={POPUP_BG} fg={t.brandAlt} attributes={TextAttributes.BOLD}>
                       {truncText(line.label ?? "", maxTextW)}
                     </text>
                   </PopupRow>
@@ -116,7 +118,7 @@ export function InfoPopup({ visible, config, onClose }: Props) {
               case "separator":
                 return (
                   <PopupRow key={key} w={innerW}>
-                    <text bg={POPUP_BG} fg="#333">
+                    <text bg={POPUP_BG} fg={t.textFaint}>
                       {"─".repeat(innerW - 2)}
                     </text>
                   </PopupRow>
@@ -125,10 +127,10 @@ export function InfoPopup({ visible, config, onClose }: Props) {
                 const descMax = maxTextW - labelW;
                 return (
                   <PopupRow key={key} w={innerW}>
-                    <text bg={POPUP_BG} fg={line.color ?? "#FF0040"}>
+                    <text bg={POPUP_BG} fg={line.color ?? t.brandSecondary}>
                       {(line.label ?? "").padEnd(labelW).slice(0, labelW)}
                     </text>
-                    <text bg={POPUP_BG} fg={line.descColor ?? "#666"}>
+                    <text bg={POPUP_BG} fg={line.descColor ?? t.textMuted}>
                       {truncText(line.desc ?? "", descMax)}
                     </text>
                   </PopupRow>
@@ -137,7 +139,7 @@ export function InfoPopup({ visible, config, onClose }: Props) {
               case "text":
                 return (
                   <PopupRow key={key} w={innerW}>
-                    <text bg={POPUP_BG} fg={line.color ?? "#555"}>
+                    <text bg={POPUP_BG} fg={line.color ?? t.textMuted}>
                       {truncText(line.label ?? "", maxTextW)}
                     </text>
                   </PopupRow>
@@ -149,19 +151,20 @@ export function InfoPopup({ visible, config, onClose }: Props) {
                 const filled = Math.max(fillPct > 0 ? 1 : 0, Math.round((fillPct / 100) * barW));
                 const empty = barW - filled;
                 const barFg =
-                  line.barColor ?? (fillPct > 75 ? "#FF0040" : fillPct > 50 ? "#FF8C00" : "#2d5");
+                  line.barColor ??
+                  (fillPct > 75 ? t.brandSecondary : fillPct > 50 ? t.warning : t.success);
                 return (
                   <PopupRow key={key} w={innerW}>
-                    <text bg={POPUP_BG} fg={line.color ?? "#ccc"}>
+                    <text bg={POPUP_BG} fg={line.color ?? t.textPrimary}>
                       {(line.label ?? "").padEnd(labelW).slice(0, labelW)}
                     </text>
                     <text bg={POPUP_BG} fg={barFg}>
                       {"━".repeat(filled)}
                     </text>
-                    <text bg={POPUP_BG} fg="#333">
+                    <text bg={POPUP_BG} fg={t.textFaint}>
                       {"─".repeat(empty)}
                     </text>
-                    <text bg={POPUP_BG} fg={line.descColor ?? "#666"}>
+                    <text bg={POPUP_BG} fg={line.descColor ?? t.textMuted}>
                       {" "}
                       {descStr}
                     </text>
@@ -181,7 +184,7 @@ export function InfoPopup({ visible, config, onClose }: Props) {
         </box>
         {config.lines.length > maxVisible && (
           <PopupRow w={innerW}>
-            <text fg="#555" bg={POPUP_BG}>
+            <text fg={t.textMuted} bg={POPUP_BG}>
               {scrollOffset > 0 ? "↑ " : "  "}
               {String(scrollOffset + 1)}-
               {String(Math.min(scrollOffset + maxVisible, config.lines.length))}/
@@ -196,7 +199,7 @@ export function InfoPopup({ visible, config, onClose }: Props) {
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#555">
+          <text bg={POPUP_BG} fg={t.textMuted}>
             {"↑↓"} scroll | esc close
           </text>
         </PopupRow>

@@ -4,6 +4,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fuzzyMatch } from "../../core/history/fuzzy.js";
 import { icon, providerIcon } from "../../core/icons.js";
 import { PROVIDER_CONFIGS } from "../../core/llm/models.js";
+import { useTheme } from "../../core/theme/index.js";
 import { useAllProviderModels } from "../../hooks/useAllProviderModels.js";
 import { Overlay, POPUP_BG, POPUP_HL, PopupRow, SPINNER_FRAMES } from "../layout/shared.js";
 
@@ -47,6 +48,7 @@ export const LlmSelector = memo(function LlmSelector({
   onSelect,
   onClose,
 }: Props) {
+  const t = useTheme();
   const { width: termCols, height: termRows } = useTerminalDimensions();
   const pw = Math.min(MAX_W, Math.floor(termCols * 0.85));
   const iw = pw - 2;
@@ -361,47 +363,47 @@ export const LlmSelector = memo(function LlmSelector({
 
   return (
     <Overlay>
-      <box flexDirection="column" borderStyle="rounded" border borderColor="#8B5CF6" width={pw}>
+      <box flexDirection="column" borderStyle="rounded" border borderColor={t.brandAlt} width={pw}>
         <PopupRow w={iw}>
-          <text fg="#9B30FF" bg={POPUP_BG}>
+          <text fg={t.brand} bg={POPUP_BG}>
             {icon("model")}{" "}
           </text>
-          <text fg="white" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
+          <text fg={t.textPrimary} attributes={TextAttributes.BOLD} bg={POPUP_BG}>
             Select Model
           </text>
         </PopupRow>
 
         <PopupRow w={iw}>
-          <text fg="#333" bg={POPUP_BG}>
+          <text fg={t.textFaint} bg={POPUP_BG}>
             {"─".repeat(iw - 4)}
           </text>
         </PopupRow>
 
         <PopupRow w={iw}>
-          <text fg="#555" bg={POPUP_BG}>
+          <text fg={t.textMuted} bg={POPUP_BG}>
             {icon("search")}{" "}
           </text>
-          <text fg="white" bg={POPUP_BG}>
+          <text fg={t.textPrimary} bg={POPUP_BG}>
             {query}
           </text>
-          <text fg="#8B5CF6" bg={POPUP_BG}>
+          <text fg={t.brandAlt} bg={POPUP_BG}>
             ▎
           </text>
           {!query && (
-            <text fg="#333" bg={POPUP_BG}>
+            <text fg={t.textFaint} bg={POPUP_BG}>
               {" search…"}
             </text>
           )}
         </PopupRow>
 
         <PopupRow w={iw}>
-          <text fg="#333" bg={POPUP_BG}>
+          <text fg={t.textFaint} bg={POPUP_BG}>
             {"<provider>/<model>"}
           </text>
         </PopupRow>
 
         <PopupRow w={iw}>
-          <text fg="#222" bg={POPUP_BG}>
+          <text fg={t.textSubtle} bg={POPUP_BG}>
             {"─".repeat(iw - 4)}
           </text>
         </PopupRow>
@@ -412,7 +414,7 @@ export const LlmSelector = memo(function LlmSelector({
 
         {displayEntries.length === 0 ? (
           <PopupRow w={iw}>
-            <text fg="#555" bg={POPUP_BG}>
+            <text fg={t.textMuted} bg={POPUP_BG}>
               {query ? "no matching models" : "no providers available"}
             </text>
           </PopupRow>
@@ -427,12 +429,12 @@ export const LlmSelector = memo(function LlmSelector({
                 const isActiveProvider = activeModel.startsWith(`${entry.id}/`);
                 const bg = active ? POPUP_HL : POPUP_BG;
                 const fg = !entry.avail
-                  ? "#444"
+                  ? t.textDim
                   : isActiveProvider
-                    ? "#00FF00"
+                    ? t.success
                     : active
                       ? "white"
-                      : "#8B5CF6";
+                      : t.brandAlt;
                 return (
                   <PopupRow key={`h-${entry.id}`} bg={bg} w={iw}>
                     <text fg={fg} bg={bg}>
@@ -442,19 +444,19 @@ export const LlmSelector = memo(function LlmSelector({
                       {providerIcon(entry.id)} {entry.name.toUpperCase()}
                     </text>
                     {entry.loading && (
-                      <text fg="#555" bg={bg}>
+                      <text fg={t.textMuted} bg={bg}>
                         {" "}
                         {SPINNER_FRAMES[spinFrame]}
                       </text>
                     )}
                     {!entry.loading && entry.count > 0 && (
-                      <text fg="#555" bg={bg}>
+                      <text fg={t.textMuted} bg={bg}>
                         {" "}
                         {String(entry.count)}
                       </text>
                     )}
                     {!entry.avail && !entry.loading && (
-                      <text fg="#444" bg={bg}>
+                      <text fg={t.textDim} bg={bg}>
                         {" · no key"}
                       </text>
                     )}
@@ -480,31 +482,31 @@ export const LlmSelector = memo(function LlmSelector({
               return (
                 <box key={`m-${entry.fullId}`} flexDirection="column">
                   <PopupRow bg={bg} w={iw}>
-                    <text fg={active ? "#8B5CF6" : "#555"} bg={bg}>
+                    <text fg={active ? t.brandAlt : t.textMuted} bg={bg}>
                       {connector}
                     </text>
                     <text
-                      fg={active ? "#FF0040" : isCur ? "#00FF00" : "#aaa"}
+                      fg={active ? t.brandSecondary : isCur ? t.success : t.textSecondary}
                       bg={bg}
                       attributes={active ? TextAttributes.BOLD : undefined}
                     >
                       {nm}
                     </text>
                     {ctxStr ? (
-                      <text fg={active ? "#994060" : "#444"} bg={bg}>
+                      <text fg={active ? t.brandDim : t.textDim} bg={bg}>
                         {" ".repeat(pad)}
                         {ctxStr}
                       </text>
                     ) : null}
                     {isCur && (
-                      <text fg="#00FF00" bg={bg}>
+                      <text fg={t.success} bg={bg}>
                         {" ✓"}
                       </text>
                     )}
                   </PopupRow>
                   {entry.hasDesc && (
                     <PopupRow bg={bg} w={iw}>
-                      <text fg={active ? "#888" : "#555"} bg={bg} truncate>
+                      <text fg={active ? t.textSecondary : t.textMuted} bg={bg} truncate>
                         {cont}
                         {entry.id.length > iw - 9 ? `${entry.id.slice(0, iw - 12)}…` : entry.id}
                       </text>
@@ -521,11 +523,11 @@ export const LlmSelector = memo(function LlmSelector({
         </PopupRow>
 
         <PopupRow w={iw}>
-          <text fg="#555" bg={POPUP_BG}>
+          <text fg={t.textMuted} bg={POPUP_BG}>
             {"↑↓"} navigate {"←→"} fold {"⏎"} select {"⇥"} next {"⎋"} {query ? "clear" : "close"}
           </text>
           {totalModels > 0 && (
-            <text fg="#444" bg={POPUP_BG}>
+            <text fg={t.textDim} bg={POPUP_BG}>
               {" "}
               {canScrollUp ? "↑" : " "}
               {String(totalModels)}

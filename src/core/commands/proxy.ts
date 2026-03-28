@@ -1,6 +1,7 @@
 import type { InfoPopupLine } from "../../components/modals/InfoPopup.js";
 import type { TaskRouter } from "../../types/index.js";
 import { icon } from "../icons.js";
+import { getThemeTokens } from "../theme/index.js";
 import type { CommandContext, CommandHandler } from "./types.js";
 import { sysMsg } from "./utils.js";
 
@@ -40,17 +41,28 @@ async function handleProxyStatus(_input: string, ctx: CommandContext): Promise<v
         type: "entry",
         label: "Status",
         desc: s.running ? "● running" : "○ stopped",
-        descColor: s.running ? "#2d5" : "#FF0040",
+        descColor: s.running ? getThemeTokens().success : getThemeTokens().brandSecondary,
       },
-      { type: "entry", label: "Endpoint", desc: s.endpoint, descColor: "#888" },
+      {
+        type: "entry",
+        label: "Endpoint",
+        desc: s.endpoint,
+        descColor: getThemeTokens().textSecondary,
+      },
       {
         type: "entry",
         label: "Binary",
         desc: s.binaryPath ?? "not installed",
-        descColor: s.installed ? "#888" : "#FF0040",
+        descColor: s.installed ? getThemeTokens().textSecondary : getThemeTokens().brandSecondary,
       },
     ];
-    if (s.pid) lines.push({ type: "entry", label: "PID", desc: String(s.pid), descColor: "#888" });
+    if (s.pid)
+      lines.push({
+        type: "entry",
+        label: "PID",
+        desc: String(s.pid),
+        descColor: getThemeTokens().textSecondary,
+      });
 
     if (s.version) {
       lines.push({ type: "spacer" }, { type: "separator" }, { type: "spacer" });
@@ -59,21 +71,23 @@ async function handleProxyStatus(_input: string, ctx: CommandContext): Promise<v
         type: "entry",
         label: "Installed",
         desc: `v${s.version.installed}`,
-        descColor: "#888",
+        descColor: getThemeTokens().textSecondary,
       });
       if (s.version.latest) {
         lines.push({
           type: "entry",
           label: "Latest",
           desc: `v${s.version.latest}`,
-          descColor: s.version.updateAvailable ? "#FFD700" : "#2d5",
+          descColor: s.version.updateAvailable
+            ? getThemeTokens().warning
+            : getThemeTokens().success,
         });
       }
       if (s.version.updateAvailable) {
         lines.push({
           type: "text",
           label: "  Run /proxy upgrade to update",
-          color: "#FFD700",
+          color: getThemeTokens().warning,
         });
       }
     }
@@ -83,14 +97,20 @@ async function handleProxyStatus(_input: string, ctx: CommandContext): Promise<v
       lines.push({ type: "spacer" }, { type: "separator" }, { type: "spacer" });
       lines.push({ type: "header", label: `Accounts (${accounts.length})` });
       for (const a of accounts) {
-        lines.push({ type: "entry", label: a.provider, desc: a.label, descColor: "#888" });
+        lines.push({
+          type: "entry",
+          label: a.provider,
+          desc: a.label,
+          descColor: getThemeTokens().textSecondary,
+        });
       }
     }
 
     if (s.models.length > 0) {
       lines.push({ type: "spacer" }, { type: "separator" }, { type: "spacer" });
       lines.push({ type: "header", label: `Models (${s.models.length})` });
-      for (const m of s.models) lines.push({ type: "text", label: `  ${m}`, color: "#888" });
+      for (const m of s.models)
+        lines.push({ type: "text", label: `  ${m}`, color: getThemeTokens().textSecondary });
     }
     lines.push(
       { type: "spacer" },
@@ -111,7 +131,7 @@ async function handleProxyStatus(_input: string, ctx: CommandContext): Promise<v
   ctx.openInfoPopup({
     title: "Proxy Status",
     icon: icon("proxy"),
-    lines: [{ type: "text", label: "Loading...", color: "#888" }],
+    lines: [{ type: "text", label: "Loading...", color: getThemeTokens().textSecondary }],
   });
 
   let pollActive = true;
@@ -146,7 +166,11 @@ async function handleProxyLogin(_input: string, ctx: CommandContext): Promise<vo
 
       type Line = InfoPopupLine;
       const loginLines: Line[] = [
-        { type: "text", label: `Logging in to ${provider.name}…`, color: "#888" },
+        {
+          type: "text",
+          label: `Logging in to ${provider.name}…`,
+          color: getThemeTokens().textSecondary,
+        },
       ];
 
       const updatePopup = (extraLines: Line[], closeCb?: () => void) => {
@@ -165,7 +189,7 @@ async function handleProxyLogin(_input: string, ctx: CommandContext): Promise<vo
       updatePopup(loginLines, onClose);
 
       handle = runProxyLogin((line) => {
-        loginLines.push({ type: "text", label: line, color: "#ccc" });
+        loginLines.push({ type: "text", label: line, color: getThemeTokens().textPrimary });
         updatePopup([...loginLines], onClose);
       }, provider.flag);
 
@@ -174,13 +198,17 @@ async function handleProxyLogin(_input: string, ctx: CommandContext): Promise<vo
           loginLines.push({
             type: "text",
             label: ok ? "Authentication complete." : "Authentication failed.",
-            color: ok ? "#2d5" : "#FF0040",
+            color: ok ? getThemeTokens().success : getThemeTokens().brandSecondary,
           });
           updatePopup([...loginLines]);
         })
         .catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : String(err);
-          loginLines.push({ type: "text", label: `Error: ${msg}`, color: "#FF0040" });
+          loginLines.push({
+            type: "text",
+            label: `Error: ${msg}`,
+            color: getThemeTokens().brandSecondary,
+          });
           updatePopup([...loginLines]);
         });
     },
@@ -195,7 +223,9 @@ async function handleProxyLogout(_input: string, ctx: CommandContext): Promise<v
     ctx.openInfoPopup({
       title: "Proxy Logout",
       icon: icon("proxy"),
-      lines: [{ type: "text", label: "No accounts logged in.", color: "#888" }],
+      lines: [
+        { type: "text", label: "No accounts logged in.", color: getThemeTokens().textSecondary },
+      ],
     });
     return;
   }
@@ -226,7 +256,7 @@ async function handleProxyLogout(_input: string, ctx: CommandContext): Promise<v
           {
             type: "text",
             label: removed ? `Removed ${label}` : `Failed to remove ${label}`,
-            color: removed ? "#2d5" : "#FF0040",
+            color: removed ? getThemeTokens().success : getThemeTokens().brandSecondary,
           },
         ],
       });
@@ -258,7 +288,7 @@ async function handleProxyUpgrade(_input: string, ctx: CommandContext): Promise<
         {
           type: "text",
           label: `Already on latest version (v${vinfo.installed})`,
-          color: "#2d5",
+          color: getThemeTokens().success,
         },
       ],
     });
@@ -270,7 +300,7 @@ async function handleProxyUpgrade(_input: string, ctx: CommandContext): Promise<
       type: "entry",
       label: "Upgrade",
       desc: `v${vinfo.installed} → v${vinfo.latest}`,
-      descColor: "#FFD700",
+      descColor: getThemeTokens().warning,
     },
     { type: "spacer" },
   ];
@@ -286,14 +316,14 @@ async function handleProxyUpgrade(_input: string, ctx: CommandContext): Promise<
   updatePopup();
 
   const result = await upgradeProxy((msg) => {
-    upgradeLines.push({ type: "text", label: msg, color: "#ccc" });
+    upgradeLines.push({ type: "text", label: msg, color: getThemeTokens().textPrimary });
     updatePopup();
   });
 
   upgradeLines.push({
     type: "text",
     label: result.ok ? "Upgrade complete." : `Upgrade failed: ${result.error}`,
-    color: result.ok ? "#2d5" : "#FF0040",
+    color: result.ok ? getThemeTokens().success : getThemeTokens().brandSecondary,
   });
   updatePopup();
 }

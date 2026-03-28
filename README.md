@@ -9,7 +9,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-BSL%201.1-blue.svg" alt="License" /></a>
   <a href="#"><img src="https://img.shields.io/badge/version-1.0.0-brightgreen.svg" alt="Version" /></a>
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-strict-blue.svg" alt="TypeScript" /></a>
-  <a href="#testing"><img src="https://img.shields.io/badge/tests-2080%20passing-brightgreen.svg" alt="Tests" /></a>
+  <a href="#testing"><img src="https://img.shields.io/badge/tests-2292%20passing-brightgreen.svg" alt="Tests" /></a>
   <a href="https://bun.sh"><img src="https://img.shields.io/badge/runtime-Bun-f472b6.svg" alt="Bun" /></a>
 </p>
 
@@ -29,20 +29,22 @@ Your real Neovim — config, plugins, LSP — embedded in an AI agent that under
 
 ### How it compares
 
-| | SoulForge | Claude Code | Copilot CLI | Aider |
-|---|---|---|---|---|
-| **Editor** | Embedded Neovim (LazyVim, your config) | No editor | No editor | No editor |
-| **Code graph** | SQLite graph — PageRank, blast radius, cochange, clone detection, FTS5 search, unused export detection, file profiles, identifier frequency | None (file reads + grep) | None | Tree-sitter repo map + PageRank |
-| **Code intelligence** | 4-tier fallback: LSP → ts-morph → tree-sitter → regex. Dual LSP (Neovim bridge + standalone). 33 languages | LSP via plugin (go-to-definition, references — no rename, no auto-install) | LSP (VS Code engines) | Tree-sitter AST |
-| **Compound tools** | `rename_symbol`, `move_symbol`, `refactor` — compiler-guaranteed, atomic, cross-file | Rename via LSP | — | — |
-| **Semantic context** | AST summaries for top 500 symbols, dispatch auto-enrichment with symbol line ranges | — | — | Tree-sitter tag summaries |
-| **Multi-agent** | Parallel dispatch (8 agents, 3 concurrent, shared file cache, edit ownership) | Subagents + Agent Teams | Subagents + Fleet | Single agent |
-| **Providers** | 10 (Anthropic, OpenAI, Google, xAI, Ollama, +5) | Anthropic models (API, Bedrock, Vertex) | Multi-model (Anthropic, OpenAI, Google) | 100+ LLMs |
-| **Task routing** | Per-task model assignment (plan, code, explore, search, trivial, cleanup, compact) | Single model | Single model | Single model |
-| **Cost visibility** | Per task, per agent, per model | `/cost` per session | Request counts | Per message |
-| **Context management** | 2-layer: per-step pruning + V1 (LLM summary) / V2 (deterministic extraction) compaction | Auto-compaction | Context window management | — |
-| **MCP** | Roadmap | Yes | Yes | No |
-| **License** | BSL 1.1 (source-available) | Proprietary | Proprietary | Apache 2.0 |
+| | SoulForge | Claude Code | Copilot CLI | Codex CLI | Aider |
+|---|---|---|---|---|---|
+| **Editor** | Embedded Neovim (LazyVim, your config) | No editor | No editor | No editor | No editor |
+| **Code graph** | SQLite graph — PageRank, blast radius, cochange, clone detection, FTS5 search, unused export detection, file profiles, identifier frequency | None (file reads + grep) | None | None (MCP plugins available) | Tree-sitter repo map + PageRank |
+| **Code intelligence** | 4-tier fallback: LSP → ts-morph → tree-sitter → regex. Dual LSP (Neovim bridge + standalone). 30 languages | LSP via plugin marketplace (rename supported, no auto-install, no fallback chain) | LSP (VS Code engines) | MCP-based LSP via plugins | Tree-sitter AST |
+| **Compound tools** | `rename_symbol`, `move_symbol`, `refactor` — compiler-guaranteed, atomic, cross-file | Rename via LSP | — | -- | — |
+| **Semantic context** | AST summaries for top 500 symbols, dispatch auto-enrichment with symbol line ranges | — | — | -- | Tree-sitter tag summaries |
+| **Multi-agent** | Parallel dispatch (8 agents, 3 concurrent, shared file cache, edit ownership) | Subagents + Agent Teams | Subagents + Fleet | Multi-agent v2 + subagents | Single agent |
+| **Providers** | 10 (LLM Gateway, Anthropic, OpenAI, Google, xAI, Ollama, +4) | Anthropic models (API, Bedrock, Vertex) | Multi-model (Anthropic, OpenAI, Google) | OpenAI models | 100+ LLMs |
+| **Task routing** | Per-task model assignment (plan, code, explore, search, trivial, cleanup, compact) | Single model | Single model | Per-agent model assignment | Single model |
+| **Cost visibility** | Per task, per agent, per model | `/cost` per session | Request counts | Server-side tracking | Per message |
+| **Context management** | 2-layer: per-step pruning + V1 (LLM summary) / V2 (deterministic extraction) compaction | Auto-compaction | Context window management | Server-side compaction | — |
+| **MCP** | Roadmap | Yes | Yes | Yes | No |
+| **License** | BSL 1.1 (source-available) | Proprietary | Proprietary | Apache 2.0 | Apache 2.0 |
+
+> *Competitor features verified as of March 28, 2026. This landscape moves fast — [let us know](https://github.com/ProxySoul/soulforge/issues) if something's changed.*
 
 ---
 
@@ -73,7 +75,7 @@ SQLite-backed codebase graph with PageRank ranking, cochange analysis, blast rad
 <td>
 
 ### 4-Tier Code Intelligence
-LSP → ts-morph → tree-sitter → regex fallback chain. 33 languages with convention-based visibility detection. Dual LSP backend: bridges to Neovim's LSP when the editor is open, spawns standalone servers when it's not. [Deep dive →](docs/architecture.md)
+LSP → ts-morph → tree-sitter → regex fallback chain. 30 languages with convention-based visibility detection. Dual LSP backend: bridges to Neovim's LSP when the editor is open, spawns standalone servers when it's not. [Deep dive →](docs/architecture.md)
 
 </td>
 </tr>
@@ -109,13 +111,13 @@ Type messages while the agent is working — they queue up and inject into the n
 <td>
 
 ### 10 Providers, Any Model
-Anthropic, OpenAI, Google, xAI, Ollama (local), OpenRouter, LLM Gateway, Vercel AI Gateway, Proxy, and custom OpenAI-compatible APIs. You own the API keys. No vendor lock-in. [Deep dive →](docs/provider-options.md)
+LLM Gateway, Anthropic, OpenAI, Google, xAI, Ollama (local), OpenRouter, Vercel AI Gateway, Proxy, and custom OpenAI-compatible APIs. You own the API keys. No vendor lock-in. [Deep dive →](docs/provider-options.md)
 
 </td>
 <td>
 
 ### Cross-Tab Coordination
-Up to 5 concurrent tabs with advisory file claims. Agents see what other tabs are editing, get warnings on contested files, and git operations are blocked during active dispatch. [Deep dive →](docs/cross-tab-coordination.md)
+Up to 5 concurrent tabs with per-tab model selection and advisory file claims. Run Opus in one tab for complex architecture, Haiku in another for quick searches. Agents see what other tabs are editing, get warnings on contested files, and git operations are blocked during active dispatch. [Deep dive →](docs/cross-tab-coordination.md)
 
 </td>
 </tr>
@@ -123,7 +125,7 @@ Up to 5 concurrent tabs with advisory file claims. Agents see what other tabs ar
 <td>
 
 ### Project Toolchain
-Auto-detects lint, typecheck, test, and build commands across 21 ecosystems from config files. Pre-commit gate blocks `git commit` on lint/type errors. Monorepo package discovery. [Deep dive →](docs/project-tool.md)
+Auto-detects lint, typecheck, test, and build commands across 23 ecosystems from config files. Pre-commit gate blocks `git commit` on lint/type errors. Monorepo package discovery. [Deep dive →](docs/project-tool.md)
 
 </td>
 <td>
@@ -139,7 +141,7 @@ Installable skill system for domain-specific capabilities. Destructive action ap
 
 ## Architecture
 
-The Forge Agent is the orchestrator. It holds 31 tools including the `dispatch` tool, which creates an AgentBus and launches parallel subagents. Subagents share file/tool caches through the bus and coordinate edits via ownership tracking.
+The Forge Agent is the orchestrator. It holds 34 tools including the `dispatch` tool, which creates an AgentBus and launches parallel subagents. Subagents share file/tool caches through the bus and coordinate edits via ownership tracking.
 
 ```mermaid
 graph TB
@@ -147,7 +149,7 @@ graph TB
     Chat --> Forge[Forge Agent]
 
     subgraph Forge Tools
-        Tools[31 Direct Tools]
+        Tools[34 Direct Tools]
         Dispatch[dispatch tool]
     end
 
@@ -397,7 +399,7 @@ soulforge --version                          # Version info
 
 ### Slash Commands
 
-76 commands available — press `/` or `Ctrl+K` to browse. Key ones by category:
+85 commands available — press `/` or `Ctrl+K` to browse. Key ones by category:
 
 **Models & Providers**
 `/model` `/router` `/provider` `/model-scope`
@@ -443,7 +445,7 @@ soulforge --version                          # Version info
 
 ## Tool Suite
 
-SoulForge ships 31 tools organized by capability:
+SoulForge ships 34 tools organized by capability:
 
 ### Code Intelligence
 
@@ -469,7 +471,7 @@ SoulForge ships 31 tools organized by capability:
 
 | Tool | What it does |
 |------|-------------|
-| `project` | Auto-detected lint, format, test, build, typecheck across [21 ecosystems](#project-toolchain-detection) |
+| `project` | Auto-detected lint, format, test, build, typecheck across [23 ecosystems](#project-toolchain-detection) |
 | `project(list)` | Discover monorepo packages with per-package capabilities |
 | `dispatch` | Parallel multi-agent execution (up to 8 agents, 3 concurrent) |
 | `git` | Structured git operations with auto co-author tracking |
@@ -497,13 +499,13 @@ SoulForge ships 31 tools organized by capability:
 
 | Provider | Models | Setup |
 |----------|--------|-------|
+| [**LLM Gateway**](https://llmgateway.io) | Multi-model gateway (OpenAI, Claude, Gemini, DeepSeek) | `LLM_GATEWAY_API_KEY` |
 | [**Anthropic**](https://console.anthropic.com/) | Claude 4.6 Opus/Sonnet, Haiku 4.5 | `ANTHROPIC_API_KEY` |
 | [**OpenAI**](https://platform.openai.com/) | GPT-4.5, o3, o4-mini | `OPENAI_API_KEY` |
 | [**Google**](https://aistudio.google.com/) | Gemini 2.5 Pro/Flash | `GOOGLE_GENERATIVE_AI_API_KEY` |
 | [**xAI**](https://console.x.ai/) | Grok 3 | `XAI_API_KEY` |
 | [**Ollama**](https://ollama.ai) | Any local model | Auto-detected |
 | [**OpenRouter**](https://openrouter.ai) | 200+ models | `OPENROUTER_API_KEY` |
-| [**LLM Gateway**](https://llmgateway.io) | Multi-model gateway (OpenAI, Claude, Gemini, DeepSeek) | `LLM_GATEWAY_API_KEY` |
 | [**Vercel AI Gateway**](https://vercel.com/ai-gateway) | Unified gateway for 15+ providers with caching, fallbacks, rate limiting | `AI_GATEWAY_API_KEY` |
 | [**Proxy**](https://github.com/router-for-me/CLIProxyAPI) | Local proxy with auto-lifecycle management — starts/stops with SoulForge | `PROXY_API_KEY` |
 | **Custom** | Any OpenAI-compatible API — add via config | Any env var |
@@ -554,7 +556,7 @@ SQLite-backed graph of your entire codebase, updated in real-time as files are e
 
 ```mermaid
 graph LR
-    Scan[File Scanner<br/>watches edits] --> Parse[tree-sitter<br/>33 languages]
+    Scan[File Scanner<br/>watches edits] --> Parse[tree-sitter<br/>30 languages]
     Parse --> Symbols[(Symbols<br/>name · kind · line · exports)]
     Parse --> Refs[(References<br/>cross-file imports)]
     Refs --> Graph[Dependency Graph]
@@ -573,7 +575,7 @@ graph LR
 
 **Powers:** `soul_find` (PageRank-ranked search with signatures), `soul_grep` (zero-cost identifier counts), `soul_analyze` (unused exports with dead code vs unnecessary export classification, file profiles, top files, external packages, symbol-by-kind queries with signatures), `soul_impact` (blast radius, dependency chains), dispatch enrichment (auto-injects symbol line ranges), AST semantic summaries (docstrings for top 500 symbols).
 
-**Language support:** Convention-based visibility detection for 33 languages. Export inference via Go capitalization, Rust/Zig `pub`, Python/Dart underscore convention, Java/Kotlin/Swift/C#/Scala not-private, PHP, Elixir `def`/`defp`, C/C++/ObjC header files, Solidity, and more. Identifier extraction patterns cover camelCase, PascalCase, snake_case, and hyphenated (Elisp) naming conventions across all supported languages.
+**Language support:** Convention-based visibility detection for 30 languages. Export inference via Go capitalization, Rust/Zig `pub`, Python/Dart underscore convention, Java/Kotlin/Swift/C#/Scala not-private, PHP, Elixir `def`/`defp`, C/C++/ObjC header files, Solidity, and more. Identifier extraction patterns cover camelCase, PascalCase, snake_case, and hyphenated (Elisp) naming conventions across all supported languages.
 
 **Monorepo support:** Partial. The repo map indexes files within the working directory. Cross-package dependencies within a monorepo are not yet tracked — each package is treated as an independent unit. The `project` tool handles monorepo workspace discovery separately.
 
@@ -709,7 +711,7 @@ See [GETTING_STARTED.md](GETTING_STARTED.md) for the full reference.
 ## Testing
 
 ```bash
-bun test              # 2080 tests across 44 files
+bun test              # 2292 tests across 49 files
 bun run typecheck     # tsc --noEmit
 bun run lint          # biome check (lint + format)
 bun run lint:fix      # auto-fix
@@ -721,7 +723,7 @@ bun run lint:fix      # auto-fix
 
 | Document | Description |
 |----------|-------------|
-| **[Command Reference](docs/commands-reference.md)** | All 76 slash commands by category |
+| **[Command Reference](docs/commands-reference.md)** | All 85 commands by category |
 | **[Headless Mode](docs/headless.md)** | Non-interactive CLI for CI/CD, scripting, automation |
 | **[Architecture](docs/architecture.md)** | System overview, data flow, component lifecycle |
 | **[Repo Map](docs/repo-map.md)** | PageRank, cochange, blast radius, clone detection |
@@ -752,7 +754,7 @@ sf --headless              CLI mode — CI/CD, scripts, automation  ✓ shipped
 SoulForge TUI              Full experience (what you're looking at now)
 ```
 
-- **`@soulforge/intelligence`** — graph intelligence, 31 tools, and agent orchestration as an importable package. Build your own AI tools on top of SoulForge's brain.
+- **`@soulforge/intelligence`** — graph intelligence, 34 tools, and agent orchestration as an importable package. Build your own AI tools on top of SoulForge's brain.
 - **`@soulforge/mcp`** — expose soul_grep, soul_find, soul_analyze, soul_impact, navigate, read_code as MCP tools. Any AI tool that supports MCP gets SoulForge's graph intelligence.
 - **`sf --headless`** — non-interactive mode. Pipe in a prompt, get back results. For CI/CD, automation, and benchmarks. [Documentation →](docs/headless.md)
 
@@ -761,7 +763,7 @@ SoulForge TUI              Full experience (what you're looking at now)
 - **Repo Map visualization** — interactive dependency graph, PageRank heatmap, blast radius explorer
 - **GitHub CLI integration** — native `gh_pr`, `gh_issue`, `gh_status` tools with structured output
 - **Dispatch worktrees** — git worktree per code agent for conflict-free parallel edits
-- **[ACP support](https://agentclientprotocol.com/)** — Agent Client Protocol integration. Run SoulForge as a coding agent inside Zed, JetBrains, Neovim (agentic.nvim), or any ACP-compatible editor. Headless mode already covers 80% of the protocol surface — `sf --acp` would expose graph intelligence, multi-agent dispatch, and all 31 tools via JSON-RPC 2.0 over stdio
+- **[ACP support](https://agentclientprotocol.com/)** — Agent Client Protocol integration. Run SoulForge as a coding agent inside Zed, JetBrains, Neovim (agentic.nvim), or any ACP-compatible editor. Headless mode already covers 80% of the protocol surface — `sf --acp` would expose graph intelligence, multi-agent dispatch, and all 34 tools via JSON-RPC 2.0 over stdio
 
 **Planned:**
 - **Monorepo graph support** — cross-package dependency tracking for pnpm/npm/yarn workspaces, Cargo workspaces, Go workspaces (`go.work`), Nx/Turborepo, and Bazel/Buck. Currently the repo map treats each workspace root as an isolated unit — cross-package imports resolve as external dependencies instead of internal edges. This means PageRank, blast radius, and unused export detection don't span package boundaries.

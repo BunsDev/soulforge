@@ -1,22 +1,9 @@
 import { TextAttributes } from "@opentui/core";
 import { useEffect, useState } from "react";
 import { icon } from "../../core/icons.js";
-import { onTaskChange, type Task, type TaskStatus } from "../../core/tools/task-list.js";
+import { useTheme } from "../../core/theme/index.js";
+import { onTaskChange, type Task } from "../../core/tools/task-list.js";
 import { SPINNER_FRAMES, useSpinnerFrame } from "../layout/shared.js";
-
-const STATUS_ICONS: Record<TaskStatus, string> = {
-  done: "✓",
-  "in-progress": "",
-  pending: "○",
-  blocked: "✗",
-};
-
-const STATUS_COLORS: Record<TaskStatus, string> = {
-  done: "#4a7",
-  "in-progress": "#9B30FF",
-  pending: "#555",
-  blocked: "#f44",
-};
 
 const MAX_VISIBLE = 6;
 
@@ -31,6 +18,19 @@ function InlineSpinner({ color }: { color: string }) {
 }
 
 export function TaskList({ tasks, nested }: TaskListProps) {
+  const theme = useTheme();
+  const STATUS_COLORS: Record<string, string> = {
+    done: theme.success,
+    "in-progress": theme.brand,
+    pending: theme.textMuted,
+    blocked: theme.error,
+  };
+  const STATUS_ICONS: Record<string, string> = {
+    done: "✓",
+    "in-progress": "●",
+    pending: "○",
+    blocked: "✗",
+  };
   if (tasks.length === 0) return null;
 
   const doneTasks = tasks.filter((t) => t.status === "done");
@@ -42,7 +42,7 @@ export function TaskList({ tasks, nested }: TaskListProps) {
     <box key={String(task.id)} height={1} flexDirection="row">
       <text>
         {task.status === "in-progress" ? (
-          <InlineSpinner color={STATUS_COLORS["in-progress"]} />
+          <InlineSpinner color={STATUS_COLORS["in-progress"] ?? theme.brand} />
         ) : (
           <span fg={STATUS_COLORS[task.status]}>{STATUS_ICONS[task.status]}</span>
         )}
@@ -50,10 +50,10 @@ export function TaskList({ tasks, nested }: TaskListProps) {
         <span
           fg={
             task.status === "done"
-              ? "#666"
+              ? theme.textMuted
               : task.status === "in-progress"
-                ? "#eee"
-                : STATUS_COLORS[task.status]
+                ? theme.textPrimary
+                : (STATUS_COLORS[task.status] ?? theme.textMuted)
           }
           attributes={task.status === "in-progress" ? TextAttributes.BOLD : undefined}
         >
@@ -66,10 +66,10 @@ export function TaskList({ tasks, nested }: TaskListProps) {
   if (nested) {
     return (
       <box flexDirection="column" paddingLeft={2}>
-        {doneTasks.length > 0 && <text fg="#4a7"> +{String(doneTasks.length)} done</text>}
+        {doneTasks.length > 0 && <text fg={theme.success}> +{String(doneTasks.length)} done</text>}
         {nonDone.slice(0, MAX_VISIBLE).map(renderTask)}
         {nonDone.length > MAX_VISIBLE && (
-          <text fg="#555"> +{String(nonDone.length - MAX_VISIBLE)} more</text>
+          <text fg={theme.textMuted}> +{String(nonDone.length - MAX_VISIBLE)} more</text>
         )}
       </box>
     );
@@ -80,22 +80,22 @@ export function TaskList({ tasks, nested }: TaskListProps) {
       flexDirection="column"
       borderStyle="rounded"
       border={true}
-      borderColor="#336"
+      borderColor={theme.brandDim}
       paddingX={1}
       width="100%"
     >
       <box gap={1} flexDirection="row" height={1}>
-        <text fg="#336" attributes={TextAttributes.BOLD}>
+        <text fg={theme.brandDim} attributes={TextAttributes.BOLD}>
           {icon("plan")} Tasks
         </text>
-        <text fg="#555">
+        <text fg={theme.textMuted}>
           {String(doneTasks.length)}/{String(tasks.length)}
         </text>
       </box>
-      {doneTasks.length > 0 && <text fg="#4a7">+{String(doneTasks.length)} done</text>}
+      {doneTasks.length > 0 && <text fg={theme.success}>+{String(doneTasks.length)} done</text>}
       {nonDone.slice(0, MAX_VISIBLE).map(renderTask)}
       {nonDone.length > MAX_VISIBLE && (
-        <text fg="#555">+{String(nonDone.length - MAX_VISIBLE)} more</text>
+        <text fg={theme.textMuted}>+{String(nonDone.length - MAX_VISIBLE)} more</text>
       )}
     </box>
   );
@@ -117,7 +117,6 @@ export function TaskProgress({ tabId }: { tabId?: string }) {
       setVisible(true);
       return;
     }
-    // All done/blocked — linger then dismiss
     setVisible(true);
     const timer = setTimeout(() => setVisible(false), 3000);
     return () => clearTimeout(timer);

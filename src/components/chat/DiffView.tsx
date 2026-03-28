@@ -2,17 +2,10 @@ import { readFile } from "node:fs/promises";
 import { memo, useEffect, useMemo, useState } from "react";
 import { computeDiff, langFromPath } from "../../core/diff.js";
 import { icon } from "../../core/icons.js";
+import { useTheme } from "../../core/theme/index.js";
 import { getSyntaxStyle, getTSClient } from "../../core/utils/syntax.js";
 
-const HEADER_ACCENT = "#9B30FF";
-const BORDER_COLOR = "#333";
-const HEADER_PATH = "#ccc";
-const ERROR_COLOR = "#f44";
 const LARGE_DIFF_THRESHOLD = 50;
-
-const ADD_COLOR = "#4a7";
-const REMOVE_COLOR = "#a55";
-const COLLAPSED_COLOR = "#555";
 
 type DiffMode = "default" | "sidebyside" | "compact";
 
@@ -61,19 +54,6 @@ function toUnifiedDiff(filePath: string, oldStr: string, newStr: string): string
   return [...header, ...body].join("\n");
 }
 
-const DIFF_COLORS = {
-  addedBg: "#0a1a0f",
-  removedBg: "#1a0a0a",
-  contextBg: "transparent",
-  addedContentBg: "#0a1a0f",
-  removedContentBg: "#1a0a0a",
-  contextContentBg: "transparent",
-  addedLineNumberBg: "#0a1a0f",
-  removedLineNumberBg: "#1a0a0a",
-  addedSignColor: ADD_COLOR,
-  removedSignColor: "#644",
-} as const;
-
 export const DiffView = memo(function DiffView({
   filePath,
   oldString,
@@ -82,6 +62,7 @@ export const DiffView = memo(function DiffView({
   errorMessage,
   mode = "default",
 }: Props) {
+  const t = useTheme();
   const [startLine, setStartLine] = useState(1);
   useEffect(() => {
     let cancelled = false;
@@ -115,7 +96,7 @@ export const DiffView = memo(function DiffView({
 
   const verb = !success ? "Edit" : computed?.isCreation ? "New" : "Edit";
   const diffIcon = !success ? icon("fail") : icon("pencil");
-  const iconColor = !success ? ERROR_COLOR : HEADER_ACCENT;
+  const iconColor = !success ? t.error : t.brand;
 
   const unifiedDiff = useMemo(() => {
     if (!success || !computed || isLarge) return null;
@@ -129,15 +110,13 @@ export const DiffView = memo(function DiffView({
       <box minHeight={1} flexShrink={0}>
         <text truncate>
           <span fg={iconColor}>{diffIcon} </span>
-          <span fg={HEADER_PATH}>{filePath}</span>
+          <span fg={t.textPrimary}>{filePath}</span>
           {!success ? (
-            <span fg={ERROR_COLOR}> {errorMessage ?? "failed"}</span>
+            <span fg={t.error}> {errorMessage ?? "failed"}</span>
           ) : computed ? (
             <>
-              {computed.added > 0 ? <span fg={ADD_COLOR}> +{String(computed.added)}</span> : null}
-              {computed.removed > 0 ? (
-                <span fg={REMOVE_COLOR}> -{String(computed.removed)}</span>
-              ) : null}
+              {computed.added > 0 ? <span fg={t.success}> +{String(computed.added)}</span> : null}
+              {computed.removed > 0 ? <span fg={t.error}> -{String(computed.removed)}</span> : null}
             </>
           ) : null}
         </text>
@@ -146,44 +125,34 @@ export const DiffView = memo(function DiffView({
   }
 
   return (
-    <box
-      flexDirection="column"
-      flexShrink={0}
-      border
-      borderStyle="rounded"
-      borderColor={BORDER_COLOR}
-    >
+    <box flexDirection="column" flexShrink={0} border borderStyle="rounded" borderColor={t.border}>
       <box
         height={1}
         flexShrink={0}
         paddingX={1}
-        backgroundColor="#1a1a1a"
+        backgroundColor={t.bgElevated}
         alignSelf="flex-start"
         marginTop={-1}
       >
         <text truncate>
-          <span fg={iconColor}>{diffIcon}</span> <span fg={HEADER_ACCENT}>{verb}</span>
-          <span fg={BORDER_COLOR}> ─ </span>
-          <span fg={HEADER_PATH}>{filePath}</span>
+          <span fg={iconColor}>{diffIcon}</span> <span fg={t.brand}>{verb}</span>
+          <span fg={t.border}> ─ </span>
+          <span fg={t.textPrimary}>{filePath}</span>
           {success && computed ? (
             <>
-              {computed.added > 0 ? <span fg={ADD_COLOR}> +{String(computed.added)}</span> : null}
-              {computed.removed > 0 ? (
-                <span fg={REMOVE_COLOR}> -{String(computed.removed)}</span>
-              ) : null}
+              {computed.added > 0 ? <span fg={t.success}> +{String(computed.added)}</span> : null}
+              {computed.removed > 0 ? <span fg={t.error}> -{String(computed.removed)}</span> : null}
             </>
           ) : null}
         </text>
       </box>
       {!success ? (
         <box paddingX={1}>
-          <text fg={ERROR_COLOR}>{errorMessage ?? "old_string not found in file"}</text>
+          <text fg={t.error}>{errorMessage ?? "old_string not found in file"}</text>
         </box>
       ) : isLarge ? (
         <box paddingX={1}>
-          <text fg={COLLAPSED_COLOR}>
-            {String(computed.added + computed.removed)} lines changed
-          </text>
+          <text fg={t.textMuted}>{String(computed.added + computed.removed)} lines changed</text>
         </box>
       ) : unifiedDiff ? (
         <diff
@@ -193,7 +162,16 @@ export const DiffView = memo(function DiffView({
           syntaxStyle={getSyntaxStyle()}
           treeSitterClient={getTSClient()}
           showLineNumbers
-          {...DIFF_COLORS}
+          addedBg={t.diffAddedBg}
+          removedBg={t.diffRemovedBg}
+          contextBg="transparent"
+          addedContentBg={t.diffAddedBg}
+          removedContentBg={t.diffRemovedBg}
+          contextContentBg="transparent"
+          addedLineNumberBg={t.diffAddedBg}
+          removedLineNumberBg={t.diffRemovedBg}
+          addedSignColor={t.diffAddedSign}
+          removedSignColor={t.diffRemovedSign}
         />
       ) : null}
     </box>

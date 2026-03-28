@@ -4,6 +4,7 @@ import { useState } from "react";
 import { getGitLog, gitPull, gitPush, gitStash, gitStashPop } from "../../core/git/status.js";
 import { icon } from "../../core/icons.js";
 
+import { useTheme } from "../../core/theme/index.js";
 import { Overlay, POPUP_BG, POPUP_HL, PopupRow } from "../layout/shared.js";
 
 const MAX_POPUP_WIDTH = 54;
@@ -174,6 +175,8 @@ export function GitMenu({
     }
   });
 
+  const t = useTheme();
+
   if (!visible) return null;
 
   const innerW = popupWidth - 2;
@@ -184,17 +187,17 @@ export function GitMenu({
         flexDirection="column"
         borderStyle="rounded"
         border={true}
-        borderColor="#8B5CF6"
+        borderColor={t.brandAlt}
         width={popupWidth}
       >
         <PopupRow w={innerW}>
-          <text fg="white" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
+          <text fg={t.textPrimary} attributes={TextAttributes.BOLD} bg={POPUP_BG}>
             {icon("git")} Git
           </text>
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text fg="#333" bg={POPUP_BG}>
+          <text fg={t.textFaint} bg={POPUP_BG}>
             {"─".repeat(innerW - 4)}
           </text>
         </PopupRow>
@@ -214,19 +217,19 @@ export function GitMenu({
             const bg = isActive ? POPUP_HL : POPUP_BG;
             return (
               <PopupRow key={item.action} bg={bg} w={innerW}>
-                <text bg={bg} fg={isActive ? "#FF0040" : "#555"}>
+                <text bg={bg} fg={isActive ? t.brandSecondary : t.textMuted}>
                   {isActive ? "› " : "  "}
                 </text>
                 <text
                   bg={bg}
-                  fg={isActive ? "#FF8C00" : "#666"}
+                  fg={isActive ? t.warning : t.textMuted}
                   attributes={isActive ? TextAttributes.BOLD : undefined}
                 >
                   {item.key}
                 </text>
                 <text
                   bg={bg}
-                  fg={isActive ? "#FF0040" : "#aaa"}
+                  fg={isActive ? t.brandSecondary : t.textSecondary}
                   attributes={isActive ? TextAttributes.BOLD : undefined}
                 >
                   {"  "}
@@ -238,7 +241,7 @@ export function GitMenu({
         </box>
         {MENU_ITEMS.length > maxVisible && (
           <PopupRow w={innerW}>
-            <text fg="#555" bg={POPUP_BG}>
+            <text fg={t.textMuted} bg={POPUP_BG}>
               {scrollOffset > 0 ? "↑ " : "  "}
               {String(cursor + 1)}/{String(MENU_ITEMS.length)}
               {scrollOffset + maxVisible < MENU_ITEMS.length ? " ↓" : ""}
@@ -251,7 +254,7 @@ export function GitMenu({
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text fg="#555" bg={POPUP_BG}>
+          <text fg={t.textMuted} bg={POPUP_BG}>
             {"↑↓"} navigate | {"⏎"}/key select | esc close
           </text>
         </PopupRow>

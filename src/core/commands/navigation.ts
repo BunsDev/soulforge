@@ -1,6 +1,7 @@
 import type { CommandPickerOption } from "../../components/modals/CommandPicker.js";
 import { useUIStore } from "../../stores/ui.js";
 import { icon } from "../icons.js";
+import { getThemeTokens } from "../theme/index.js";
 import type { CommandContext, CommandHandler } from "./types.js";
 import { sysMsg } from "./utils.js";
 
@@ -67,7 +68,7 @@ function handleTabs(_input: string, ctx: CommandContext): void {
     value: tab.id,
     label: `${String(i + 1)}. ${tab.label}`,
     icon: tab.id === ctx.tabMgr.activeTabId ? "▸" : " ",
-    color: tab.id === ctx.tabMgr.activeTabId ? "#9B30FF" : undefined,
+    color: tab.id === ctx.tabMgr.activeTabId ? getThemeTokens().brand : undefined,
   }));
   ctx.openCommandPicker({
     title: "Switch Tab",

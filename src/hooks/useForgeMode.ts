@@ -1,3 +1,4 @@
+import { getThemeTokens } from "../core/theme/index.js";
 import type { ForgeMode } from "../types/index.js";
 
 export const MODE_ORDER: ForgeMode[] = [
@@ -18,21 +19,30 @@ export const MODE_LABELS: Record<ForgeMode, string> = {
   auto: "Auto",
 };
 
-export const MODE_COLORS: Record<ForgeMode, string> = {
-  default: "#555",
-  architect: "#9B30FF",
-  socratic: "#FF8C00",
-  challenge: "#FF0040",
-  plan: "#00BFFF",
-  auto: "#2d5",
-};
+export function getModeColors(): Record<ForgeMode, string> {
+  const t = getThemeTokens();
+  return {
+    default: t.textMuted,
+    architect: t.brand,
+    socratic: t.warning,
+    challenge: t.brandSecondary,
+    plan: t.info,
+    auto: t.success,
+  };
+}
+
+export const MODE_COLORS: Record<ForgeMode, string> = new Proxy({} as Record<ForgeMode, string>, {
+  get(_, prop: string) {
+    return getModeColors()[prop as ForgeMode];
+  },
+});
 
 export function getModeLabel(mode: ForgeMode): string {
   return MODE_LABELS[mode];
 }
 
 export function getModeColor(mode: ForgeMode): string {
-  return MODE_COLORS[mode];
+  return getModeColors()[mode];
 }
 
 export function cycleForgeMode(current: ForgeMode): ForgeMode {

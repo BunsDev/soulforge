@@ -10,18 +10,20 @@ Your real Neovim -- config, plugins, LSP -- embedded in an AI agent that underst
 
 ## How it compares
 
-| | SoulForge | Claude Code | Copilot CLI | Aider |
-|---|---|---|---|---|
-| **Editor** | Embedded Neovim (your config) | No editor | No editor | No editor |
-| **Code graph** | SQLite graph -- PageRank, blast radius, cochange, clone detection, FTS5 | None (file reads + grep) | None | Tree-sitter repo map + PageRank |
-| **Code intelligence** | 4-tier fallback: LSP, ts-morph, tree-sitter, regex. Dual LSP. 12 operations. 33 languages | LSP via plugin (5 ops, no rename) | No agent LSP access | Tree-sitter AST |
-| **Compound tools** | `rename_symbol`, `move_symbol`, `refactor` -- compiler-guaranteed, atomic | Rename via LSP | -- | -- |
-| **Semantic context** | AST summaries for top 500 symbols, dispatch auto-enrichment | -- | -- | Tree-sitter tag summaries |
-| **Multi-agent** | Parallel dispatch (8 agents, 3 concurrent, shared cache, edit ownership) | Subagents + Agent Teams | Subagents + Fleet | Single agent |
-| **Providers** | 10 (Anthropic, OpenAI, Google, xAI, Ollama, +5) | Anthropic only | Multi-model | 100+ LLMs |
-| **Task routing** | Per-task model assignment (plan, code, explore, search, trivial, cleanup, compact) | Single model | Single model | Single model |
-| **Context management** | 2-layer: per-step pruning + V1/V2 compaction | Auto-compaction | Context window management | -- |
-| **License** | BSL 1.1 (source-available) | Proprietary | Proprietary | Apache 2.0 |
+| | SoulForge | Claude Code | Copilot CLI | Codex CLI | Aider |
+|---|---|---|---|---|---|
+| **Editor** | Embedded Neovim (your config) | No editor | No editor | No editor | No editor |
+| **Code graph** | SQLite graph -- PageRank, blast radius, cochange, clone detection, FTS5 | None (file reads + grep) | None | None (MCP plugins) | Tree-sitter repo map + PageRank |
+| **Code intelligence** | 4-tier fallback: LSP, ts-morph, tree-sitter, regex. Dual LSP. 12 operations. 30 languages | LSP via plugin marketplace (rename via cclsp, no auto-install) | No agent LSP access | MCP-based LSP via plugins | Tree-sitter AST |
+| **Compound tools** | `rename_symbol`, `move_symbol`, `refactor` -- compiler-guaranteed, atomic | Rename via LSP | -- | -- | -- |
+| **Semantic context** | AST summaries for top 500 symbols, dispatch auto-enrichment | -- | -- | -- | Tree-sitter tag summaries |
+| **Multi-agent** | Parallel dispatch (8 agents, 3 concurrent, shared cache, edit ownership) | Subagents + Agent Teams | Subagents + Fleet | Multi-agent v2 + subagents | Single agent |
+| **Providers** | 10 (LLM Gateway, Anthropic, OpenAI, Google, xAI, Ollama, +4) | Anthropic (API, Bedrock, Vertex) | Multi-model | OpenAI models | 100+ LLMs |
+| **Task routing** | Per-task model assignment (plan, code, explore, search, trivial, cleanup, compact) | Single model | Single model | Per-agent model | Single model |
+| **Context management** | 2-layer: per-step pruning + V1/V2 compaction | Auto-compaction | Context window management | Server-side compaction | -- |
+| **License** | BSL 1.1 (source-available) | Proprietary | Proprietary | Apache 2.0 | Apache 2.0 |
+
+<Note>Competitor capabilities verified as of March 28, 2026.</Note>
 
 ## Highlights
 
@@ -40,7 +42,7 @@ Your real Neovim -- config, plugins, LSP -- embedded in an AI agent that underst
 </Card>
 
 <Card title="4-tier code intelligence" icon="brain">
-  LSP, ts-morph, tree-sitter, regex fallback chain across 33 languages with dual LSP backend.
+  LSP, ts-morph, tree-sitter, regex fallback chain across 30 languages with dual LSP backend.
 </Card>
 
 <Card title="Compound tools" icon="wrench">
@@ -60,15 +62,19 @@ Your real Neovim -- config, plugins, LSP -- embedded in an AI agent that underst
 </Card>
 
 <Card title="10 providers" icon="plug">
-  Anthropic, OpenAI, Google, xAI, Ollama, OpenRouter, and custom OpenAI-compatible APIs.
+  LLM Gateway, Anthropic, OpenAI, Google, xAI, Ollama, OpenRouter, Vercel AI Gateway, Proxy, and custom OpenAI-compatible APIs.
+</Card>
+
+<Card title="Per-model cost tracking" icon="chart-line">
+  Cache-aware pricing across 30+ models. Per-task, per-agent, per-model breakdown with real-time display.
 </Card>
 
 <Card title="Cross-tab coordination" icon="table-columns">
-  Up to 5 concurrent tabs with advisory file claims and git blocking during dispatch.
+  Up to 5 concurrent tabs with per-tab model selection, advisory file claims, and git blocking during dispatch.
 </Card>
 
 <Card title="Project toolchain" icon="toolbox">
-  Auto-detects lint, typecheck, test, and build across 21 ecosystems with pre-commit enforcement.
+  Auto-detects lint, typecheck, test, and build across 23 ecosystems with pre-commit enforcement.
 </Card>
 
 <Card title="Skills and approval gates" icon="shield-check">
@@ -79,7 +85,7 @@ Your real Neovim -- config, plugins, LSP -- embedded in an AI agent that underst
 
 ## Tool suite
 
-SoulForge ships 31 tools organized by capability:
+SoulForge ships 34 tools organized by capability:
 
 ### Code intelligence
 
@@ -105,7 +111,7 @@ SoulForge ships 31 tools organized by capability:
 
 | Tool | What it does |
 |------|-------------|
-| `project` | Auto-detected lint, format, test, build, typecheck across 21 ecosystems |
+| `project` | Auto-detected lint, format, test, build, typecheck across 23 ecosystems |
 | `project(list)` | Discover monorepo packages with per-package capabilities |
 | `dispatch` | Parallel multi-agent execution (up to 8 agents, 3 concurrent) |
 | `git` | Structured git operations with auto co-author tracking |
@@ -114,13 +120,13 @@ SoulForge ships 31 tools organized by capability:
 
 | Provider | Models | Setup |
 |----------|--------|-------|
+| **LLM Gateway** | Multi-model gateway (OpenAI, Claude, Gemini, DeepSeek) | `LLM_GATEWAY_API_KEY` |
 | **Anthropic** | Claude Opus 4.6, Sonnet 4, Haiku 3.5 | `ANTHROPIC_API_KEY` |
 | **OpenAI** | GPT-4.5, o3, o4-mini | `OPENAI_API_KEY` |
 | **Google** | Gemini 2.5 Pro/Flash | `GOOGLE_GENERATIVE_AI_API_KEY` |
 | **xAI** | Grok 3 | `XAI_API_KEY` |
 | **Ollama** | Any local model | Auto-detected |
 | **OpenRouter** | 200+ models | `OPENROUTER_API_KEY` |
-| **LLM Gateway** | Multi-model gateway | `LLM_GATEWAY_API_KEY` |
 | **Vercel AI Gateway** | Unified gateway for 15+ providers | `AI_GATEWAY_API_KEY` |
 | **Proxy** | Local proxy with auto-lifecycle | `PROXY_API_KEY` |
 | **Custom** | Any OpenAI-compatible API | Any env var |

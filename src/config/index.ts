@@ -28,7 +28,7 @@ const DEFAULT_CONFIG: AppConfig = {
     args: [],
   },
   theme: {
-    accentColor: "cyan",
+    name: "dark",
   },
   nvimConfig: "default",
   editorIntegration: {

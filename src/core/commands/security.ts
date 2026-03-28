@@ -1,5 +1,6 @@
 import type { InfoPopupLine } from "../../components/modals/InfoPopup.js";
 import { icon } from "../icons.js";
+import { getThemeTokens } from "../theme/index.js";
 import type { CommandContext, CommandHandler } from "./types.js";
 import { sysMsg } from "./utils.js";
 
@@ -39,7 +40,7 @@ async function handlePrivacy(input: string, ctx: CommandContext): Promise<void> 
         popupLines.push({
           type: "text",
           label: `  ... and ${String(items.length - max)} more`,
-          color: "#444",
+          color: getThemeTokens().textDim,
         });
       }
       popupLines.push({ type: "spacer" });

@@ -1,5 +1,6 @@
 import { useTerminalDimensions } from "@opentui/react";
 import { icon } from "../../core/icons.js";
+import { useTheme } from "../../core/theme/index.js";
 
 // Priority tiers: 1 = always show, 2 = medium+, 3 = wide only
 interface ShortcutDef {
@@ -25,6 +26,7 @@ const SHORTCUTS: ShortcutDef[] = [
 
 export function Footer() {
   const { width } = useTerminalDimensions();
+  const t = useTheme();
 
   const maxTier = width >= 100 ? 3 : width >= 70 ? 2 : 1;
   const showLabels = width >= 50;
@@ -40,10 +42,10 @@ export function Footer() {
     >
       {visible.map((s) => (
         <text key={s.k}>
-          <span fg="#666">
+          <span fg={t.textMuted}>
             <b>{s.k}</b>
           </span>
-          <span fg="#444">
+          <span fg={t.textDim}>
             {" "}
             {s.ic}
             {showLabels ? ` ${s.l}` : ""}

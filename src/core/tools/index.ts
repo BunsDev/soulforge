@@ -605,11 +605,19 @@ export function buildTools(
       description: listDirTool.description,
       inputSchema: z.object({
         path: z
-          .string()
+          .union([z.string(), z.array(z.string())])
           .nullable()
           .optional()
           .transform(nullToUndef)
-          .describe("Directory path (defaults to cwd)"),
+          .describe(
+            "Directory path or array of paths (defaults to cwd). Pass multiple paths to list several directories in one call.",
+          ),
+        depth: z
+          .preprocess(coerceInt, z.number())
+          .nullable()
+          .optional()
+          .transform(nullToUndef)
+          .describe("Recursion depth (1=immediate children, max 5). Default 1."),
       }),
       execute: deferExecute((args) => listDirTool.execute(args, opts?.repoMap)),
     }),
@@ -1818,11 +1826,19 @@ export function buildSubagentExploreTools(opts?: {
       description: listDirTool.description,
       inputSchema: z.object({
         path: z
-          .string()
+          .union([z.string(), z.array(z.string())])
           .nullable()
           .optional()
           .transform(nullToUndef)
-          .describe("Directory path (defaults to cwd)"),
+          .describe(
+            "Directory path or array of paths (defaults to cwd). Pass multiple paths to list several directories in one call.",
+          ),
+        depth: z
+          .preprocess(coerceInt, z.number())
+          .nullable()
+          .optional()
+          .transform(nullToUndef)
+          .describe("Recursion depth (1=immediate children, max 5). Default 1."),
       }),
       execute: deferExecute((args) => listDirTool.execute(args, opts?.repoMap)),
     }),

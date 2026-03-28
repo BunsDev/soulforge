@@ -1,6 +1,7 @@
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { memo, useState } from "react";
+import { useTheme } from "../../core/theme/index.js";
 import { CORE_TOOL_NAMES, DEFERRED_TOOL_CATALOG } from "../../core/tools/constants.js";
 import { usePopupScroll } from "../../hooks/usePopupScroll.js";
 import { Overlay, POPUP_BG, POPUP_HL, PopupRow } from "../layout/shared.js";
@@ -45,18 +46,19 @@ const ToolRow = memo(function ToolRow({
   selected: boolean;
   w: number;
 }) {
+  const t = useTheme();
   const bg = selected ? POPUP_HL : POPUP_BG;
   const check = enabled ? "x" : " ";
-  const nameColor = enabled ? (tool.core ? "#2d9bf0" : "#ccc") : "#555";
-  const descColor = enabled ? "#666" : "#444";
+  const nameColor = enabled ? (tool.core ? t.info : t.textPrimary) : t.textMuted;
+  const descColor = enabled ? t.textMuted : t.textDim;
   const tag = tool.core ? " core" : "";
-  const tagColor = "#444";
+  const tagColor = t.textDim;
   const maxDesc = Math.max(0, w - tool.name.length - tag.length - 10);
   const desc = tool.desc.length > maxDesc ? `${tool.desc.slice(0, maxDesc - 1)}…` : tool.desc;
 
   return (
     <PopupRow bg={bg} w={w}>
-      <text bg={bg} fg={enabled ? "#2d5" : "#555"}>
+      <text bg={bg} fg={enabled ? t.success : t.textMuted}>
         [{check}]
       </text>
       <text bg={bg} fg={nameColor}>
@@ -82,6 +84,7 @@ export function ToolsPopup({
   onToggleAgentManaged,
   onClose,
 }: Props) {
+  const t = useTheme();
   const { width: termCols, height: termRows } = useTerminalDimensions();
   const popupW = Math.min(MAX_POPUP_WIDTH, termCols - 4);
   const innerW = popupW - 2;
@@ -133,15 +136,21 @@ export function ToolsPopup({
 
   return (
     <Overlay>
-      <box borderStyle="rounded" border borderColor="#8B5CF6" flexDirection="column" width={popupW}>
+      <box
+        borderStyle="rounded"
+        border
+        borderColor={t.brandAlt}
+        flexDirection="column"
+        width={popupW}
+      >
         <PopupRow w={innerW}>
-          <text fg="#8B5CF6" attributes={TextAttributes.BOLD}>
+          <text fg={t.brandAlt} attributes={TextAttributes.BOLD}>
             Tools
           </text>
-          <text fg="#555"> — space to toggle, esc to close</text>
+          <text fg={t.textMuted}> — space to toggle, esc to close</text>
         </PopupRow>
         <PopupRow w={innerW}>
-          <text fg="#333">{"─".repeat(innerW)}</text>
+          <text fg={t.textFaint}>{"─".repeat(innerW)}</text>
         </PopupRow>
 
         {visibleItems.map((tool, i) => {
@@ -160,20 +169,20 @@ export function ToolsPopup({
         {agentRowVisible && (
           <>
             <PopupRow w={innerW}>
-              <text fg="#333">{"─".repeat(innerW)}</text>
+              <text fg={t.textFaint}>{"─".repeat(innerW)}</text>
             </PopupRow>
             <PopupRow bg={cursor === items.length ? POPUP_HL : POPUP_BG} w={innerW}>
               <text
                 bg={cursor === items.length ? POPUP_HL : POPUP_BG}
-                fg={agentManaged ? "#2d5" : "#555"}
+                fg={agentManaged ? t.success : t.textMuted}
               >
                 [{agentManaged ? "x" : " "}]
               </text>
-              <text bg={cursor === items.length ? POPUP_HL : POPUP_BG} fg="#e0a020">
+              <text bg={cursor === items.length ? POPUP_HL : POPUP_BG} fg={t.warning}>
                 {" "}
                 Agent-managed tools
               </text>
-              <text bg={cursor === items.length ? POPUP_HL : POPUP_BG} fg="#666">
+              <text bg={cursor === items.length ? POPUP_HL : POPUP_BG} fg={t.textMuted}>
                 {" "}
                 allow agent to request/release tools
               </text>

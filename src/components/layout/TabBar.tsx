@@ -1,6 +1,7 @@
 import { TextAttributes } from "@opentui/core";
 import { useEffect, useState } from "react";
 import { icon } from "../../core/icons.js";
+import { useTheme } from "../../core/theme/index.js";
 import { getModeColor, getModeLabel } from "../../hooks/useForgeMode.js";
 import type { Tab, TabActivity } from "../../hooks/useTabs.js";
 import type { ForgeMode } from "../../types/index.js";
@@ -42,13 +43,15 @@ export function TabBar({
     return () => clearInterval(timer);
   }, [hasBusy]);
 
+  const t = useTheme();
+
   return (
     <box flexShrink={0} paddingX={1} height={1} flexDirection="row">
-      <text fg="#444">{icon("tabs")} </text>
-      <text fg="#555" attributes={TextAttributes.BOLD}>
+      <text fg={t.textDim}>{icon("tabs")} </text>
+      <text fg={t.textMuted} attributes={TextAttributes.BOLD}>
         TABS{" "}
       </text>
-      <text fg="#333">→ </text>
+      <text fg={t.textFaint}>→ </text>
       {tabs.map((tab, i) => {
         const isActive = tab.id === activeTabId;
         const num = String(i + 1);
@@ -65,39 +68,38 @@ export function TabBar({
         const hasUnread = activity?.hasUnread ?? false;
         const needsAttention = activity?.needsAttention ?? false;
 
-        // bracket color: attention=orange, compacting=blue, loading=purple, error=red, active=red, default=dim
         const bracketColor = needsAttention
-          ? "#F59E0B"
+          ? t.warning
           : isCompacting
-            ? "#5af"
+            ? t.info
             : isLoading
-              ? "#8B5CF6"
+              ? t.brandAlt
               : hasError
-                ? "#a55"
+                ? t.error
                 : isActive
-                  ? "#FF0040"
-                  : "#444";
+                  ? t.borderFocused
+                  : t.textDim;
 
         const numColor = isActive
-          ? "#FF0040"
+          ? t.borderFocused
           : needsAttention
-            ? "#F59E0B"
+            ? t.warning
             : isCompacting
-              ? "#5af"
+              ? t.info
               : isLoading
-                ? "#8B5CF6"
-                : "#666";
-        const labelColor = isActive ? "#ccc" : hasUnread ? "#b87333" : "#555";
+                ? t.brandAlt
+                : t.textSecondary;
+        const labelColor = isActive ? t.textPrimary : hasUnread ? t.amber : t.textMuted;
 
         return (
           <box key={tab.id} flexDirection="row">
-            {i > 0 && <text fg="#2a2a2a"> │ </text>}
-            {needsAttention && !isActive && <text fg="#F59E0B">? </text>}
+            {i > 0 && <text fg={t.textSubtle}> │ </text>}
+            {needsAttention && !isActive && <text fg={t.warning}>? </text>}
             {isCompacting && !needsAttention && (
-              <text fg="#5af">{SPINNER_FRAMES[spinFrame] ?? "⠋"} </text>
+              <text fg={t.info}>{SPINNER_FRAMES[spinFrame] ?? "⠋"} </text>
             )}
             {isLoading && !isCompacting && !needsAttention && (
-              <text fg="#8B5CF6">{SPINNER_FRAMES[spinFrame] ?? "⠋"} </text>
+              <text fg={t.brandAlt}>{SPINNER_FRAMES[spinFrame] ?? "⠋"} </text>
             )}
             <text fg={bracketColor}>[</text>
             <text fg={numColor} attributes={isActive ? TextAttributes.BOLD : undefined}>
@@ -106,30 +108,32 @@ export function TabBar({
             <text fg={bracketColor}>]</text>
             {tabMode !== "default" && (
               <>
-                <text fg={isActive ? tabModeColor : "#555"}>[</text>
+                <text fg={isActive ? tabModeColor : t.textMuted}>[</text>
                 <text fg={tabModeColor} attributes={isActive ? TextAttributes.BOLD : undefined}>
                   {tabModeLabel}
                 </text>
-                <text fg={isActive ? tabModeColor : "#555"}>]</text>
+                <text fg={isActive ? tabModeColor : t.textMuted}>]</text>
               </>
             )}
             {(activity?.editedFileCount ?? 0) > 0 && (
               <>
-                <text fg={isActive ? "#3a6" : "#2a4"}>[</text>
-                <text fg="#4a7">
+                <text fg={isActive ? t.success : t.textDim}>[</text>
+                <text fg={t.success}>
                   {icon("pencil")} {String(activity?.editedFileCount ?? 0)}
                 </text>
-                <text fg={isActive ? "#3a6" : "#2a4"}>]</text>
+                <text fg={isActive ? t.success : t.textDim}>]</text>
               </>
             )}
             {(() => {
               const modelLabel = getModelLabel(tab.id);
               if (!modelLabel) return null;
-              const c = isActive ? "#666" : "#444";
+              const c = isActive ? t.textSecondary : t.textDim;
               return (
                 <>
                   <text fg={c}> [</text>
-                  <text fg={isActive ? "#888" : "#555"}>{truncateLabel(modelLabel, 16)}</text>
+                  <text fg={isActive ? t.textSecondary : t.textMuted}>
+                    {truncateLabel(modelLabel, 16)}
+                  </text>
                   <text fg={c}>]</text>
                 </>
               );
@@ -139,8 +143,8 @@ export function TabBar({
                 {label}
               </text>
             )}
-            {hasUnread && !isLoading && !needsAttention && <text fg="#b87333">[●]</text>}
-            {hasError && !isLoading && !needsAttention && <text fg="#a55">[✗]</text>}
+            {hasUnread && !isLoading && !needsAttention && <text fg={t.amber}>[●]</text>}
+            {hasError && !isLoading && !needsAttention && <text fg={t.error}>[✗]</text>}
           </box>
         );
       })}

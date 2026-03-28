@@ -7,6 +7,7 @@ import { icon } from "../../core/icons.js";
 import { getIntelligenceStatus } from "../../core/intelligence/index.js";
 import { getModelContextInfo, getShortModelLabel } from "../../core/llm/models.js";
 import { getProxyPid } from "../../core/proxy/lifecycle.js";
+import { useTheme } from "../../core/theme/index.js";
 import type { ChatInstance } from "../../hooks/useChat.js";
 import type { UseTabsReturn } from "../../hooks/useTabs.js";
 import { useRepoMapStore } from "../../stores/repomap.js";
@@ -21,11 +22,6 @@ import { Overlay, POPUP_BG, PopupRow } from "../layout/shared.js";
 const CHROME_ROWS = 6;
 const TABS = ["Context", "System"] as const;
 type Tab = (typeof TABS)[number];
-
-const TAB_COLORS: Record<Tab, string> = {
-  Context: "#2d9bf0",
-  System: "#9B30FF",
-};
 
 function fmtTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -60,18 +56,19 @@ function BarRow({
   innerW: number;
   labelW?: number;
 }) {
+  const t = useTheme();
   const truncLabel = label.length > labelW ? `${label.slice(0, labelW - 1)}…` : label;
   const barW = Math.max(6, innerW - labelW - desc.length - 6);
   const filled = Math.round((pct / 100) * barW);
   return (
     <PopupRow w={innerW}>
-      <text fg="#888" bg={POPUP_BG}>
+      <text fg={t.textSecondary} bg={POPUP_BG}>
         {truncLabel.padEnd(labelW)}
       </text>
       <text fg={barColor} bg={POPUP_BG}>
         {"▰".repeat(filled)}
       </text>
-      <text fg="#222" bg={POPUP_BG}>
+      <text fg={t.textSubtle} bg={POPUP_BG}>
         {"▱".repeat(barW - filled)}
       </text>
       <text fg={descColor} bg={POPUP_BG}>
@@ -99,14 +96,15 @@ function EntryRow({
   labelW?: number;
   rightAlign?: boolean;
 }) {
+  const t = useTheme();
   const valueW = innerW - labelW - 2;
   const displayValue = rightAlign ? value.padStart(valueW) : value;
   return (
     <PopupRow w={innerW}>
-      <text fg={labelColor ?? "#888"} bg={POPUP_BG}>
+      <text fg={labelColor ?? t.textSecondary} bg={POPUP_BG}>
         {label.padEnd(labelW)}
       </text>
-      <text fg={valueColor ?? "#ccc"} bg={POPUP_BG}>
+      <text fg={valueColor ?? t.textPrimary} bg={POPUP_BG}>
         {displayValue}
       </text>
     </PopupRow>
@@ -122,9 +120,10 @@ function SectionHeader({
   color?: string;
   innerW: number;
 }) {
+  const t = useTheme();
   return (
     <PopupRow w={innerW}>
-      <text fg={color ?? "#8B5CF6"} bg={POPUP_BG} attributes={TextAttributes.BOLD}>
+      <text fg={color ?? t.brandAlt} bg={POPUP_BG} attributes={TextAttributes.BOLD}>
         {label}
       </text>
     </PopupRow>
@@ -160,11 +159,13 @@ export function StatusDashboard({
   currentMode,
   currentModeLabel,
 }: Props) {
+  const t = useTheme();
   const { width: termCols, height: termRows } = useTerminalDimensions();
   const popupWidth = Math.min(82, Math.floor(termCols * 0.85));
   const innerW = popupWidth - 2;
   const maxVisible = Math.max(6, Math.floor((termRows - 2) * 0.8) - CHROME_ROWS);
   const [tab, setTab] = useState<Tab>(initialTab ?? "Context");
+  const TAB_COLORS: Record<Tab, string> = { Context: t.info, System: t.brand };
   const [scrollOffset, setScrollOffset] = useState(0);
 
   const sb = useStatusBarStore();
@@ -241,8 +242,8 @@ export function StatusDashboard({
         label="Context Window"
         pct={fillPct}
         desc={`${fmtTokens(usedTokens)} / ${fmtTokens(ctxWindow)} (${pctLabel})`}
-        barColor={fillPct > 75 ? "#FF0040" : fillPct > 50 ? "#FF8C00" : "#1a6"}
-        descColor={fillPct > 75 ? "#FF0040" : fillPct > 50 ? "#FF8C00" : "#888"}
+        barColor={fillPct > 75 ? t.brandSecondary : fillPct > 50 ? t.warning : t.success}
+        descColor={fillPct > 75 ? t.brandSecondary : fillPct > 50 ? t.warning : t.textSecondary}
         innerW={innerW}
       />,
     );
@@ -266,8 +267,8 @@ export function StatusDashboard({
             label={`  ${s.section}`}
             pct={sPct}
             desc={`~${fmtTokens(sTokens)}`}
-            barColor={sPct > 40 ? "#FF8C00" : "#555"}
-            descColor="#666"
+            barColor={sPct > 40 ? t.warning : t.textMuted}
+            descColor={t.textMuted}
             innerW={innerW}
             labelW={sysLabelW}
           />,
@@ -291,7 +292,7 @@ export function StatusDashboard({
           key="t-in"
           label="  Input"
           value={fmtTokens(uncachedInput)}
-          valueColor="#2d9bf0"
+          valueColor={t.info}
           labelW={tokLabelW}
           rightAlign
           innerW={innerW}
@@ -303,7 +304,7 @@ export function StatusDashboard({
             key="t-in-main"
             label="    Main"
             value={fmtTokens(tu.prompt)}
-            valueColor="#5a8abf"
+            valueColor={t.info}
             labelW={tokLabelW}
             rightAlign
             innerW={innerW}
@@ -314,7 +315,7 @@ export function StatusDashboard({
             key="t-in-sub"
             label="    Dispatch"
             value={fmtTokens(tu.subagentInput)}
-            valueColor="#9B30FF"
+            valueColor={t.brand}
             labelW={tokLabelW}
             rightAlign
             innerW={innerW}
@@ -327,7 +328,7 @@ export function StatusDashboard({
           key="t-out"
           label="  Output"
           value={fmtTokens(totalOutput)}
-          valueColor="#e0a020"
+          valueColor={t.warning}
           labelW={tokLabelW}
           rightAlign
           innerW={innerW}
@@ -339,7 +340,7 @@ export function StatusDashboard({
             key="t-out-main"
             label="    Main"
             value={fmtTokens(tu.completion)}
-            valueColor="#b89030"
+            valueColor={t.warning}
             labelW={tokLabelW}
             rightAlign
             innerW={innerW}
@@ -350,7 +351,7 @@ export function StatusDashboard({
             key="t-out-sub"
             label="    Dispatch"
             value={fmtTokens(tu.subagentOutput)}
-            valueColor="#9B30FF"
+            valueColor={t.brand}
             labelW={tokLabelW}
             rightAlign
             innerW={innerW}
@@ -364,8 +365,8 @@ export function StatusDashboard({
           label="  Cache Read"
           pct={cachePct}
           desc={tu.cacheRead > 0 ? `${fmtTokens(tu.cacheRead)} (${String(cachePct)}%)` : "—"}
-          barColor={tu.cacheRead > 0 ? "#2d5" : "#333"}
-          descColor={tu.cacheRead > 0 ? "#2d5" : "#444"}
+          barColor={tu.cacheRead > 0 ? t.success : t.textFaint}
+          descColor={tu.cacheRead > 0 ? t.success : t.textDim}
           innerW={innerW}
         />,
       );
@@ -375,7 +376,7 @@ export function StatusDashboard({
             key="t-cache-write"
             label="  Cache Write"
             value={fmtTokens(tu.cacheWrite)}
-            valueColor="#e0a020"
+            valueColor={t.warning}
             labelW={tokLabelW}
             rightAlign
             innerW={innerW}
@@ -388,7 +389,7 @@ export function StatusDashboard({
             key="t-uncached"
             label="    Uncached"
             value={fmtTokens(uncachedInput)}
-            valueColor="#888"
+            valueColor={t.textSecondary}
             labelW={tokLabelW}
             rightAlign
             innerW={innerW}
@@ -428,7 +429,7 @@ export function StatusDashboard({
               key={`cost-${mid}`}
               label={`  ${shortId}`}
               value={`${fmtCost(c)}  (${String(pct)}%)`}
-              valueColor="#ccc"
+              valueColor={t.textPrimary}
               labelW={costLabelW}
               rightAlign
               innerW={innerW}
@@ -440,7 +441,7 @@ export function StatusDashboard({
             key="cost-total"
             label="  Total"
             value={fmtCost(totalCost)}
-            valueColor="#e0a020"
+            valueColor={t.warning}
             labelW={costLabelW}
             rightAlign
             innerW={innerW}
@@ -461,9 +462,9 @@ export function StatusDashboard({
       );
       let grandTotal = 0;
       for (let i = 0; i < allTabs.length; i++) {
-        const t = allTabs[i];
-        if (!t) continue;
-        const c = tabMgr.getChat(t.id);
+        const tabEntry = allTabs[i];
+        if (!tabEntry) continue;
+        const c = tabMgr.getChat(tabEntry.id);
         const u = c?.tokenUsage ?? {
           prompt: 0,
           completion: 0,
@@ -476,18 +477,18 @@ export function StatusDashboard({
           lastStepCacheRead: 0,
         };
         grandTotal += u.total;
-        const isActive = t.id === tabMgr.activeTabId;
+        const isActive = tabEntry.id === tabMgr.activeTabId;
         lines.push(
           <EntryRow
-            key={`tab-${t.id}`}
+            key={`tab-${tabEntry.id}`}
             label={`  ${isActive ? "▸" : " "} Tab ${String(i + 1)}`}
             value={
               u.total > 0
                 ? `${fmtTokens(u.prompt)}↑ ${fmtTokens(u.completion)}↓ = ${fmtTokens(u.total)}`
                 : "—"
             }
-            labelColor={isActive ? "#2d9bf0" : "#888"}
-            valueColor={isActive ? "#ccc" : "#666"}
+            labelColor={isActive ? t.info : t.textSecondary}
+            valueColor={isActive ? t.textPrimary : t.textMuted}
             innerW={innerW}
           />,
         );
@@ -509,24 +510,25 @@ export function StatusDashboard({
     sb.contextTokens,
     sb.subagentChars,
     sb.chatCharsAtSnapshot,
+    t,
   ]);
 
   const systemLines = useMemo(() => {
     const lspStatus = getIntelligenceStatus();
     const lspCount = lspStatus?.lspServers.length ?? 0;
     const rssMB = sb.rssMB;
-    const memColor = rssMB < 2048 ? "#4a7" : rssMB < 4096 ? "#b87333" : "#f44";
+    const memColor = rssMB < 2048 ? t.success : rssMB < 4096 ? t.amber : t.error;
 
     const lines: React.ReactNode[] = [];
 
     const rmStatusColor =
       rm.status === "ready"
-        ? "#4a7"
+        ? t.success
         : rm.status === "scanning"
-          ? "#b87333"
+          ? t.amber
           : rm.status === "error"
-            ? "#f44"
-            : "#666";
+            ? t.error
+            : t.textMuted;
     const semLabel =
       rm.semanticStatus !== "off"
         ? ` · sem: ${rm.semanticStatus} (${String(rm.semanticCount)})`
@@ -539,7 +541,7 @@ export function StatusDashboard({
           {"  "}
           {rm.status}
         </text>
-        <text fg="#666" bg={POPUP_BG}>
+        <text fg={t.textMuted} bg={POPUP_BG}>
           {` · ${String(rm.files)} files · ${String(rm.symbols)} symbols · ${String(rm.edges)} edges · ${fmtBytes(rm.dbSizeBytes)}${semLabel}`}
         </text>
       </PopupRow>,
@@ -556,12 +558,12 @@ export function StatusDashboard({
             : icon("worker");
     const wkColor = (s: string) =>
       s === "ready" || s === "busy"
-        ? "#4a7"
+        ? t.success
         : s === "starting" || s === "restarting"
-          ? "#b87333"
+          ? t.amber
           : s === "crashed"
-            ? "#f44"
-            : "#666";
+            ? t.error
+            : t.textMuted;
 
     const totalWorkerHeap = wk.intelligence.heapMB + wk.io.heapMB;
     const pr = sb.processRss;
@@ -609,7 +611,7 @@ export function StatusDashboard({
       externals.push({
         key: "proc-nvim",
         label: `${icon("worker")} neovim  active`,
-        color: "#57A143",
+        color: t.success,
         detail: nvimMem,
       });
     }
@@ -619,7 +621,7 @@ export function StatusDashboard({
       externals.push({
         key: "proc-lsp",
         label: `${icon("worker")} lsp  ${String(lspCount)} server${lspCount > 1 ? "s" : ""}`,
-        color: "#2dd4bf",
+        color: t.info,
         detail: lspMem,
       });
     }
@@ -629,7 +631,7 @@ export function StatusDashboard({
       externals.push({
         key: "proc-proxy",
         label: `${icon("worker")} proxy  active`,
-        color: "#9B30FF",
+        color: t.brand,
         detail: proxyMem,
       });
     }
@@ -638,13 +640,13 @@ export function StatusDashboard({
 
     // Main process with workers nested underneath
     const hasExternals = externals.length > 0;
-    const mainMemColor = pr.mainMB < 1024 ? "#4a7" : pr.mainMB < 2048 ? "#b87333" : "#f44";
+    const mainMemColor = pr.mainMB < 1024 ? t.success : pr.mainMB < 2048 ? t.amber : t.error;
     lines.push(
       <PopupRow key="sys-main" w={innerW}>
-        <text fg="#888" bg={POPUP_BG}>
+        <text fg={t.textSecondary} bg={POPUP_BG}>
           {hasExternals ? "  ├─ " : "  └─ "}
         </text>
-        <text fg="#888" bg={POPUP_BG}>
+        <text fg={t.textSecondary} bg={POPUP_BG}>
           {"main"}
         </text>
         <text fg={mainMemColor} bg={POPUP_BG}>
@@ -661,13 +663,13 @@ export function StatusDashboard({
       const treePad = hasExternals ? "  │  " : "     ";
       lines.push(
         <PopupRow key={wkEntry.key} w={innerW}>
-          <text fg="#555" bg={POPUP_BG}>
+          <text fg={t.textMuted} bg={POPUP_BG}>
             {isLast ? `${treePad}└─ ` : `${treePad}├─ `}
           </text>
           <text fg={wkEntry.color} bg={POPUP_BG}>
             {wkEntry.label}
           </text>
-          <text fg="#666" bg={POPUP_BG}>
+          <text fg={t.textMuted} bg={POPUP_BG}>
             {wkEntry.detail}
           </text>
         </PopupRow>,
@@ -681,13 +683,13 @@ export function StatusDashboard({
       const isLast = i === externals.length - 1;
       lines.push(
         <PopupRow key={ext.key} w={innerW}>
-          <text fg="#555" bg={POPUP_BG}>
+          <text fg={t.textMuted} bg={POPUP_BG}>
             {isLast ? "  └─ " : "  ├─ "}
           </text>
           <text fg={ext.color} bg={POPUP_BG}>
             {ext.label}
           </text>
-          <text fg="#666" bg={POPUP_BG}>
+          <text fg={t.textMuted} bg={POPUP_BG}>
             {ext.detail}
           </text>
         </PopupRow>,
@@ -698,7 +700,7 @@ export function StatusDashboard({
       const errMsg = wk.intelligence.lastError ?? wk.io.lastError ?? "";
       lines.push(
         <PopupRow key="wk-err" w={innerW}>
-          <text fg="#f44" bg={POPUP_BG}>
+          <text fg={t.error} bg={POPUP_BG}>
             {`  ${icon("error")} ${errMsg.slice(0, innerW - 6)}`}
           </text>
         </PopupRow>,
@@ -710,13 +712,13 @@ export function StatusDashboard({
     // Only worker heap is a meaningful separate metric.
     lines.push(
       <PopupRow key="sys-total" w={innerW}>
-        <text fg="#555" bg={POPUP_BG}>
+        <text fg={t.textMuted} bg={POPUP_BG}>
           {"  total  "}
         </text>
         <text fg={memColor} bg={POPUP_BG}>
           {`${fmtMem(rssMB)} rss`}
         </text>
-        <text fg="#666" bg={POPUP_BG}>
+        <text fg={t.textMuted} bg={POPUP_BG}>
           {totalWorkerHeap > 0 ? ` · ${fmtMem(totalWorkerHeap)} worker heap` : ""}
         </text>
       </PopupRow>,
@@ -729,13 +731,13 @@ export function StatusDashboard({
         key="sys-mode"
         label="  Mode"
         value={currentModeLabel}
-        valueColor={currentMode === "default" ? "#666" : "#FF8C00"}
+        valueColor={currentMode === "default" ? t.textMuted : t.warning}
         innerW={innerW}
       />,
     );
 
     return lines;
-  }, [sb, rm, wk, currentMode, currentModeLabel, innerW]);
+  }, [sb, rm, wk, currentMode, currentModeLabel, innerW, t]);
 
   const activeLines = tab === "Context" ? contextLines : systemLines;
   const clampedScroll = Math.min(scrollOffset, Math.max(0, activeLines.length - maxVisible));
@@ -780,18 +782,18 @@ export function StatusDashboard({
           <text fg={TAB_COLORS[tab]} bg={POPUP_BG}>
             {icon("gauge")}{" "}
           </text>
-          {TABS.map((t, i) => {
-            const isActive = t === tab;
-            const color = TAB_COLORS[t];
+          {TABS.map((tabName, i) => {
+            const isActive = tabName === tab;
+            const color = TAB_COLORS[tabName];
             return (
               <text
-                key={t}
-                fg={isActive ? color : "#555"}
+                key={tabName}
+                fg={isActive ? color : t.textMuted}
                 bg={POPUP_BG}
                 attributes={isActive ? TextAttributes.BOLD : undefined}
               >
                 {i > 0 ? " │ " : ""}
-                {isActive ? `▸ ${t}` : `  ${t}`}
+                {isActive ? `▸ ${tabName}` : `  ${tabName}`}
               </text>
             );
           })}
@@ -799,7 +801,7 @@ export function StatusDashboard({
 
         {/* Separator */}
         <PopupRow w={innerW}>
-          <text fg="#222" bg={POPUP_BG}>
+          <text fg={t.textSubtle} bg={POPUP_BG}>
             {"─".repeat(innerW - 4)}
           </text>
         </PopupRow>
@@ -816,7 +818,7 @@ export function StatusDashboard({
         {/* Scroll */}
         {activeLines.length > maxVisible && (
           <PopupRow w={innerW}>
-            <text fg="#444" bg={POPUP_BG}>
+            <text fg={t.textDim} bg={POPUP_BG}>
               {clampedScroll > 0 ? "↑ " : "  "}
               {String(clampedScroll + 1)}-
               {String(Math.min(clampedScroll + maxVisible, activeLines.length))}/
@@ -828,7 +830,7 @@ export function StatusDashboard({
 
         {/* Footer */}
         <PopupRow w={innerW}>
-          <text fg="#444" bg={POPUP_BG}>
+          <text fg={t.textDim} bg={POPUP_BG}>
             ⇥ switch tab | ↑↓ scroll | esc close
           </text>
         </PopupRow>

@@ -16,9 +16,9 @@ import {
   uninstallPackage,
 } from "../../core/intelligence/backends/lsp/installer.js";
 import { clearProbeCache } from "../../core/intelligence/backends/lsp/server-registry.js";
+import { useTheme } from "../../core/theme/index.js";
 import { usePopupScroll } from "../../hooks/usePopupScroll.js";
 import type { AppConfig } from "../../types/index.js";
-
 import { type ConfigScope, Overlay, POPUP_BG, POPUP_HL, PopupRow } from "../layout/shared.js";
 
 const MAX_POPUP_WIDTH = 110;
@@ -97,6 +97,7 @@ export const LspInstallSearch = memo(function LspInstallSearch({
   disabledServers,
   initialTab = "installed",
 }: Props) {
+  const t = useTheme();
   const [tab, setTab] = useState<Tab>(initialTab);
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("All");
@@ -447,35 +448,35 @@ export const LspInstallSearch = memo(function LspInstallSearch({
 
     return (
       <PopupRow key={status.pkg.name} bg={bg} w={innerW}>
-        <text bg={bg} fg={isActive ? "#FF0040" : "#555"}>
+        <text bg={bg} fg={isActive ? t.brandSecondary : t.textMuted}>
           {isActive ? "› " : "  "}
         </text>
         <text
           bg={bg}
-          fg={isDisabled ? "#555" : isActive ? "#FF0040" : "#aaa"}
+          fg={isDisabled ? t.textMuted : isActive ? t.brandSecondary : t.textSecondary}
           attributes={isActive ? TextAttributes.BOLD : undefined}
         >
           {status.pkg.name}
         </text>
         {lang && (
-          <text bg={bg} fg="#666">
+          <text bg={bg} fg={t.textMuted}>
             {" "}
             {lang}
           </text>
         )}
         {src ? (
-          <text bg={bg} fg="#00FF00">
+          <text bg={bg} fg={t.success}>
             {" "}
             {src}
           </text>
         ) : method ? (
-          <text bg={bg} fg={missingToolchain ? "#FF4444" : "#666"}>
+          <text bg={bg} fg={missingToolchain ? t.error : t.textMuted}>
             {" "}
             {method}
           </text>
         ) : null}
         {isDisabled && (
-          <text bg={bg} fg="#FF4444">
+          <text bg={bg} fg={t.error}>
             {" "}
             [disabled]
           </text>
@@ -490,15 +491,15 @@ export const LspInstallSearch = memo(function LspInstallSearch({
         flexDirection="column"
         borderStyle="rounded"
         border={true}
-        borderColor="#8B5CF6"
+        borderColor={t.brandAlt}
         width={popupWidth}
       >
         <PopupRow w={innerW}>
-          <text fg="white" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
+          <text fg={t.textPrimary} attributes={TextAttributes.BOLD} bg={POPUP_BG}>
             {"\uDB80\uDCA6"} LSP Servers
           </text>
           {tab === "search" && (
-            <text fg="#666" bg={POPUP_BG}>
+            <text fg={t.textMuted} bg={POPUP_BG}>
               {" "}
               [{categoryFilter}]
             </text>
@@ -506,51 +507,51 @@ export const LspInstallSearch = memo(function LspInstallSearch({
         </PopupRow>
 
         <PopupRow w={innerW}>
-          {TABS.map((t, i) => (
-            <text key={t} bg={POPUP_BG}>
+          {TABS.map((tabItem, i) => (
+            <text key={tabItem} bg={POPUP_BG}>
               {i > 0 ? (
-                <span fg="#333" bg={POPUP_BG}>
+                <span fg={t.textFaint} bg={POPUP_BG}>
                   {" │ "}
                 </span>
               ) : (
                 ""
               )}
               <span
-                fg={i === tabIdx ? "#FF0040" : "#666"}
+                fg={i === tabIdx ? t.brandSecondary : t.textMuted}
                 attributes={i === tabIdx ? TextAttributes.BOLD : undefined}
                 bg={POPUP_BG}
               >
-                {TAB_LABELS[t]}
+                {TAB_LABELS[tabItem]}
               </span>
             </text>
           ))}
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text fg="#333" bg={POPUP_BG}>
+          <text fg={t.textFaint} bg={POPUP_BG}>
             {"─".repeat(innerW - 4)}
           </text>
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text fg="#9B30FF" bg={POPUP_BG}>
+          <text fg={t.brand} bg={POPUP_BG}>
             {" "}
           </text>
           {query ? (
             <>
-              <text fg="white" bg={POPUP_BG}>
+              <text fg={t.textPrimary} bg={POPUP_BG}>
                 {query}
               </text>
-              <text fg="#FF0040" bg={POPUP_BG}>
+              <text fg={t.brandSecondary} bg={POPUP_BG}>
                 {"█"}
               </text>
             </>
           ) : (
             <>
-              <text fg="#FF0040" bg={POPUP_BG}>
+              <text fg={t.brandSecondary} bg={POPUP_BG}>
                 {"█"}
               </text>
-              <text fg="#555" bg={POPUP_BG}>
+              <text fg={t.textMuted} bg={POPUP_BG}>
                 {tab === "search"
                   ? "type to search 576+ packages..."
                   : tab === "installed"
@@ -568,13 +569,13 @@ export const LspInstallSearch = memo(function LspInstallSearch({
 
         {registryLoading ? (
           <PopupRow w={innerW}>
-            <text fg="#9B30FF" bg={POPUP_BG}>
+            <text fg={t.brand} bg={POPUP_BG}>
               {registryLoaded ? "scanning installed packages..." : "loading Mason registry..."}
             </text>
           </PopupRow>
         ) : !registryLoaded ? (
           <PopupRow w={innerW}>
-            <text fg="#555" bg={POPUP_BG}>
+            <text fg={t.textMuted} bg={POPUP_BG}>
               no registry available — install Mason or check network
             </text>
           </PopupRow>
@@ -586,7 +587,7 @@ export const LspInstallSearch = memo(function LspInstallSearch({
           >
             {items.length === 0 ? (
               <PopupRow w={innerW}>
-                <text fg="#555" bg={POPUP_BG}>
+                <text fg={t.textMuted} bg={POPUP_BG}>
                   {query ? "no matching packages" : "no packages"}
                 </text>
               </PopupRow>
@@ -600,7 +601,7 @@ export const LspInstallSearch = memo(function LspInstallSearch({
 
         {items.length > maxVisible && (
           <PopupRow w={innerW}>
-            <text fg="#555" bg={POPUP_BG}>
+            <text fg={t.textMuted} bg={POPUP_BG}>
               {scrollOffset > 0 ? "↑ " : "  "}
               {String(cursor + 1)}/{String(items.length)}
               {scrollOffset + maxVisible < items.length ? " ↓" : ""}
@@ -614,7 +615,7 @@ export const LspInstallSearch = memo(function LspInstallSearch({
               <text>{""}</text>
             </PopupRow>
             <PopupRow w={innerW}>
-              <text fg="white" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
+              <text fg={t.textPrimary} attributes={TextAttributes.BOLD} bg={POPUP_BG}>
                 {disabledServers.includes(pendingToggle.pkg.name) ? "Enable" : "Disable"} "
                 {pendingToggle.pkg.name}" scope:
               </text>
@@ -624,12 +625,12 @@ export const LspInstallSearch = memo(function LspInstallSearch({
               const bg = isActive ? POPUP_HL : POPUP_BG;
               return (
                 <PopupRow key={label} bg={bg} w={innerW}>
-                  <text bg={bg} fg={isActive ? "#FF0040" : "#555"}>
+                  <text bg={bg} fg={isActive ? t.brandSecondary : t.textMuted}>
                     {isActive ? "› " : "  "}
                   </text>
                   <text
                     bg={bg}
-                    fg={isActive ? "#FF0040" : "#aaa"}
+                    fg={isActive ? t.brandSecondary : t.textSecondary}
                     attributes={isActive ? TextAttributes.BOLD : undefined}
                   >
                     {label}
@@ -642,7 +643,7 @@ export const LspInstallSearch = memo(function LspInstallSearch({
 
         {installing && (
           <PopupRow w={innerW}>
-            <text fg="#9B30FF" bg={POPUP_BG}>
+            <text fg={t.brand} bg={POPUP_BG}>
               installing...
             </text>
           </PopupRow>
@@ -652,7 +653,7 @@ export const LspInstallSearch = memo(function LspInstallSearch({
           <text>{""}</text>
         </PopupRow>
         <PopupRow w={innerW}>
-          <text fg="#555" bg={POPUP_BG}>
+          <text fg={t.textMuted} bg={POPUP_BG}>
             {"↑↓"} nav | {"⏎"} {tab === "installed" || tab === "disabled" ? "toggle" : "install"} |
             {"^D"} disable | {"^U"} uninstall | {"^F"} category | {"⇥"} tab | esc close
           </text>

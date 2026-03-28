@@ -1,5 +1,6 @@
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { useTheme } from "../../../core/theme/index.js";
 import { Overlay, POPUP_BG } from "../../layout/shared.js";
 import { MAX_W, STEPS } from "./data.js";
 import { FooterNav } from "./FooterNav.js";
@@ -88,6 +89,8 @@ export const FirstRunWizard = memo(function FirstRunWizard({
     ),
   );
 
+  const t = useTheme();
+
   if (!visible) return null;
 
   const maxH = Math.max(24, Math.floor(termRows * 0.7));
@@ -98,7 +101,7 @@ export const FirstRunWizard = memo(function FirstRunWizard({
         flexDirection="column"
         borderStyle="rounded"
         border={true}
-        borderColor="#8B5CF6"
+        borderColor={t.brandAlt}
         backgroundColor={POPUP_BG}
         width={pw}
         height={maxH}

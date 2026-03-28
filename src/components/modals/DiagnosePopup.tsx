@@ -3,6 +3,7 @@ import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useCallback, useEffect, useState } from "react";
 import { icon } from "../../core/icons.js";
 import type { BackendProbeResult, HealthCheckResult } from "../../core/intelligence/router.js";
+import { type ThemeTokens, useTheme } from "../../core/theme/index.js";
 import { Overlay, POPUP_BG, PopupRow, useSpinnerFrame } from "../layout/shared.js";
 
 const CHROME_ROWS = 6;
@@ -20,17 +21,18 @@ function statusBadge(
   br: BackendProbeResult,
   running: boolean,
   spinnerCh: string,
+  t: ThemeTokens,
 ): { ch: string; color: string } {
-  if (!br.supports) return { ch: "○", color: "#555" };
-  if (br.initError) return { ch: "✗", color: "#FF0040" };
-  if (br.probes.length === 0 && running) return { ch: spinnerCh, color: "#b87333" };
+  if (!br.supports) return { ch: "○", color: t.textMuted };
+  if (br.initError) return { ch: "✗", color: t.error };
+  if (br.probes.length === 0 && running) return { ch: spinnerCh, color: t.amber };
   const allPass =
     br.probes.length > 0 &&
     br.probes.every((p) => p.status === "pass" || p.status === "unsupported");
-  if (allPass) return { ch: "●", color: "#2d5" };
-  if (br.probes.some((p) => p.status === "pass")) return { ch: "◐", color: "#FF8C00" };
-  if (br.probes.length === 0) return { ch: "◌", color: "#b87333" };
-  return { ch: "✗", color: "#FF0040" };
+  if (allPass) return { ch: "●", color: t.success };
+  if (br.probes.some((p) => p.status === "pass")) return { ch: "◐", color: t.warning };
+  if (br.probes.length === 0) return { ch: "◌", color: t.amber };
+  return { ch: "✗", color: t.error };
 }
 
 interface Line {
@@ -41,13 +43,18 @@ interface Line {
   descColor?: string;
 }
 
-function buildLines(result: HealthCheckResult, running: boolean, spinnerCh: string): Line[] {
+function buildLines(
+  result: HealthCheckResult,
+  running: boolean,
+  spinnerCh: string,
+  t: ThemeTokens,
+): Line[] {
   const lines: Line[] = [];
 
   for (let bi = 0; bi < result.backends.length; bi++) {
     const br = result.backends[bi];
     if (!br) continue;
-    const s = statusBadge(br, running, spinnerCh);
+    const s = statusBadge(br, running, spinnerCh, t);
 
     if (bi > 0) lines.push({ type: "spacer" });
 
@@ -58,15 +65,19 @@ function buildLines(result: HealthCheckResult, running: boolean, spinnerCh: stri
     });
 
     if (!br.supports) {
-      lines.push({ type: "text", label: "  does not support this language", color: "#555" });
+      lines.push({
+        type: "text",
+        label: "  does not support this language",
+        color: t.textMuted,
+      });
     } else if (br.initError) {
       lines.push({
         type: "text",
         label: `  init failed: ${br.initError.slice(0, 50)}`,
-        color: "#FF0040",
+        color: t.error,
       });
     } else if (br.probes.length === 0) {
-      lines.push({ type: "text", label: "  waiting…", color: "#555" });
+      lines.push({ type: "text", label: "  waiting…", color: t.textMuted });
     } else {
       for (const probe of br.probes) {
         const pIcon =
@@ -81,12 +92,12 @@ function buildLines(result: HealthCheckResult, running: boolean, spinnerCh: stri
                   : "✗";
         const pColor =
           probe.status === "pass"
-            ? "#2d5"
+            ? t.success
             : probe.status === "empty"
-              ? "#FF8C00"
+              ? t.warning
               : probe.status === "unsupported"
-                ? "#555"
-                : "#FF0040";
+                ? t.textMuted
+                : t.error;
         const timing = probe.ms !== undefined ? ` ${String(probe.ms)}ms` : "";
         const desc =
           probe.status === "error"
@@ -96,7 +107,7 @@ function buildLines(result: HealthCheckResult, running: boolean, spinnerCh: stri
           type: "probe",
           label: probe.operation,
           desc,
-          color: "#999",
+          color: t.textSecondary,
           descColor: pColor,
         });
       }
@@ -112,6 +123,7 @@ export function DiagnosePopup({ visible, onClose, runHealthCheck }: Props) {
   const [scrollOffset, setScrollOffset] = useState(0);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const t = useTheme();
   const spinnerFrame = useSpinnerFrame();
 
   const popupWidth = Math.min(64, Math.floor(termCols * 0.8));
@@ -121,7 +133,7 @@ export function DiagnosePopup({ visible, onClose, runHealthCheck }: Props) {
   const containerRows = termRows - 2;
   const maxVisible = Math.max(6, Math.floor(containerRows * 0.8) - CHROME_ROWS);
 
-  const lines = result ? buildLines(result, running, spinnerCh) : [];
+  const lines = result ? buildLines(result, running, spinnerCh, t) : [];
 
   const run = useCallback(() => {
     setRunning(true);
@@ -179,29 +191,29 @@ export function DiagnosePopup({ visible, onClose, runHealthCheck }: Props) {
         flexDirection="column"
         borderStyle="rounded"
         border={true}
-        borderColor="#8B5CF6"
+        borderColor={t.brandAlt}
         width={popupWidth}
       >
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#9B30FF">
+          <text bg={POPUP_BG} fg={t.brand}>
             {icon("brain")}{" "}
           </text>
-          <text bg={POPUP_BG} fg="white" attributes={TextAttributes.BOLD}>
+          <text bg={POPUP_BG} fg={t.textPrimary} attributes={TextAttributes.BOLD}>
             Health Check
           </text>
           {result ? (
-            <text bg={POPUP_BG} fg="#555">
+            <text bg={POPUP_BG} fg={t.textMuted}>
               {"  "}
               {result.language} · {result.probeFile.split("/").pop()}
             </text>
           ) : null}
-          <text bg={POPUP_BG} fg="#555">
+          <text bg={POPUP_BG} fg={t.textMuted}>
             {"  "}↑↓ scroll
           </text>
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#333">
+          <text bg={POPUP_BG} fg={t.textFaint}>
             {"─".repeat(innerW - 2)}
           </text>
         </PopupRow>
@@ -220,7 +232,7 @@ export function DiagnosePopup({ visible, onClose, runHealthCheck }: Props) {
                     <PopupRow key={key} w={innerW}>
                       <text
                         bg={POPUP_BG}
-                        fg={line.color ?? "#8B5CF6"}
+                        fg={line.color ?? t.brandAlt}
                         attributes={TextAttributes.BOLD}
                       >
                         {line.label ?? ""}
@@ -230,11 +242,11 @@ export function DiagnosePopup({ visible, onClose, runHealthCheck }: Props) {
                 case "probe":
                   return (
                     <PopupRow key={key} w={innerW}>
-                      <text bg={POPUP_BG} fg={line.color ?? "#999"}>
+                      <text bg={POPUP_BG} fg={line.color ?? t.textSecondary}>
                         {"  "}
                         {(line.label ?? "").padEnd(labelW).slice(0, labelW)}
                       </text>
-                      <text bg={POPUP_BG} fg={line.descColor ?? "#666"}>
+                      <text bg={POPUP_BG} fg={line.descColor ?? t.textMuted}>
                         {line.desc ?? ""}
                       </text>
                     </PopupRow>
@@ -242,7 +254,7 @@ export function DiagnosePopup({ visible, onClose, runHealthCheck }: Props) {
                 case "text":
                   return (
                     <PopupRow key={key} w={innerW}>
-                      <text bg={POPUP_BG} fg={line.color ?? "#555"}>
+                      <text bg={POPUP_BG} fg={line.color ?? t.textMuted}>
                         {line.label ?? ""}
                       </text>
                     </PopupRow>
@@ -259,7 +271,7 @@ export function DiagnosePopup({ visible, onClose, runHealthCheck }: Props) {
             })
           ) : (
             <PopupRow w={innerW}>
-              <text bg={POPUP_BG} fg={error ? "#FF0040" : "#b87333"}>
+              <text bg={POPUP_BG} fg={error ? t.brandSecondary : t.amber}>
                 {error ?? `${spinnerCh} initializing…`}
               </text>
             </PopupRow>
@@ -268,7 +280,7 @@ export function DiagnosePopup({ visible, onClose, runHealthCheck }: Props) {
 
         {lines.length > maxVisible && (
           <PopupRow w={innerW}>
-            <text fg="#555" bg={POPUP_BG}>
+            <text fg={t.textMuted} bg={POPUP_BG}>
               {scrollOffset > 0 ? "↑ " : "  "}
               {scrollOffset + 1}-{Math.min(scrollOffset + maxVisible, lines.length)}/{lines.length}
               {scrollOffset + maxVisible < lines.length ? " ↓" : ""}
@@ -281,7 +293,7 @@ export function DiagnosePopup({ visible, onClose, runHealthCheck }: Props) {
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#555">
+          <text bg={POPUP_BG} fg={t.textMuted}>
             ↑↓ scroll · r re-run · esc close
           </text>
         </PopupRow>

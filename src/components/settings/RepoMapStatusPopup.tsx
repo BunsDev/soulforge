@@ -2,6 +2,7 @@ import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useEffect, useRef, useState } from "react";
 import { icon } from "../../core/icons.js";
+import { type ThemeTokens, useTheme } from "../../core/theme/index.js";
 import { type RepoMapStatus, useRepoMapStore } from "../../stores/repomap.js";
 import { Overlay, POPUP_BG, POPUP_HL, PopupRow, SPINNER_FRAMES } from "../layout/shared.js";
 
@@ -31,16 +32,16 @@ const LLM_LIMIT_PRESETS = [100, 200, 300, 500, 1000];
 
 const TOKEN_BUDGET_PRESETS = [2000, 4000, 8000, 16000] as const;
 
-function statusColor(status: RepoMapStatus): string {
+function statusColor(status: RepoMapStatus, t: ThemeTokens): string {
   switch (status) {
     case "scanning":
-      return "#FF8C00";
+      return t.warning;
     case "ready":
-      return "#2d5";
+      return t.success;
     case "error":
-      return "#FF0040";
+      return t.error;
     default:
-      return "#555";
+      return t.textMuted;
   }
 }
 
@@ -105,6 +106,7 @@ export function RepoMapStatusPopup({
   onLspEnrich,
   onApply,
 }: Props) {
+  const t = useTheme();
   const { width: termCols } = useTerminalDimensions();
   const popupWidth = Math.min(POPUP_W, Math.floor(termCols * 0.8));
   const innerW = popupWidth - 2;
@@ -317,33 +319,33 @@ export function RepoMapStatusPopup({
 
   const semanticColor =
     semanticStatus === "generating"
-      ? "#FF8C00"
+      ? t.warning
       : semanticStatus === "ready"
-        ? "#2d5"
+        ? t.success
         : semanticStatus === "error"
-          ? "#FF0040"
-          : "#555";
+          ? t.error
+          : t.textMuted;
 
   const rows: Array<{ label: string; value: string; valueColor?: string }> = [
-    { label: "Status", value: statusLabel, valueColor: statusColor(status) },
+    { label: "Status", value: statusLabel, valueColor: statusColor(status, t) },
     { label: "Files", value: String(files) },
     { label: "Symbols", value: String(symbols) },
     { label: "Edges", value: String(edges) },
     { label: "DB Size", value: formatBytes(dbSize) },
     { label: "Semantic", value: semanticLabel, valueColor: semanticColor },
     ...(semanticModel && semanticStatus !== "off"
-      ? [{ label: "Semantic Model", value: semanticModel, valueColor: "#8B5CF6" }]
+      ? [{ label: "Semantic Model", value: semanticModel, valueColor: t.brandAlt }]
       : []),
     ...(semanticTokensIn > 0 || semanticTokensOut > 0
       ? [
           {
             label: "LLM Tokens",
             value: `\u2191${formatTokens(semanticTokensIn)} \u2193${formatTokens(semanticTokensOut)} (${formatTokens(semanticTokensIn + semanticTokensOut)} total)`,
-            valueColor: "#FF8C00",
+            valueColor: t.warning,
           },
         ]
       : []),
-    ...(scanError ? [{ label: "Error", value: scanError, valueColor: "#FF0040" }] : []),
+    ...(scanError ? [{ label: "Error", value: scanError, valueColor: t.error }] : []),
   ];
 
   const modeChips = SEMANTIC_MODES.map((m) => {
@@ -380,30 +382,30 @@ export function RepoMapStatusPopup({
         flexDirection="column"
         borderStyle="rounded"
         border={true}
-        borderColor="#8B5CF6"
+        borderColor={t.brandAlt}
         width={popupWidth}
       >
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#9B30FF">
+          <text bg={POPUP_BG} fg={t.brand}>
             {`${icon("repomap")} `}
           </text>
-          <text bg={POPUP_BG} fg="white" attributes={TextAttributes.BOLD}>
+          <text bg={POPUP_BG} fg={t.textPrimary} attributes={TextAttributes.BOLD}>
             Soul Map
           </text>
           {hasConfig && (
-            <text bg={POPUP_BG} fg={selectedScope === "project" ? "#5CBBF6" : "#FF8C00"}>
+            <text bg={POPUP_BG} fg={selectedScope === "project" ? t.info : t.warning}>
               {`  [${selectedScope}]`}
             </text>
           )}
           {isModified && (
-            <text bg={POPUP_BG} fg="#FF8C00">
+            <text bg={POPUP_BG} fg={t.warning}>
               {" [modified]"}
             </text>
           )}
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#333">
+          <text bg={POPUP_BG} fg={t.textFaint}>
             {"\u2500".repeat(innerW - 2)}
           </text>
         </PopupRow>
@@ -414,10 +416,10 @@ export function RepoMapStatusPopup({
 
         {rows.map((row) => (
           <PopupRow key={row.label} w={innerW}>
-            <text bg={POPUP_BG} fg="#FF0040" attributes={TextAttributes.BOLD}>
+            <text bg={POPUP_BG} fg={t.brandSecondary} attributes={TextAttributes.BOLD}>
               {row.label.padEnd(LABEL_W).slice(0, LABEL_W)}
             </text>
-            <text bg={POPUP_BG} fg={row.valueColor ?? "#666"}>
+            <text bg={POPUP_BG} fg={row.valueColor ?? t.textMuted}>
               {row.value}
             </text>
           </PopupRow>
@@ -432,18 +434,18 @@ export function RepoMapStatusPopup({
               <text bg={POPUP_BG}>
                 {"  "}
                 {onToggle && (
-                  <span fg={enabled ? "#FF0040" : "#2d5"}>
+                  <span fg={enabled ? t.brandSecondary : t.success}>
                     {enabled ? "[E] disable" : "[E] enable"}
                     {"   "}
                   </span>
                 )}
-                {enabled && <span fg="#5CBBF6">{"[R] refresh"}</span>}
-                {enabled && <span fg="#FF8C00">{"   [X] clear index"}</span>}
+                {enabled && <span fg={t.info}>{"[R] refresh"}</span>}
+                {enabled && <span fg={t.warning}>{"   [X] clear index"}</span>}
               </text>
             </PopupRow>
             {!enabled && (
               <PopupRow w={innerW}>
-                <text bg={POPUP_BG} fg="#FF8C00">
+                <text bg={POPUP_BG} fg={t.warning}>
                   {"  Soul map disabled — soul tools inactive, saves ~4-8k prompt tokens"}
                 </text>
               </PopupRow>
@@ -458,13 +460,13 @@ export function RepoMapStatusPopup({
             </PopupRow>
 
             <PopupRow w={innerW}>
-              <text bg={POPUP_BG} fg="#333">
+              <text bg={POPUP_BG} fg={t.textFaint}>
                 {"\u2500".repeat(innerW - 2)}
               </text>
             </PopupRow>
 
             <PopupRow w={innerW}>
-              <text bg={POPUP_BG} fg="#9B30FF" attributes={TextAttributes.BOLD}>
+              <text bg={POPUP_BG} fg={t.brand} attributes={TextAttributes.BOLD}>
                 Semantic Summaries
               </text>
             </PopupRow>
@@ -474,12 +476,12 @@ export function RepoMapStatusPopup({
             </PopupRow>
 
             <PopupRow bg={modeBg} w={innerW}>
-              <text bg={modeBg} fg={focusRow === FocusRow.Mode ? "#FF0040" : "#555"}>
+              <text bg={modeBg} fg={focusRow === FocusRow.Mode ? t.brandSecondary : t.textMuted}>
                 {focusRow === FocusRow.Mode ? "\u203A " : "  "}
               </text>
               <text
                 bg={modeBg}
-                fg={focusRow === FocusRow.Mode ? "white" : "#aaa"}
+                fg={focusRow === FocusRow.Mode ? "white" : t.textSecondary}
                 attributes={focusRow === FocusRow.Mode ? TextAttributes.BOLD : undefined}
               >
                 {"Mode  "}
@@ -488,7 +490,7 @@ export function RepoMapStatusPopup({
                 <text
                   key={chip.mode}
                   bg={modeBg}
-                  fg={chip.active ? "#2d5" : "#555"}
+                  fg={chip.active ? t.success : t.textMuted}
                   attributes={chip.active ? TextAttributes.BOLD : undefined}
                 >
                   {chip.active ? `[${chip.label}]` : ` ${chip.label} `}{" "}
@@ -498,12 +500,15 @@ export function RepoMapStatusPopup({
 
             {showLimitRow && (
               <PopupRow bg={limitBg} w={innerW}>
-                <text bg={limitBg} fg={focusRow === FocusRow.Limit ? "#FF0040" : "#555"}>
+                <text
+                  bg={limitBg}
+                  fg={focusRow === FocusRow.Limit ? t.brandSecondary : t.textMuted}
+                >
                   {focusRow === FocusRow.Limit ? "\u203A " : "  "}
                 </text>
                 <text
                   bg={limitBg}
-                  fg={focusRow === FocusRow.Limit ? "white" : "#aaa"}
+                  fg={focusRow === FocusRow.Limit ? "white" : t.textSecondary}
                   attributes={focusRow === FocusRow.Limit ? TextAttributes.BOLD : undefined}
                 >
                   {"LLM Limit  "}
@@ -512,13 +517,13 @@ export function RepoMapStatusPopup({
                   <text
                     key={chip.value}
                     bg={limitBg}
-                    fg={chip.active ? "#2d5" : "#555"}
+                    fg={chip.active ? t.success : t.textMuted}
                     attributes={chip.active ? TextAttributes.BOLD : undefined}
                   >
                     {chip.active ? `[${String(chip.value)}]` : ` ${String(chip.value)} `}{" "}
                   </text>
                 ))}
-                <text bg={limitBg} fg="#555">
+                <text bg={limitBg} fg={t.textMuted}>
                   symbols
                 </text>
               </PopupRow>
@@ -528,11 +533,14 @@ export function RepoMapStatusPopup({
               <PopupRow w={innerW}>
                 <text bg={POPUP_BG}>
                   {"    "}
-                  <span fg="#555">{"Auto-regen  "}</span>
-                  <span fg={selectedAutoRegen ? "#2d5" : "#555"} attributes={TextAttributes.BOLD}>
+                  <span fg={t.textMuted}>{"Auto-regen  "}</span>
+                  <span
+                    fg={selectedAutoRegen ? t.success : t.textMuted}
+                    attributes={TextAttributes.BOLD}
+                  >
                     {selectedAutoRegen ? "[on]" : "[off]"}
                   </span>
-                  <span fg="#444">{" (a toggle) — costs tokens on each file change"}</span>
+                  <span fg={t.textDim}>{" (a toggle) — costs tokens on each file change"}</span>
                 </text>
               </PopupRow>
             )}
@@ -542,7 +550,7 @@ export function RepoMapStatusPopup({
             </PopupRow>
 
             <PopupRow w={innerW}>
-              <text bg={POPUP_BG} fg="#555">
+              <text bg={POPUP_BG} fg={t.textMuted}>
                 {`  ${selectedMode.padEnd(11)}\u2014 ${MODE_DESCRIPTIONS[selectedMode]}`}
               </text>
             </PopupRow>
@@ -554,15 +562,15 @@ export function RepoMapStatusPopup({
             <PopupRow w={innerW}>
               <text bg={POPUP_BG}>
                 {"  "}
-                <span fg="#5CBBF6">{"[G] regenerate"}</span>
+                <span fg={t.info}>{"[G] regenerate"}</span>
                 {confirmClear ? (
-                  <span fg="#FF0040" attributes={TextAttributes.BOLD}>
+                  <span fg={t.brandSecondary} attributes={TextAttributes.BOLD}>
                     {"   [C] CONFIRM clear (includes LLM)"}
                   </span>
                 ) : (
-                  <span fg="#FF8C00">{"   [C] clear summaries"}</span>
+                  <span fg={t.warning}>{"   [C] clear summaries"}</span>
                 )}
-                {onLspEnrich ? <span fg="#2d5">{"   [L] lsp enrich"}</span> : null}
+                {onLspEnrich ? <span fg={t.success}>{"   [L] lsp enrich"}</span> : null}
               </text>
             </PopupRow>
 
@@ -571,13 +579,13 @@ export function RepoMapStatusPopup({
             </PopupRow>
 
             <PopupRow w={innerW}>
-              <text bg={POPUP_BG} fg="#333">
+              <text bg={POPUP_BG} fg={t.textFaint}>
                 {"\u2500".repeat(innerW - 2)}
               </text>
             </PopupRow>
 
             <PopupRow w={innerW}>
-              <text bg={POPUP_BG} fg="#9B30FF" attributes={TextAttributes.BOLD}>
+              <text bg={POPUP_BG} fg={t.brand} attributes={TextAttributes.BOLD}>
                 Map Token Budget
               </text>
             </PopupRow>
@@ -587,12 +595,15 @@ export function RepoMapStatusPopup({
             </PopupRow>
 
             <PopupRow bg={budgetBg} w={innerW}>
-              <text bg={budgetBg} fg={focusRow === FocusRow.Budget ? "#FF0040" : "#555"}>
+              <text
+                bg={budgetBg}
+                fg={focusRow === FocusRow.Budget ? t.brandSecondary : t.textMuted}
+              >
                 {focusRow === FocusRow.Budget ? "\u203A " : "  "}
               </text>
               <text
                 bg={budgetBg}
-                fg={focusRow === FocusRow.Budget ? "white" : "#aaa"}
+                fg={focusRow === FocusRow.Budget ? "white" : t.textSecondary}
                 attributes={focusRow === FocusRow.Budget ? TextAttributes.BOLD : undefined}
               >
                 {"Budget  "}
@@ -601,7 +612,7 @@ export function RepoMapStatusPopup({
                 <text
                   key={chip.label}
                   bg={budgetBg}
-                  fg={chip.active ? "#2d5" : "#555"}
+                  fg={chip.active ? t.success : t.textMuted}
                   attributes={chip.active ? TextAttributes.BOLD : undefined}
                 >
                   {chip.active ? `[${chip.label}]` : ` ${chip.label} `}{" "}
@@ -610,7 +621,7 @@ export function RepoMapStatusPopup({
             </PopupRow>
 
             <PopupRow w={innerW}>
-              <text bg={POPUP_BG} fg="#444">
+              <text bg={POPUP_BG} fg={t.textDim}>
                 {"    "}
                 {selectedTokenBudget === undefined
                   ? "scales with conversation length (1.5k\u20134k)"
@@ -623,22 +634,22 @@ export function RepoMapStatusPopup({
             </PopupRow>
 
             <PopupRow w={innerW}>
-              <text bg={POPUP_BG} fg="#333">
+              <text bg={POPUP_BG} fg={t.textFaint}>
                 {"\u2500".repeat(innerW - 2)}
               </text>
             </PopupRow>
 
             <PopupRow w={innerW}>
-              <text bg={POPUP_BG} fg="#555">
+              <text bg={POPUP_BG} fg={t.textMuted}>
                 {"\u2191\u2193 focus | \u2190\u2192 change | tab scope | 1-5 mode | "}
                 {isModified ? (
-                  <span fg="#2d5" attributes={TextAttributes.BOLD}>
+                  <span fg={t.success} attributes={TextAttributes.BOLD}>
                     {"\u23CE apply"}
                   </span>
                 ) : (
-                  <span fg="#555">{"\u23CE apply"}</span>
+                  <span fg={t.textMuted}>{"\u23CE apply"}</span>
                 )}
-                <span fg="#555">{" | esc close"}</span>
+                <span fg={t.textMuted}>{" | esc close"}</span>
               </text>
             </PopupRow>
           </>
@@ -646,7 +657,7 @@ export function RepoMapStatusPopup({
 
         {!hasConfig && (
           <PopupRow w={innerW}>
-            <text bg={POPUP_BG} fg="#555">
+            <text bg={POPUP_BG} fg={t.textMuted}>
               {`  [E] ${enabled ? "disable" : "enable"} | [R] refresh | [X] clear | tab scope | esc close`}
             </text>
           </PopupRow>

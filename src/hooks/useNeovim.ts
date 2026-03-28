@@ -11,6 +11,7 @@ import {
   shutdownNeovim,
 } from "../core/editor/neovim.js";
 import type { ScreenSegment } from "../core/editor/screen.js";
+import { useTheme } from "../core/theme/index.js";
 import { onFileEdited } from "../core/tools/file-events.js";
 import type { NvimConfigMode } from "../types/index.js";
 
@@ -49,6 +50,7 @@ export function useNeovim(
   hasTabBar = true,
   splitPct = 60,
 ): UseNeovimReturn {
+  const themeTokens = useTheme();
   const nvimRef = useRef<NvimInstance | null>(null);
   const mountedRef = useRef(true);
   const launchingRef = useRef(false);
@@ -57,7 +59,7 @@ export function useNeovim(
   const [ready, setReady] = useState(false);
   const [screen, setScreen] = useState<ScreenState>({
     lines: [],
-    defaultBg: "#1a1a2e",
+    defaultBg: themeTokens.bgApp,
     modeName: "normal",
   });
   const [fileName, setFileName] = useState<string | null>(null);

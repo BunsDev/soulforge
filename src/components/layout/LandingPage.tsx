@@ -4,21 +4,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { icon, providerIcon } from "../../core/icons.js";
 import type { ProviderStatus } from "../../core/llm/provider.js";
 import type { PrerequisiteStatus } from "../../core/setup/prerequisites.js";
+import { useTheme } from "../../core/theme/index.js";
 import { useRepoMapStore } from "../../stores/repomap.js";
 import { ScanDivider } from "./ScanDivider.js";
 import { SPINNER_FRAMES } from "./shared.js";
-
-const PURPLE = "#9B30FF";
-const PURPLE_DIM = "#6B20B0";
-const PURPLE_GLOW = "#BF5FFF";
-const RED = "#FF0040";
-const FAINT = "#1a1a2e";
-const MUTED = "#555";
-const SUBTLE = "#444";
-const GREEN = "#4a7";
-const AMBER = "#b87333";
-
-const GLOW_CYCLE = [PURPLE_DIM, PURPLE, PURPLE_GLOW, PURPLE, PURPLE_DIM];
 
 const WORDMARK = [
   "┌─┐┌─┐┬ ┬┬  ┌─┐┌─┐┬─┐┌─┐┌─┐",
@@ -52,6 +41,7 @@ function GradientLine({
   to: string;
   revealedChars?: number;
 }) {
+  const tk = useTheme();
   const len = text.length;
   if (len === 0) return null;
   const reveal = revealedChars ?? len;
@@ -63,7 +53,10 @@ function GradientLine({
     const slice = text.slice(i, i + CHUNK);
     const t = len > 1 ? i / (len - 1) : 0;
     if (i >= reveal) {
-      segments.push({ chars: slice.replace(/[^ ]/g, " "), color: FAINT });
+      segments.push({
+        chars: slice.replace(/[^ ]/g, " "),
+        color: tk.bgPopupHighlight,
+      });
     } else if (i + CHUNK > reveal) {
       const visCount = reveal - i;
       const vis = slice.slice(0, visCount);
@@ -92,6 +85,7 @@ interface LandingPageProps {
 }
 
 export function LandingPage({ bootProviders, bootPrereqs }: LandingPageProps) {
+  const tk = useTheme();
   const { width, height } = useTerminalDimensions();
   const columns = width ?? 80;
   const rows = height ?? 24;
@@ -122,12 +116,16 @@ export function LandingPage({ bootProviders, bootPrereqs }: LandingPageProps) {
   }, [totalChars, revealDone]);
 
   /* ── ghost pulse ── */
+  const glowCycle = useMemo(
+    () => [tk.brandDim, tk.brand, tk.brandAlt, tk.brand, tk.brandDim],
+    [tk.brandDim, tk.brand, tk.brandAlt],
+  );
   const [glowIdx, setGlowIdx] = useState(0);
   useEffect(() => {
-    const timer = setInterval(() => setGlowIdx((g) => (g + 1) % GLOW_CYCLE.length), 400);
+    const timer = setInterval(() => setGlowIdx((g) => (g + 1) % glowCycle.length), 400);
     return () => clearInterval(timer);
-  }, []);
-  const ghostColor = GLOW_CYCLE[glowIdx] ?? PURPLE;
+  }, [glowCycle]);
+  const ghostColor = glowCycle[glowIdx] ?? tk.brand;
 
   /* ── staggered fade-in after reveal ── */
   const [fadeStep, setFadeStep] = useState(0);
@@ -179,13 +177,13 @@ export function LandingPage({ bootProviders, bootPrereqs }: LandingPageProps) {
               // biome-ignore lint/suspicious/noArrayIndexKey: stable wordmark rows
               key={i}
               text={line}
-              from={PURPLE}
-              to={RED}
+              from={tk.brand}
+              to={tk.brandSecondary}
               revealedChars={revealed}
             />
           ))
         ) : (
-          <text fg={PURPLE} attributes={TextAttributes.BOLD}>
+          <text fg={tk.brand} attributes={TextAttributes.BOLD}>
             SOULFORGE
           </text>
         )}
@@ -193,11 +191,11 @@ export function LandingPage({ bootProviders, bootPrereqs }: LandingPageProps) {
         {/* ── Tagline (appears after reveal) ── */}
         {revealDone && (
           <box flexDirection="row" gap={0}>
-            <text fg={SUBTLE}>{"── "}</text>
-            <text fg={MUTED} attributes={TextAttributes.ITALIC}>
+            <text fg={tk.textDim}>{"── "}</text>
+            <text fg={tk.textMuted} attributes={TextAttributes.ITALIC}>
               AI-Powered Terminal IDE
             </text>
-            <text fg={SUBTLE}>{" ──"}</text>
+            <text fg={tk.textDim}>{" ──"}</text>
           </box>
         )}
 
@@ -214,28 +212,36 @@ export function LandingPage({ bootProviders, bootPrereqs }: LandingPageProps) {
             <box flexDirection="row" gap={0} justifyContent="center" flexWrap="wrap">
               {visibleProviders.map((p, i) => (
                 <box key={p.id} flexDirection="row" gap={0}>
-                  {i > 0 && <text fg={FAINT}>{" · "}</text>}
-                  <text fg={p.available ? GREEN : SUBTLE}>
+                  {i > 0 && <text fg={tk.bgPopupHighlight}>{" · "}</text>}
+                  <text fg={p.available ? tk.success : tk.textDim}>
                     {providerIcon(p.id)} {p.name}
                   </text>
                 </box>
               ))}
               {providerOverflow > 0 && (
                 <>
-                  <text fg={FAINT}>{" · "}</text>
-                  <text fg={SUBTLE}>+{providerOverflow}</text>
+                  <text fg={tk.bgPopupHighlight}>{" · "}</text>
+                  <text fg={tk.textDim}>+{providerOverflow}</text>
                 </>
               )}
             </box>
 
             <box flexDirection="row" gap={0} justifyContent="center">
               {allToolsOk ? (
-                <text fg={MUTED}>{icon("check")} all tools ready</text>
+                <text fg={tk.textMuted}>{icon("check")} all tools ready</text>
               ) : (
                 bootPrereqs.map((t, i) => (
                   <box key={t.prerequisite.name} flexDirection="row" gap={0}>
-                    {i > 0 && <text fg={FAINT}>{" · "}</text>}
-                    <text fg={t.installed ? GREEN : t.prerequisite.required ? RED : "#FF8C00"}>
+                    {i > 0 && <text fg={tk.bgPopupHighlight}>{" · "}</text>}
+                    <text
+                      fg={
+                        t.installed
+                          ? tk.success
+                          : t.prerequisite.required
+                            ? tk.brandSecondary
+                            : tk.warning
+                      }
+                    >
                       {t.installed ? icon("check") : "○"} {t.prerequisite.name}
                     </text>
                   </box>
@@ -246,7 +252,7 @@ export function LandingPage({ bootProviders, bootPrereqs }: LandingPageProps) {
             <IndexingStatus />
 
             {(missingRequired.length > 0 || !anyProvider) && (
-              <text fg={SUBTLE}>/setup to configure</text>
+              <text fg={tk.textDim}>/setup to configure</text>
             )}
           </>
         )}
@@ -276,6 +282,7 @@ export function LandingPage({ bootProviders, bootPrereqs }: LandingPageProps) {
 }
 
 function IndexingStatus() {
+  const tk = useTheme();
   const [state, setState] = useState(() => {
     const s = useRepoMapStore.getState();
     return { status: s.status, files: s.files, scanProgress: s.scanProgress };
@@ -317,7 +324,7 @@ function IndexingStatus() {
   if (status === "scanning") {
     return (
       <box flexDirection="row" gap={0} justifyContent="center">
-        <text fg={AMBER}>
+        <text fg={tk.amber}>
           {frame} indexing repo{scanProgress ? ` ${scanProgress}` : ""}
         </text>
       </box>
@@ -327,7 +334,7 @@ function IndexingStatus() {
   if (status === "ready") {
     return (
       <box flexDirection="row" gap={0} justifyContent="center">
-        <text fg={MUTED}>
+        <text fg={tk.textMuted}>
           {icon("check")} {String(files)} files indexed
         </text>
       </box>
@@ -337,7 +344,7 @@ function IndexingStatus() {
   if (status === "error") {
     return (
       <box flexDirection="row" gap={0} justifyContent="center">
-        <text fg={RED}>○ indexing failed</text>
+        <text fg={tk.brandSecondary}>○ indexing failed</text>
       </box>
     );
   }
@@ -346,11 +353,12 @@ function IndexingStatus() {
 }
 
 function Cmd({ name, arg }: { name: string; arg?: string }) {
+  const tk = useTheme();
   return (
     <box flexDirection="row" gap={0}>
-      <text fg={PURPLE}>/</text>
-      <text fg="#777">{name}</text>
-      {arg && <text fg={SUBTLE}> {arg}</text>}
+      <text fg={tk.brand}>/</text>
+      <text fg={tk.textSecondary}>{name}</text>
+      {arg && <text fg={tk.textDim}> {arg}</text>}
     </box>
   );
 }

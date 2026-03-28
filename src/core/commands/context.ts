@@ -1,6 +1,7 @@
 import type { InfoPopupLine } from "../../components/modals/InfoPopup.js";
 import { useUIStore } from "../../stores/ui.js";
 import { icon } from "../icons.js";
+import { getThemeTokens } from "../theme/index.js";
 import type { CommandContext, CommandHandler } from "./types.js";
 import { sysMsg } from "./utils.js";
 
@@ -125,14 +126,14 @@ export function openMemoryMenu(ctx: CommandContext): void {
             const memories = memMgr.listByScope(scope);
             lines.push({ type: "header", label: `${scope} (${String(memories.length)})` });
             if (memories.length === 0) {
-              lines.push({ type: "text", label: "  (empty)", color: "#444" });
+              lines.push({ type: "text", label: "  (empty)", color: getThemeTokens().textDim });
             } else {
               for (const m of memories) {
                 lines.push({
                   type: "entry",
                   label: `  ${m.category}`,
                   desc: m.title,
-                  color: "#FF8C00",
+                  color: getThemeTokens().warning,
                 });
               }
             }

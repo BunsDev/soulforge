@@ -1,3 +1,5 @@
+import { getThemeTokens } from "./theme/index.js";
+
 export type ToolCategory =
   | "file"
   | "shell"
@@ -75,29 +77,38 @@ const TOOL_CATEGORIES: Record<string, ToolCategory> = {
   soul_impact: "soul-map",
 };
 
-export const CATEGORY_COLORS: Record<string, string> = {
-  file: "#5C9FD6",
-  shell: "#c55",
-  git: "#4a7",
-  lsp: "#c678dd",
-  "tree-sitter": "#e5c07b",
-  "ts-morph": "#3178C6",
-  regex: "#888",
-  code: "#e5c07b",
-  web: "#5CBBF6",
-  memory: "#b87333",
-  agent: "#c080ff",
-  ui: "#00BFFF",
-  editor: "#5C9FD6",
-  execution: "#61AFEF",
-  "soul-map": "#2dd4bf",
-  brave: "#FB542B",
-  ddg: "#DE5833",
-  jina: "#FFAA00",
-  "jina-api": "#FFAA00",
-  readability: "#888",
-  fetch: "#5CBBF6",
-};
+export function getCategoryColors(): Record<string, string> {
+  const t = getThemeTokens();
+  return {
+    file: t.info,
+    shell: t.error,
+    git: t.success,
+    lsp: t.brandAlt,
+    "tree-sitter": t.warning,
+    "ts-morph": t.info,
+    regex: t.textSecondary,
+    code: t.warning,
+    web: t.info,
+    memory: t.amber,
+    agent: t.brand,
+    ui: t.info,
+    editor: t.info,
+    execution: t.info,
+    "soul-map": t.success,
+    brave: t.brandSecondary,
+    ddg: t.brandSecondary,
+    jina: t.warning,
+    "jina-api": t.warning,
+    readability: t.textSecondary,
+    fetch: t.info,
+  };
+}
+
+export const CATEGORY_COLORS: Record<string, string> = new Proxy({} as Record<string, string>, {
+  get(_, prop: string) {
+    return getCategoryColors()[prop];
+  },
+});
 
 const BACKEND_LABELS_BASE: Record<string, string> = {
   jina: "jina",
@@ -203,49 +214,53 @@ export const TOOL_LABELS: Record<string, string> = {
 };
 
 /** Resolve all display properties for a tool in one call. */
-export function resolveToolDisplay(toolName: string, defaultColor = "#888") {
+export function resolveToolDisplay(toolName: string, defaultColor?: string) {
+  const fallback = defaultColor ?? getThemeTokens().textSecondary;
   return {
     icon: TOOL_ICONS[toolName] ?? "\uF0AD",
-    iconColor: TOOL_ICON_COLORS[toolName] ?? defaultColor,
+    iconColor: getToolIconColors()[toolName] ?? fallback,
     label: TOOL_LABELS[toolName] ?? toolName,
     category: TOOL_CATEGORIES[toolName] as ToolCategory | undefined,
   };
 }
 
-const TOOL_ICON_COLORS: Record<string, string> = {
-  read_file: "#5C9FD6",
-  edit_file: "#c89030",
-  multi_edit: "#c89030",
-  undo_edit: "#c89030",
-  list_dir: "#5C9FD6",
-  shell: "#c55",
-  grep: "#c8b040",
-  glob: "#5C9FD6",
-  dispatch: "#9B30FF",
-  web_search: "#5CBBF6",
-  fetch_page: "#5CBBF6",
-  memory: "#b87333",
-  editor: "#5C9FD6",
-  git: "#4a7",
-  navigate: "#8B5CF6",
-  analyze: "#8B5CF6",
-  rename_symbol: "#c89030",
-  move_symbol: "#c89030",
-  rename_file: "#c89030",
-  refactor: "#c89030",
-  project: "#c55",
-  test_scaffold: "#8B5CF6",
-  discover_pattern: "#8B5CF6",
-  plan: "#00BFFF",
-  update_plan_step: "#00BFFF",
-  ask_user: "#c89030",
-  task_list: "#00BFFF",
-  editor_panel: "#5C9FD6",
-  skills: "#9B30FF",
-  code_execution: "#61AFEF",
-  soul_grep: "#2dd4bf",
-  soul_find: "#2dd4bf",
-  soul_analyze: "#2dd4bf",
-  soul_impact: "#2dd4bf",
-  _nudge: "#d9a020",
-};
+function getToolIconColors(): Record<string, string> {
+  const t = getThemeTokens();
+  return {
+    read_file: t.info,
+    edit_file: t.amber,
+    multi_edit: t.amber,
+    undo_edit: t.amber,
+    list_dir: t.info,
+    shell: t.error,
+    grep: t.warning,
+    glob: t.info,
+    dispatch: t.brand,
+    web_search: t.info,
+    fetch_page: t.info,
+    memory: t.amber,
+    editor: t.info,
+    git: t.success,
+    navigate: t.brandAlt,
+    analyze: t.brandAlt,
+    rename_symbol: t.amber,
+    move_symbol: t.amber,
+    rename_file: t.amber,
+    refactor: t.amber,
+    project: t.error,
+    test_scaffold: t.brandAlt,
+    discover_pattern: t.brandAlt,
+    plan: t.info,
+    update_plan_step: t.info,
+    ask_user: t.amber,
+    task_list: t.info,
+    editor_panel: t.info,
+    skills: t.brand,
+    code_execution: t.info,
+    soul_grep: t.success,
+    soul_find: t.success,
+    soul_analyze: t.success,
+    soul_impact: t.success,
+    _nudge: t.warning,
+  };
+}

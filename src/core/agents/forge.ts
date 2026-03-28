@@ -9,7 +9,7 @@ import type {
   InteractiveCallbacks,
 } from "../../types/index.js";
 import type { ContextManager } from "../context/manager.js";
-import { EPHEMERAL_CACHE, isAnthropicNative } from "../llm/provider-options.js";
+import { detectModelFamily, EPHEMERAL_CACHE, isAnthropicNative } from "../llm/provider-options.js";
 import {
   buildInteractiveTools,
   buildTools,
@@ -366,10 +366,17 @@ export function createForgeAgent({
     activeDeferredTools,
   });
 
-  // miniForge: share the forge system prompt with subagents for Anthropic prefix cache hits
-  const forgeInstructions = isAnthropicNative(modelId)
-    ? buildInstructions(contextManager, modelId)
-    : undefined;
+  // miniForge: share the forge system prompt with subagents for prefix cache hits.
+  // Works across all providers with automatic caching (OpenAI, Gemini, DeepSeek, Mistral, etc.)
+  // buildInstructions is WeakMap-cached, so this call is effectively free.
+  const forgeInstructions = buildInstructions(contextManager, modelId);
+
+  // OpenAI prompt cache routing: session-level key co-locates requests sharing
+  // the same prefix on the same backend, improving hit rates (~60% → ~87%).
+  const subagentHeaders =
+    detectModelFamily(modelId) === "openai" && sessionId
+      ? { ...headers, "x-prompt-cache-key": sessionId }
+      : headers;
 
   const subagentTools = isRestricted
     ? {
@@ -378,7 +385,7 @@ export function createForgeAgent({
           explorationModel: subagentModels?.exploration,
           webSearchModel,
           providerOptions,
-          headers,
+          headers: subagentHeaders,
           onApproveWebSearch,
           onApproveFetchPage,
           readOnly: true,
@@ -400,7 +407,7 @@ export function createForgeAgent({
         verifyModel: subagentModels?.verify,
         webSearchModel,
         providerOptions,
-        headers,
+        headers: subagentHeaders,
         onApproveWebSearch,
         onApproveFetchPage,
         repoMap,
@@ -474,7 +481,7 @@ export function createForgeAgent({
     prepareStep: buildForgePrepareStep(forgeMode === "plan", drainSteering, contextManager, tabId),
     experimental_repairToolCall: repairToolCall,
     providerOptions: wrappedProviderOptions,
-    ...(headers ? { headers } : {}),
+    ...(subagentHeaders ? { headers: subagentHeaders } : {}),
   });
 }
 

@@ -1,6 +1,7 @@
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useEffect, useState } from "react";
+import { useTheme } from "../../core/theme/index.js";
 import { usePopupScroll } from "../../hooks/usePopupScroll.js";
 import { copyToClipboard } from "../../utils/clipboard.js";
 import { Overlay, POPUP_BG, POPUP_HL, PopupRow } from "../layout/shared.js";
@@ -65,6 +66,7 @@ export function LogViewer<T extends LogViewerEntry>({
   entries,
   config,
 }: Props<T>) {
+  const t = useTheme();
   const [query, setQuery] = useState("");
   const [detailIndex, setDetailIndex] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
@@ -203,29 +205,29 @@ export function LogViewer<T extends LogViewerEntry>({
             <text fg={dh.iconColor} bg={POPUP_BG}>
               {dh.icon}
             </text>
-            <text fg="white" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
+            <text fg={t.textPrimary} attributes={TextAttributes.BOLD} bg={POPUP_BG}>
               {" "}
               {dh.label}
             </text>
             {dh.sublabel && (
-              <text fg={dh.sublabelColor ?? "#9B30FF"} bg={POPUP_BG}>
+              <text fg={dh.sublabelColor ?? t.brand} bg={POPUP_BG}>
                 {"  "}
                 {dh.sublabel}
               </text>
             )}
-            <text fg="#555" bg={POPUP_BG}>
+            <text fg={t.textMuted} bg={POPUP_BG}>
               {"  "}
               {dh.timeStr}
             </text>
             {copied && (
-              <text fg="#2d5" bg={POPUP_BG}>
+              <text fg={t.success} bg={POPUP_BG}>
                 {"  "}Copied!
               </text>
             )}
           </PopupRow>
 
           <PopupRow w={innerW}>
-            <text fg="#333" bg={POPUP_BG}>
+            <text fg={t.textFaint} bg={POPUP_BG}>
               {"─".repeat(innerW - 4)}
             </text>
           </PopupRow>
@@ -242,7 +244,7 @@ export function LogViewer<T extends LogViewerEntry>({
                 return (
                   <PopupRow key={String(vi + detailScrollOffset)} w={innerW}>
                     <text
-                      fg={isSection ? sectionColor : "#aaa"}
+                      fg={isSection ? sectionColor : t.textSecondary}
                       attributes={isSection ? TextAttributes.BOLD : undefined}
                       bg={POPUP_BG}
                       truncate
@@ -255,7 +257,7 @@ export function LogViewer<T extends LogViewerEntry>({
           </box>
           {detailLines.length > maxDetailLines && (
             <PopupRow w={innerW}>
-              <text fg="#555" bg={POPUP_BG}>
+              <text fg={t.textMuted} bg={POPUP_BG}>
                 {detailScrollOffset > 0 ? "↑ " : "  "}
                 {String(detailScrollOffset + 1)}-
                 {String(Math.min(detailScrollOffset + maxDetailLines, detailLines.length))}/
@@ -269,7 +271,7 @@ export function LogViewer<T extends LogViewerEntry>({
             <text>{""}</text>
           </PopupRow>
           <PopupRow w={innerW}>
-            <text fg="#555" bg={POPUP_BG}>
+            <text fg={t.textMuted} bg={POPUP_BG}>
               ↑↓ scroll | ^Y copy | esc back
             </text>
           </PopupRow>
@@ -291,12 +293,12 @@ export function LogViewer<T extends LogViewerEntry>({
           <text fg={config.titleColor} attributes={TextAttributes.BOLD} bg={POPUP_BG}>
             {config.titleIcon} {config.title}
           </text>
-          <text fg="#555" bg={POPUP_BG}>
+          <text fg={t.textMuted} bg={POPUP_BG}>
             {" "}
             ({config.countLabel(entries.length)})
           </text>
           {copied && (
-            <text fg="#2d5" bg={POPUP_BG}>
+            <text fg={t.success} bg={POPUP_BG}>
               {"  "}Copied!
             </text>
           )}
@@ -308,7 +310,7 @@ export function LogViewer<T extends LogViewerEntry>({
           </text>
           {query ? (
             <>
-              <text fg="white" bg={POPUP_BG}>
+              <text fg={t.textPrimary} bg={POPUP_BG}>
                 {query}
               </text>
               <text fg={config.accentColor} bg={POPUP_BG}>
@@ -320,7 +322,7 @@ export function LogViewer<T extends LogViewerEntry>({
               <text fg={config.accentColor} bg={POPUP_BG}>
                 █
               </text>
-              <text fg="#555" bg={POPUP_BG}>
+              <text fg={t.textMuted} bg={POPUP_BG}>
                 {config.filterPlaceholder}
               </text>
             </>
@@ -328,7 +330,7 @@ export function LogViewer<T extends LogViewerEntry>({
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text fg="#333" bg={POPUP_BG}>
+          <text fg={t.textFaint} bg={POPUP_BG}>
             {"─".repeat(innerW - 4)}
           </text>
         </PopupRow>
@@ -340,7 +342,7 @@ export function LogViewer<T extends LogViewerEntry>({
         >
           {filtered.length === 0 ? (
             <PopupRow w={innerW}>
-              <text fg="#555" bg={POPUP_BG}>
+              <text fg={t.textMuted} bg={POPUP_BG}>
                 {query ? config.emptyFilterMessage : config.emptyMessage}
               </text>
             </PopupRow>
@@ -352,7 +354,7 @@ export function LogViewer<T extends LogViewerEntry>({
               const row = config.renderListRow(entry, innerW);
               return (
                 <PopupRow key={entry.id} bg={bg} w={innerW}>
-                  <text bg={bg} fg={isActive ? config.cursorColor : "#555"}>
+                  <text bg={bg} fg={isActive ? config.cursorColor : t.textMuted}>
                     {isActive ? "› " : "  "}
                   </text>
                   <text bg={bg} fg={row.iconColor}>
@@ -360,21 +362,21 @@ export function LogViewer<T extends LogViewerEntry>({
                   </text>
                   <text
                     bg={bg}
-                    fg={isActive ? "white" : "#aaa"}
+                    fg={isActive ? "white" : t.textSecondary}
                     attributes={isActive ? TextAttributes.BOLD : undefined}
                   >
                     {row.label}
                   </text>
-                  <text bg={bg} fg="#666">
+                  <text bg={bg} fg={t.textMuted}>
                     {" "}
                     {row.summary}
                   </text>
                   {row.extra && (
-                    <text bg={bg} fg={row.extraColor ?? "#9B30FF"}>
+                    <text bg={bg} fg={row.extraColor ?? t.brand}>
                       {row.extra}
                     </text>
                   )}
-                  <text bg={bg} fg="#444">
+                  <text bg={bg} fg={t.textDim}>
                     {"  "}
                     {row.timeStr}
                   </text>
@@ -385,7 +387,7 @@ export function LogViewer<T extends LogViewerEntry>({
         </box>
         {filtered.length > maxListVisible && (
           <PopupRow w={innerW}>
-            <text fg="#555" bg={POPUP_BG}>
+            <text fg={t.textMuted} bg={POPUP_BG}>
               {scrollOffset > 0 ? "↑ " : "  "}
               {String(cursor + 1)}/{String(filtered.length)}
               {scrollOffset + maxListVisible < filtered.length ? " ↓" : ""}
@@ -397,7 +399,7 @@ export function LogViewer<T extends LogViewerEntry>({
           <text>{""}</text>
         </PopupRow>
         <PopupRow w={innerW}>
-          <text fg="#555" bg={POPUP_BG}>
+          <text fg={t.textMuted} bg={POPUP_BG}>
             ↑↓ nav | ⏎ detail | ^Y copy | esc close
           </text>
         </PopupRow>

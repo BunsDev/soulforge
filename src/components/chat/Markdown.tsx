@@ -1,4 +1,5 @@
-import { createContext, memo, useContext } from "react";
+import { createContext, memo, useContext, useMemo } from "react";
+import { useTheme } from "../../core/theme/index.js";
 import { getSyntaxStyle, getTSClient } from "../../core/utils/syntax.js";
 
 const CodeExpandedContext = createContext(false);
@@ -12,18 +13,22 @@ interface Props {
   streaming?: boolean;
 }
 
-const TABLE_OPTIONS = {
-  widthMode: "content" as const,
-  wrapMode: "word" as const,
-  borders: true,
-  borderStyle: "rounded" as const,
-  borderColor: "#333",
-  cellPadding: 0,
-};
-
 export const Markdown = memo(function Markdown({ text, streaming }: Props) {
+  const t = useTheme();
   const syntaxStyle = getSyntaxStyle();
   const tsClient = getTSClient();
+
+  const tableOptions = useMemo(
+    () => ({
+      widthMode: "content" as const,
+      wrapMode: "word" as const,
+      borders: true,
+      borderStyle: "rounded" as const,
+      borderColor: t.textFaint,
+      cellPadding: 0,
+    }),
+    [t.textFaint],
+  );
 
   return (
     <markdown
@@ -32,7 +37,7 @@ export const Markdown = memo(function Markdown({ text, streaming }: Props) {
       treeSitterClient={tsClient}
       conceal
       streaming={streaming}
-      tableOptions={TABLE_OPTIONS}
+      tableOptions={tableOptions}
     />
   );
 });

@@ -2,20 +2,24 @@ import { fg as fgStyle, StyledText, type TextRenderable } from "@opentui/core";
 import { useTerminalDimensions } from "@opentui/react";
 import { useEffect, useRef } from "react";
 import { icon } from "../../core/icons.js";
+import { getThemeTokens } from "../../core/theme/index.js";
 import { useStatusBarStore } from "../../stores/statusbar.js";
 
-const PURPLE_GLOW = "#BF5FFF";
-const PURPLE = "#9B30FF";
-const PURPLE_DIM = "#6B20B0";
-const SCAN_FAINT = "#1a1a2e";
 const SCAN_SPEED = 120;
 
 function buildScanContent(pos: number, width: number): StyledText {
+  const tk = getThemeTokens();
   const segments: ReturnType<ReturnType<typeof fgStyle>>[] = [];
   for (let i = 0; i < width; i++) {
     const dist = Math.abs(i - pos);
     const color =
-      dist === 0 ? PURPLE_GLOW : dist === 1 ? PURPLE : dist === 2 ? PURPLE_DIM : SCAN_FAINT;
+      dist === 0
+        ? tk.brand
+        : dist === 1
+          ? tk.brand
+          : dist === 2
+            ? tk.brandDim
+            : tk.bgPopupHighlight;
     const ch = dist === 0 ? "━" : "─";
     segments.push(fgStyle(color)(ch));
   }
@@ -48,30 +52,37 @@ function formatElapsed(sec: number): string {
 }
 
 function buildGhostContent(ghostVisible: boolean, isCompacting: boolean): StyledText {
+  const tk = getThemeTokens();
   const currentGhost = ghostVisible ? ghostIcon() : " ";
-  const ghostColor = isCompacting ? "#5af" : "#8B5CF6";
+  const ghostColor = isCompacting ? tk.info : tk.brandAlt;
   return new StyledText([fgStyle(ghostColor)(` ${currentGhost} `)]);
 }
 
 function buildStatusContent(isCompacting: boolean, forgeStatus: string): StyledText {
+  const tk = getThemeTokens();
   const busyStatus = isCompacting ? "Compacting context…" : forgeStatus;
-  const statusColor = isCompacting ? "#3388cc" : "#6A0DAD";
+  const statusColor = isCompacting ? tk.info : tk.brand;
   return new StyledText([fgStyle(statusColor)(busyStatus)]);
 }
 
 function buildElapsedContent(elapsedSec: number, queueCount: number | undefined): StyledText {
+  const tk = getThemeTokens();
   const chunks: ReturnType<ReturnType<typeof fgStyle>>[] = [];
   if (elapsedSec > 0) {
-    chunks.push(fgStyle("#555")(` ${formatElapsed(elapsedSec)}`));
+    chunks.push(fgStyle(tk.textMuted)(` ${formatElapsed(elapsedSec)}`));
   }
   if (queueCount != null && queueCount > 0) {
-    chunks.push(fgStyle("#555")(` (${String(queueCount)} queued)`));
+    chunks.push(fgStyle(tk.textMuted)(` (${String(queueCount)} queued)`));
   }
   return new StyledText(chunks);
 }
 
 function buildCompletedContent(time: string): StyledText {
-  return new StyledText([fgStyle("#2a5")(" ✓ "), fgStyle("#555")(`Completed in ${time}`)]);
+  const tk = getThemeTokens();
+  return new StyledText([
+    fgStyle(tk.success)(" ✓ "),
+    fgStyle(tk.textMuted)(`Completed in ${time}`),
+  ]);
 }
 
 interface LoadingStatusProps {

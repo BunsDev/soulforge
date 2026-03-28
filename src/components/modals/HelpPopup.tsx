@@ -2,6 +2,7 @@ import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useEffect, useState } from "react";
 import { icon } from "../../core/icons.js";
+import { useTheme } from "../../core/theme/index.js";
 import { Overlay, POPUP_BG, PopupRow } from "../layout/shared.js";
 
 const MAX_POPUP_WIDTH = 88;
@@ -14,76 +15,78 @@ interface HelpLine {
   color?: string;
 }
 
-const LINES: HelpLine[] = [
-  { type: "text", label: "Ctrl+K — open command palette (search all commands)" },
-  { type: "text", label: "/settings — all settings in one place" },
-  { type: "spacer" },
-  { type: "separator" },
+function buildHelpLines(t: ReturnType<typeof useTheme>): HelpLine[] {
+  return [
+    { type: "text", label: "Ctrl+K — open command palette (search all commands)" },
+    { type: "text", label: "/settings — all settings in one place" },
+    { type: "spacer" },
+    { type: "separator" },
 
-  { type: "header", label: "Keybindings" },
-  { type: "text", label: "General" },
-  { type: "entry", label: "Ctrl+X", desc: "stop/abort generation" },
-  { type: "entry", label: "Ctrl+C", desc: "copy selection / exit" },
-  { type: "entry", label: "Ctrl+D", desc: "cycle forge mode" },
-  { type: "entry", label: "Ctrl+K", desc: "command palette" },
-  { type: "entry", label: "Ctrl+O", desc: "expand/collapse all (code, reasoning)" },
-  { type: "spacer" },
-  { type: "text", label: "Panels" },
-  { type: "entry", label: "Ctrl+L", desc: "switch LLM model" },
-  { type: "entry", label: "Ctrl+S", desc: "browse skills" },
-  { type: "entry", label: "Ctrl+P", desc: "browse sessions" },
-  { type: "entry", label: "Alt+R", desc: "error log" },
-  { type: "entry", label: "Ctrl+G", desc: "git menu" },
-  { type: "spacer" },
-  { type: "text", label: "Editor" },
-  { type: "entry", label: "Ctrl+E", desc: "open/close editor" },
-  { type: "spacer" },
-  { type: "text", label: "Tabs" },
-  { type: "entry", label: "Ctrl+T", desc: "new tab" },
-  { type: "entry", label: "Ctrl+W", desc: "close tab" },
-  { type: "entry", label: "Ctrl+1-9", desc: "switch to tab N" },
-  { type: "entry", label: "Ctrl+[ / Ctrl+]", desc: "prev / next tab" },
-  { type: "spacer" },
-  { type: "text", label: "Scroll" },
-  { type: "entry", label: "Page Up / Down", desc: "scroll chat" },
+    { type: "header", label: "Keybindings" },
+    { type: "text", label: "General" },
+    { type: "entry", label: "Ctrl+X", desc: "stop/abort generation" },
+    { type: "entry", label: "Ctrl+C", desc: "copy selection / exit" },
+    { type: "entry", label: "Ctrl+D", desc: "cycle forge mode" },
+    { type: "entry", label: "Ctrl+K", desc: "command palette" },
+    { type: "entry", label: "Ctrl+O", desc: "expand/collapse all (code, reasoning)" },
+    { type: "spacer" },
+    { type: "text", label: "Panels" },
+    { type: "entry", label: "Ctrl+L", desc: "switch LLM model" },
+    { type: "entry", label: "Ctrl+S", desc: "browse skills" },
+    { type: "entry", label: "Ctrl+P", desc: "browse sessions" },
+    { type: "entry", label: "Alt+R", desc: "error log" },
+    { type: "entry", label: "Ctrl+G", desc: "git menu" },
+    { type: "spacer" },
+    { type: "text", label: "Editor" },
+    { type: "entry", label: "Ctrl+E", desc: "open/close editor" },
+    { type: "spacer" },
+    { type: "text", label: "Tabs" },
+    { type: "entry", label: "Ctrl+T", desc: "new tab" },
+    { type: "entry", label: "Ctrl+W", desc: "close tab" },
+    { type: "entry", label: "Ctrl+1-9", desc: "switch to tab N" },
+    { type: "entry", label: "Ctrl+[ / Ctrl+]", desc: "prev / next tab" },
+    { type: "spacer" },
+    { type: "text", label: "Scroll" },
+    { type: "entry", label: "Page Up / Down", desc: "scroll chat" },
 
-  { type: "spacer" },
-  { type: "separator" },
+    { type: "spacer" },
+    { type: "separator" },
 
-  { type: "header", label: "Forge Modes" },
-  { type: "text", label: "Switch with /mode <name> or Ctrl+D to cycle." },
-  { type: "spacer" },
-  {
-    type: "entry",
-    label: "default",
-    desc: "standard assistant — implements directly",
-    color: "#555",
-  },
-  {
-    type: "entry",
-    label: "architect",
-    desc: "design only — outlines, tradeoffs, no code",
-    color: "#9B30FF",
-  },
-  {
-    type: "entry",
-    label: "socratic",
-    desc: "asks probing questions before implementing",
-    color: "#FF8C00",
-  },
-  {
-    type: "entry",
-    label: "challenge",
-    desc: "devil's advocate — challenges every assumption",
-    color: "#FF0040",
-  },
-  {
-    type: "entry",
-    label: "plan",
-    desc: "research & plan only — no file edits or shell",
-    color: "#00BFFF",
-  },
-];
+    { type: "header", label: "Forge Modes" },
+    { type: "text", label: "Switch with /mode <name> or Ctrl+D to cycle." },
+    { type: "spacer" },
+    {
+      type: "entry",
+      label: "default",
+      desc: "standard assistant — implements directly",
+      color: t.textMuted,
+    },
+    {
+      type: "entry",
+      label: "architect",
+      desc: "design only — outlines, tradeoffs, no code",
+      color: t.brand,
+    },
+    {
+      type: "entry",
+      label: "socratic",
+      desc: "asks probing questions before implementing",
+      color: t.warning,
+    },
+    {
+      type: "entry",
+      label: "challenge",
+      desc: "devil's advocate — challenges every assumption",
+      color: t.brandSecondary,
+    },
+    {
+      type: "entry",
+      label: "plan",
+      desc: "research & plan only — no file edits or shell",
+      color: t.info,
+    },
+  ];
+}
 
 interface Props {
   visible: boolean;
@@ -91,6 +94,8 @@ interface Props {
 }
 
 export function HelpPopup({ visible, onClose }: Props) {
+  const t = useTheme();
+  const LINES = buildHelpLines(t);
   const { width: termCols, height: termRows } = useTerminalDimensions();
   const containerRows = termRows - 2;
   const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.8));
@@ -125,24 +130,24 @@ export function HelpPopup({ visible, onClose }: Props) {
         flexDirection="column"
         borderStyle="rounded"
         border={true}
-        borderColor="#8B5CF6"
+        borderColor={t.brandAlt}
         width={popupWidth}
       >
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#9B30FF" attributes={TextAttributes.BOLD}>
+          <text bg={POPUP_BG} fg={t.brand} attributes={TextAttributes.BOLD}>
             {icon("info")}
           </text>
-          <text bg={POPUP_BG} fg="white" attributes={TextAttributes.BOLD}>
+          <text bg={POPUP_BG} fg={t.textPrimary} attributes={TextAttributes.BOLD}>
             {" "}
             SoulForge Help
           </text>
-          <text bg={POPUP_BG} fg="#555">
+          <text bg={POPUP_BG} fg={t.textMuted}>
             {"  "}↑↓ scroll
           </text>
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#333">
+          <text bg={POPUP_BG} fg={t.textFaint}>
             {"─".repeat(innerW - 2)}
           </text>
         </PopupRow>
@@ -154,7 +159,7 @@ export function HelpPopup({ visible, onClose }: Props) {
               case "header":
                 return (
                   <PopupRow key={key} w={innerW}>
-                    <text bg={POPUP_BG} fg="#8B5CF6" attributes={TextAttributes.BOLD}>
+                    <text bg={POPUP_BG} fg={t.brandAlt} attributes={TextAttributes.BOLD}>
                       {line.label}
                     </text>
                   </PopupRow>
@@ -162,7 +167,7 @@ export function HelpPopup({ visible, onClose }: Props) {
               case "separator":
                 return (
                   <PopupRow key={key} w={innerW}>
-                    <text bg={POPUP_BG} fg="#333">
+                    <text bg={POPUP_BG} fg={t.textFaint}>
                       {"─".repeat(innerW - 2)}
                     </text>
                   </PopupRow>
@@ -170,10 +175,10 @@ export function HelpPopup({ visible, onClose }: Props) {
               case "entry":
                 return (
                   <PopupRow key={key} w={innerW}>
-                    <text bg={POPUP_BG} fg={line.color ?? "#FF0040"}>
+                    <text bg={POPUP_BG} fg={line.color ?? t.brandSecondary}>
                       {(line.label ?? "").padEnd(20)}
                     </text>
-                    <text bg={POPUP_BG} fg="#666">
+                    <text bg={POPUP_BG} fg={t.textMuted}>
                       {line.desc}
                     </text>
                   </PopupRow>
@@ -181,7 +186,7 @@ export function HelpPopup({ visible, onClose }: Props) {
               case "text":
                 return (
                   <PopupRow key={key} w={innerW}>
-                    <text bg={POPUP_BG} fg="#555">
+                    <text bg={POPUP_BG} fg={t.textMuted}>
                       {line.label}
                     </text>
                   </PopupRow>
@@ -199,7 +204,7 @@ export function HelpPopup({ visible, onClose }: Props) {
         </box>
         {LINES.length > maxVisible && (
           <PopupRow w={innerW}>
-            <text fg="#555" bg={POPUP_BG}>
+            <text fg={t.textMuted} bg={POPUP_BG}>
               {scrollOffset > 0 ? "↑ " : "  "}
               {scrollOffset + 1}-{Math.min(scrollOffset + maxVisible, LINES.length)}/{LINES.length}
               {scrollOffset + maxVisible < LINES.length ? " ↓" : ""}
@@ -212,7 +217,7 @@ export function HelpPopup({ visible, onClose }: Props) {
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#555">
+          <text bg={POPUP_BG} fg={t.textMuted}>
             {"↑↓"} scroll | esc close
           </text>
         </PopupRow>

@@ -2,6 +2,7 @@ import { TextAttributes } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
 import { useMemo, useState } from "react";
 import { icon } from "../../core/icons.js";
+import { useTheme } from "../../core/theme/index.js";
 import type { Plan } from "../../types/index.js";
 
 interface Props {
@@ -14,23 +15,12 @@ interface Props {
   planFile: string;
 }
 
-const ACCENT = "#00BFFF";
-const STEP_COLOR = "#8B5CF6";
-const CANCEL_COLOR = "#FF0040";
-
 interface Option {
   id: string;
   label: string;
   icon: string;
   color: string;
 }
-
-const ALL_OPTIONS: Option[] = [
-  { id: "implement", label: "Implement", icon: "\u23CE", color: ACCENT },
-  { id: "clear_implement", label: "Clear & Implement", icon: "\u21BB", color: "#FF8C00" },
-  { id: "revise", label: "Revise", icon: "\uF040", color: STEP_COLOR },
-  { id: "cancel", label: "Cancel", icon: "\uF00D", color: CANCEL_COLOR },
-];
 
 export function PlanReviewPrompt({
   onAccept,
@@ -41,12 +31,25 @@ export function PlanReviewPrompt({
   plan,
   planFile,
 }: Props) {
+  const t = useTheme();
+  const ACCENT = t.info;
+  const STEP_COLOR = t.brandAlt;
+  const CANCEL_COLOR = t.brandSecondary;
+  const allOptions: Option[] = useMemo(
+    () => [
+      { id: "implement", label: "Implement", icon: "\u23CE", color: ACCENT },
+      { id: "clear_implement", label: "Clear & Implement", icon: "\u21BB", color: t.warning },
+      { id: "revise", label: "Revise", icon: "\uF040", color: STEP_COLOR },
+      { id: "cancel", label: "Cancel", icon: "\uF00D", color: CANCEL_COLOR },
+    ],
+    [ACCENT, STEP_COLOR, CANCEL_COLOR, t.warning],
+  );
   const options = useMemo(() => {
     if (plan.depth === "light") {
-      return ALL_OPTIONS.filter((o) => o.id !== "clear_implement");
+      return allOptions.filter((o) => o.id !== "clear_implement");
     }
-    return ALL_OPTIONS;
-  }, [plan.depth]);
+    return allOptions;
+  }, [plan.depth, allOptions]);
 
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [reviseInput, setReviseInput] = useState("");
@@ -115,10 +118,10 @@ export function PlanReviewPrompt({
         <text fg={ACCENT} attributes={TextAttributes.BOLD}>
           {icon("plan")} {plan.title}
         </text>
-        <text fg="#333">{"\u2502"}</text>
-        <text fg="#444">{String(plan.steps.length)} steps</text>
-        <text fg="#333">{"\u2502"}</text>
-        <text fg="#444">{planFile}</text>
+        <text fg={t.textFaint}>{"\u2502"}</text>
+        <text fg={t.textDim}>{String(plan.steps.length)} steps</text>
+        <text fg={t.textFaint}>{"\u2502"}</text>
+        <text fg={t.textDim}>{planFile}</text>
       </box>
 
       {plan.steps.length <= 5 ? (
@@ -126,8 +129,8 @@ export function PlanReviewPrompt({
           {plan.steps.map((step) => (
             <box key={step.id} height={1} flexShrink={0}>
               <text truncate>
-                <span fg="#555"> ○ </span>
-                <span fg="#999">{step.label}</span>
+                <span fg={t.textMuted}> ○ </span>
+                <span fg={t.textSecondary}>{step.label}</span>
               </text>
             </box>
           ))}
@@ -138,19 +141,19 @@ export function PlanReviewPrompt({
             {plan.steps.slice(0, Math.ceil(plan.steps.length / 2)).map((step) => (
               <box key={step.id} height={1} flexShrink={0}>
                 <text truncate>
-                  <span fg="#555"> ○ </span>
-                  <span fg="#999">{step.label}</span>
+                  <span fg={t.textMuted}> ○ </span>
+                  <span fg={t.textSecondary}>{step.label}</span>
                 </text>
               </box>
             ))}
           </box>
-          <text fg="#222"> │ </text>
+          <text fg={t.textSubtle}> │ </text>
           <box flexDirection="column" flexGrow={1} flexBasis={0}>
             {plan.steps.slice(Math.ceil(plan.steps.length / 2)).map((step) => (
               <box key={step.id} height={1} flexShrink={0}>
                 <text truncate>
-                  <span fg="#555"> ○ </span>
-                  <span fg="#999">{step.label}</span>
+                  <span fg={t.textMuted}> ○ </span>
+                  <span fg={t.textSecondary}>{step.label}</span>
                 </text>
               </box>
             ))}
@@ -176,7 +179,7 @@ export function PlanReviewPrompt({
             flexGrow={1}
             placeholder="what should change..."
           />
-          <text fg="#555">⏎ submit · esc back</text>
+          <text fg={t.textMuted}>⏎ submit · esc back</text>
         </box>
       ) : (
         <box flexDirection="column">
@@ -184,9 +187,9 @@ export function PlanReviewPrompt({
             const selected = i === selectedIdx;
             return (
               <text key={opt.id}>
-                <span fg={selected ? opt.color : "#555"}>{selected ? " › " : "   "}</span>
+                <span fg={selected ? opt.color : t.textMuted}>{selected ? " › " : "   "}</span>
                 <span
-                  fg={selected ? "#FFF" : "#888"}
+                  fg={selected ? t.textPrimary : t.textSecondary}
                   attributes={selected ? TextAttributes.BOLD : undefined}
                 >
                   {opt.icon} {opt.label}
@@ -194,7 +197,7 @@ export function PlanReviewPrompt({
               </text>
             );
           })}
-          <text fg="#444">{"  "}↑↓ select · ⏎ confirm · esc cancel</text>
+          <text fg={t.textDim}>{"  "}↑↓ select · ⏎ confirm · esc cancel</text>
         </box>
       )}
     </box>

@@ -2,6 +2,7 @@ import type { ConfigScope } from "../../components/layout/shared.js";
 import { useUIStore } from "../../stores/ui.js";
 import type { AgentFeatures } from "../../types/index.js";
 import { icon, setNerdFont } from "../icons.js";
+import { applyTheme, getThemeTokens, listThemes, useThemeStore } from "../theme/index.js";
 import type { CommandContext, CommandHandler } from "./types.js";
 import { sysMsg } from "./utils.js";
 
@@ -190,37 +191,37 @@ function handleMode(input: string, ctx: CommandContext): void {
           value: "default",
           label: "Default",
           description: "standard assistant — implements directly",
-          color: "#aaa",
+          color: getThemeTokens().textSecondary,
         },
         {
           value: "architect",
           label: "Architect",
           description: "design only — outlines, tradeoffs, no code",
-          color: "#9B30FF",
+          color: getThemeTokens().brand,
         },
         {
           value: "socratic",
           label: "Socratic",
           description: "asks probing questions before implementing",
-          color: "#FF8C00",
+          color: getThemeTokens().warning,
         },
         {
           value: "challenge",
           label: "Challenge",
           description: "devil's advocate — challenges every assumption",
-          color: "#FF0040",
+          color: getThemeTokens().brandSecondary,
         },
         {
           value: "plan",
           label: "Plan",
           description: "research & plan only — no file edits or shell",
-          color: "#00BFFF",
+          color: getThemeTokens().info,
         },
         {
           value: "auto",
           label: "Auto",
           description: "autonomous execution — minimal questions, action over planning",
-          color: "#2d5",
+          color: getThemeTokens().success,
         },
       ],
       onSelect: (value, scope) => applyMode(value as Mode, scope),
@@ -422,7 +423,11 @@ async function handleInstructions(_input: string, ctx: CommandContext): Promise<
       return {
         value: s.id,
         icon: enabled ? "✓" : " ",
-        color: enabled ? (found ? "#2d5" : "#F59E0B") : "#555",
+        color: enabled
+          ? found
+            ? getThemeTokens().success
+            : getThemeTokens().warning
+          : getThemeTokens().textMuted,
         label: `${s.label}${suffix}`,
       };
     });
@@ -631,6 +636,62 @@ function handleSettingsHub(_input: string, ctx: CommandContext): void {
   });
 }
 
+const handleTheme: CommandHandler = (input: string, ctx: CommandContext) => {
+  const arg = input.replace(/^\/theme\s*/, "").trim();
+  const current = useThemeStore.getState().name;
+  const isTransparent = useThemeStore.getState().tokens.bgApp === "transparent";
+
+  if (!arg || arg === "list") {
+    const themes = listThemes();
+    const originalTheme = current;
+    const originalTransparent = isTransparent;
+    let transparent = isTransparent;
+
+    ctx.openCommandPicker({
+      title: "Theme",
+      icon: icon("palette"),
+      currentValue: current,
+      searchable: true,
+      maxWidth: 40,
+      options: themes.map((th) => ({
+        value: th.id,
+        label: `${th.variant === "light" ? "☀" : "☾"} ${th.label}`,
+        icon: "■■",
+        color: th.brand,
+      })),
+      toggles: [
+        {
+          key: "tab",
+          label: "Transparent",
+          value: transparent,
+          onToggle: () => {
+            transparent = !transparent;
+            const name = useThemeStore.getState().name;
+            applyTheme(name, transparent);
+            ctx.saveToScope({ theme: { name, transparent } }, "global");
+          },
+        },
+      ],
+      onCursorChange: (value) => {
+        applyTheme(value, transparent);
+      },
+      onCancel: () => {
+        applyTheme(originalTheme, originalTransparent);
+      },
+      onSelect: (value) => {
+        applyTheme(value, transparent);
+        ctx.saveToScope({ theme: { name: value, transparent } }, "global");
+        sysMsg(ctx, `Theme → ${value}`);
+      },
+    });
+    return;
+  }
+
+  applyTheme(arg, isTransparent);
+  ctx.saveToScope({ theme: { name: arg, transparent: isTransparent } }, "global");
+  sysMsg(ctx, `Theme → ${arg}`);
+};
+
 export function register(map: Map<string, CommandHandler>): void {
   map.set("/chat-style", handleChatStyle);
   map.set("/mode", handleMode);
@@ -647,6 +708,7 @@ export function register(map: Map<string, CommandHandler>): void {
   map.set("/nerd-font", handleNerdFont);
   map.set("/nerdfont", handleNerdFont);
   map.set("/settings", handleSettingsHub);
+  map.set("/theme", handleTheme);
 }
 
 export function matchConfigPrefix(cmd: string): CommandHandler | null {
@@ -655,5 +717,6 @@ export function matchConfigPrefix(cmd: string): CommandHandler | null {
   if (cmd === "/chat-style" || cmd.startsWith("/chat-style ")) return handleChatStyle;
   if (cmd === "/mode" || cmd.startsWith("/mode ")) return handleMode;
   if (cmd === "/nvim-config" || cmd.startsWith("/nvim-config ")) return handleNvimConfig;
+  if (cmd === "/theme" || cmd.startsWith("/theme ")) return handleTheme;
   return null;
 }

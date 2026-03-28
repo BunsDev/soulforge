@@ -2,6 +2,7 @@ import { fg as fgStyle, StyledText, type TextRenderable } from "@opentui/core";
 import { useCallback, useEffect, useRef } from "react";
 import type { ContextManager } from "../../core/context/manager.js";
 import { icon } from "../../core/icons.js";
+import { getThemeTokens } from "../../core/theme/index.js";
 import { useStatusBarStore } from "../../stores/statusbar.js";
 import { useWorkerStore, type WorkerStatus } from "../../stores/workers.js";
 
@@ -17,24 +18,27 @@ function approach(current: number, target: number): number {
 }
 
 function getBarColor(pct: number): string {
-  if (pct < 50) return "#1a6";
-  if (pct < 70) return "#a07018";
-  if (pct < 85) return "#b06000";
-  return "#b0002e";
+  const tk = getThemeTokens();
+  if (pct < 50) return tk.success;
+  if (pct < 70) return tk.warning;
+  if (pct < 85) return tk.warning;
+  return tk.error;
 }
 
 function getPctColor(pct: number): string {
-  if (pct < 50) return "#176";
-  if (pct < 70) return "#7a5510";
-  if (pct < 85) return "#884a00";
-  return "#881020";
+  const tk = getThemeTokens();
+  if (pct < 50) return tk.success;
+  if (pct < 70) return tk.warning;
+  if (pct < 85) return tk.warning;
+  return tk.error;
 }
 
 function getFlashColor(pct: number): string {
-  if (pct < 50) return "#1a6";
-  if (pct < 70) return "#a07018";
-  if (pct < 85) return "#b06000";
-  return "#b0002e";
+  const tk = getThemeTokens();
+  if (pct < 50) return tk.success;
+  if (pct < 70) return tk.warning;
+  if (pct < 85) return tk.warning;
+  return tk.error;
 }
 
 const COMPACT_FRAMES = ["◐", "◓", "◑", "◒"];
@@ -63,17 +67,18 @@ function buildContent(
   const pulse = pct > 80;
 
   const pctColor = flash ? getFlashColor(pct) : getPctColor(pct);
+  const t = getThemeTokens();
   const chunks = [
-    fgStyle(live ? "#1a6" : "#444")("● "),
-    fgStyle("#333")("["),
-    fgStyle(pulse ? "#b0002e" : barColor)("▰".repeat(filled)),
-    fgStyle("#222")("▱".repeat(empty)),
-    fgStyle("#333")("]"),
+    fgStyle(live ? t.success : t.textDim)("● "),
+    fgStyle(t.textFaint)("["),
+    fgStyle(pulse ? t.error : barColor)("▰".repeat(filled)),
+    fgStyle(t.textSubtle)("▱".repeat(empty)),
+    fgStyle(t.textFaint)("]"),
     fgStyle(pctColor)(live ? `${String(pct)}%` : `~${String(pct)}%`),
   ];
   if (compacting?.active) {
     const spinner = COMPACT_FRAMES[compacting.frame % COMPACT_FRAMES.length] ?? "◐";
-    chunks.push(fgStyle("#5af")(` ${spinner} compacting`));
+    chunks.push(fgStyle(t.info)(` ${spinner} compacting`));
   }
   if (workers) {
     const worst =
@@ -83,7 +88,7 @@ function buildContent(
           ? "restarting"
           : null;
     if (worst) {
-      const wColor = worst === "crashed" ? "#f44" : "#FF8C00";
+      const wColor = worst === "crashed" ? t.error : t.warning;
       const wGlyph = worst === "crashed" ? icon("worker_crash") : icon("worker_restart");
       chunks.push(fgStyle(wColor)(` ${wGlyph}`));
     }

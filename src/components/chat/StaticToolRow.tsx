@@ -1,6 +1,7 @@
 import { TextAttributes } from "@opentui/core";
 import type { ReactNode } from "react";
 import { icon as getIcon } from "../../core/icons.js";
+import { getThemeTokens, useTheme } from "../../core/theme/index.js";
 import {
   CATEGORY_COLORS,
   getBackendLabel,
@@ -16,13 +17,35 @@ import {
   OUTSIDE_BADGE,
 } from "./tool-formatters.js";
 
+export function getRowColors() {
+  const t = getThemeTokens();
+  return {
+    textDone: t.textMuted,
+    toolNameActive: t.brand,
+    argsActive: t.textSecondary,
+    checkDone: t.success,
+    error: t.error,
+  };
+}
+
+/** @deprecated Use getRowColors() for themed values */
 export const ROW_COLORS = {
-  textDone: "#555",
-  toolNameActive: "#9B30FF",
-  argsActive: "#aaa",
-  checkDone: "#4a7",
-  error: "#f44",
-} as const;
+  get textDone() {
+    return getThemeTokens().textMuted;
+  },
+  get toolNameActive() {
+    return getThemeTokens().brand;
+  },
+  get argsActive() {
+    return getThemeTokens().textSecondary;
+  },
+  get checkDone() {
+    return getThemeTokens().success;
+  },
+  get error() {
+    return getThemeTokens().error;
+  },
+};
 
 export interface StaticToolRowProps {
   statusContent: ReactNode;
@@ -74,37 +97,43 @@ export function StaticToolRow({
   diff,
   diffStyle = "default",
 }: StaticToolRowProps) {
+  const t = useTheme();
+  const rc = {
+    textDone: t.textMuted,
+    toolNameActive: t.brand,
+    argsActive: t.textSecondary,
+    checkDone: t.success,
+    error: t.error,
+  };
   return (
     <box flexDirection="column">
       <box height={1} flexShrink={0}>
         <text truncate>
           {statusContent}
-          <span fg={isDone ? ROW_COLORS.textDone : iconColor}> {icon} </span>
-          {category ? <span fg={isDone ? "#444" : categoryColor}>[{category}]</span> : null}
+          <span fg={isDone ? rc.textDone : iconColor}> {icon} </span>
+          {category ? <span fg={isDone ? t.textDim : categoryColor}>[{category}]</span> : null}
           {backendTag ? (
-            <span fg={isDone ? "#444" : backendColor}>[{getBackendLabel(backendTag)}] </span>
+            <span fg={isDone ? t.textDim : backendColor}>[{getBackendLabel(backendTag)}] </span>
           ) : category ? (
             <span> </span>
           ) : null}
           {outsideBadge ? (
-            <span fg={isDone ? "#444" : outsideBadge.color}>[{outsideBadge.label}] </span>
+            <span fg={isDone ? t.textDim : outsideBadge.color}>[{outsideBadge.label}] </span>
           ) : null}
           {editResultText ? (
-            <span fg={ROW_COLORS.textDone}>{editResultText}</span>
+            <span fg={rc.textDone}>{editResultText}</span>
           ) : (
             <>
               <span
-                fg={isDone ? ROW_COLORS.textDone : ROW_COLORS.toolNameActive}
+                fg={isDone ? rc.textDone : rc.toolNameActive}
                 attributes={!isDone ? TextAttributes.BOLD : undefined}
               >
                 {label}
               </span>
-              {argStr ? (
-                <span fg={isDone ? ROW_COLORS.textDone : ROW_COLORS.argsActive}> {argStr}</span>
-              ) : null}
+              {argStr ? <span fg={isDone ? rc.textDone : rc.argsActive}> {argStr}</span> : null}
             </>
           )}
-          {suffix ? <span fg={suffixColor ?? ROW_COLORS.textDone}>{suffix}</span> : null}
+          {suffix ? <span fg={suffixColor ?? rc.textDone}>{suffix}</span> : null}
         </text>
       </box>
       {diff ? (
@@ -118,10 +147,10 @@ export function StaticToolRow({
             mode={diffStyle}
           />
           {diff.impact ? (
-            <text fg="#666">
+            <text fg={t.textMuted}>
               {"  "}
-              <span fg="#c89030">{getIcon("impact")}</span>
-              <span fg="#888"> {diff.impact}</span>
+              <span fg={t.amber}>{getIcon("impact")}</span>
+              <span fg={t.textSecondary}> {diff.impact}</span>
             </text>
           ) : null}
         </box>
@@ -149,10 +178,12 @@ function resolveBackendCategory(
   const backendTag = hasSplit ? backend : null;
   const categoryColor =
     (toolCategory ? CATEGORY_COLORS[toolCategory as ToolCategory] : null) ??
-    (backend ? (CATEGORY_COLORS[backend as ToolCategory] ?? "#888") : undefined) ??
-    "#888";
+    (backend
+      ? (CATEGORY_COLORS[backend as ToolCategory] ?? getThemeTokens().textSecondary)
+      : undefined) ??
+    getThemeTokens().textSecondary;
   const backendColor = backendTag
-    ? (CATEGORY_COLORS[backendTag as ToolCategory] ?? "#888")
+    ? (CATEGORY_COLORS[backendTag as ToolCategory] ?? getThemeTokens().textSecondary)
     : undefined;
   return {
     category: category ?? undefined,
@@ -209,9 +240,10 @@ function computeSuffix(
   if (isError) {
     const fullError = result.error ?? "";
     const clean = fullError.length > 60 ? `${fullError.slice(0, 57)}…` : fullError;
-    return { suffix: ` → ${clean}`, suffixColor: "#a55" };
+    const st = getThemeTokens();
+    return { suffix: ` → ${clean}`, suffixColor: st.error };
   }
-  if (denied) return { suffix: " → denied", suffixColor: "#666" };
+  if (denied) return { suffix: " → denied", suffixColor: getThemeTokens().textSecondary };
   if (!isEdit && resultJson) {
     const r = formatResult(toolName, resultJson);
     if (r) return { suffix: ` → ${r}` };
@@ -260,7 +292,7 @@ export function buildLiveToolRowProps(
       : toolDisplay.icon;
   const labelVal = isRepoMapHit ? "Soul Map" : codeExec ? codeExec.runtime : toolDisplay.label;
   const iconColorVal = isRepoMapHit
-    ? "#2dd4bf"
+    ? getThemeTokens().info
     : codeExecDisplay
       ? codeExecDisplay.iconColor
       : toolDisplay.iconColor;
@@ -391,13 +423,14 @@ export function buildFinalToolRowProps(tc: {
         ? getIcon("skip")
         : getIcon("fail")
     : "●";
+  const _t = getThemeTokens();
   const statusColor = tc.result
     ? tc.result.success
-      ? ROW_COLORS.checkDone
+      ? _t.success
       : denied
-        ? "#666"
-        : ROW_COLORS.error
-    : "#666";
+        ? _t.textSecondary
+        : _t.error
+    : _t.textSecondary;
 
   // Edit result text
   const editResultText =

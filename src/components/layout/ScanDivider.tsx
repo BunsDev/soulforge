@@ -1,12 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-
-const PURPLE = "#9B30FF";
-const PURPLE_DIM = "#6B20B0";
-const PURPLE_GLOW = "#BF5FFF";
-const FAINT = "#1a1a2e";
+import { useTheme } from "../../core/theme/index.js";
 
 /** Animated divider — a bright cursor sweeps across a dim line. */
 export function ScanDivider({ width: w, speed = 120 }: { width: number; speed?: number }) {
+  const t = useTheme();
   const [pos, setPos] = useState(0);
 
   useEffect(() => {
@@ -18,13 +15,13 @@ export function ScanDivider({ width: w, speed = 120 }: { width: number; speed?: 
     const out: { ch: string; color: string }[] = [];
     for (let i = 0; i < w; i++) {
       const dist = Math.abs(i - pos);
-      if (dist === 0) out.push({ ch: "━", color: PURPLE_GLOW });
-      else if (dist === 1) out.push({ ch: "─", color: PURPLE });
-      else if (dist === 2) out.push({ ch: "─", color: PURPLE_DIM });
-      else out.push({ ch: "─", color: FAINT });
+      if (dist === 0) out.push({ ch: "━", color: t.brandAlt });
+      else if (dist === 1) out.push({ ch: "─", color: t.brand });
+      else if (dist === 2) out.push({ ch: "─", color: t.brandDim });
+      else out.push({ ch: "─", color: t.bgPopupHighlight });
     }
     return out;
-  }, [pos, w]);
+  }, [pos, w, t]);
 
   return (
     <box flexDirection="row">

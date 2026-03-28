@@ -6,7 +6,7 @@ icon: "sitemap"
 
 ## System overview
 
-31 tools, three agent tiers, and an in-process coordination bus.
+34 tools, three agent tiers, and an in-process coordination bus.
 
 ```
 User Input
@@ -38,7 +38,7 @@ User Input
                     v                v                v
              +-----------+   +-----------+   +-----------+
              |   Tools   |   |Intelligence|   |  Neovim   |
-             |  31 tools |   |  Router    |   | (msgpack) |
+             |  34 tools |   |  Router    |   | (msgpack) |
              +-----------+   +-----+-----+   +-----------+
                                    |
                         +----------+----------+
@@ -128,7 +128,7 @@ Routes code intelligence operations to the best available backend.
 |---------|------|-------------|
 | **LSP** | 1 | definitions, references, rename, diagnostics, code actions, call hierarchy, type info, formatting |
 | **ts-morph** | 2 | TypeScript/JavaScript --AST definitions, references, rename, extract, unused detection |
-| **tree-sitter** | 2 | 33 languages --symbol extraction, imports/exports, scopes, outlines |
+| **tree-sitter** | 2 | 30 languages --symbol extraction, imports/exports, scopes, outlines |
 | **regex** | 3 | Universal fallback --symbol search, simple definitions, import patterns |
 
 For each operation, the router tries backends in tier order. If tier 1 returns null or throws, tier 2 is tried, then tier 3.
@@ -237,5 +237,5 @@ src/
     +-- security/               # Forbidden file patterns
     +-- sessions/               # Session persistence + rebuild
     +-- setup/                  # Prerequisite checks
-    +-- tools/                  # All 31 tools
+    +-- tools/                  # All 34 tools
 ```

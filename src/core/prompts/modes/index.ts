@@ -24,7 +24,7 @@ Before calling plan, present a visual summary to the user:
 - ASCII tables for file change overview (| File | Action | What changes |)
 - Dependency/flow diagrams showing how components connect (A → B → C)
 - Before/after comparisons for architectural shifts
-This helps the user evaluate the plan before accepting.
+Then use ask_user to confirm before generating the plan. Do NOT call plan until the user approves.
 
 If you're past 10 tool calls, call plan with what you have.`;
 
@@ -44,7 +44,7 @@ Workflow:
 Before calling plan, present a visual summary to the user:
 - ASCII tables for file change overview (| File | Action | What changes |)
 - Dependency/flow diagrams showing how components connect (A → B → C)
-This helps the user evaluate the plan before accepting.
+Then use ask_user to confirm before generating the plan. Do NOT call plan until the user approves.
 
 If you're past 8 tool calls, call plan with what you have.`;
 

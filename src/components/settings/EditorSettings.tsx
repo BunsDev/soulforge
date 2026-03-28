@@ -1,6 +1,7 @@
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useEffect, useState } from "react";
+import { type ThemeTokens, useTheme } from "../../core/theme/index.js";
 import { usePopupScroll } from "../../hooks/usePopupScroll.js";
 import type { AgentEditorAccess, EditorIntegration } from "../../types/index.js";
 import type { ConfigScope } from "../layout/shared.js";
@@ -12,11 +13,9 @@ const AGENT_ACCESS_LABELS: Record<AgentEditorAccess, string> = {
   off: "Never",
   "when-open": "When editor open",
 };
-const AGENT_ACCESS_COLORS: Record<AgentEditorAccess, string> = {
-  on: "#2d5",
-  off: "#c55",
-  "when-open": "#FF8C00",
-};
+function getAgentAccessColors(t: ThemeTokens): Record<AgentEditorAccess, string> {
+  return { on: t.success, off: t.error, "when-open": t.warning };
+}
 
 const MAX_POPUP_WIDTH = 70;
 const CHROME_ROWS = 8;
@@ -82,6 +81,7 @@ export function EditorSettings({ visible, settings, initialScope, onUpdate, onCl
   const maxVisible = Math.max(4, Math.floor(containerRows * 0.8) - CHROME_ROWS);
   const { cursor, setCursor, scrollOffset, adjustScroll } = usePopupScroll(maxVisible);
   const [scope, setScope] = useState<ConfigScope>(initialScope ?? "project");
+  const t = useTheme();
   const current = settings ?? ALL_ON;
 
   useEffect(() => {
@@ -156,19 +156,19 @@ export function EditorSettings({ visible, settings, initialScope, onUpdate, onCl
         flexDirection="column"
         borderStyle="rounded"
         border={true}
-        borderColor="#8B5CF6"
+        borderColor={t.brandAlt}
         width={popupWidth}
       >
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#9B30FF" attributes={TextAttributes.BOLD}></text>
-          <text bg={POPUP_BG} fg="white" attributes={TextAttributes.BOLD}>
+          <text bg={POPUP_BG} fg={t.brand} attributes={TextAttributes.BOLD}></text>
+          <text bg={POPUP_BG} fg={t.textPrimary} attributes={TextAttributes.BOLD}>
             {" "}
             Editor Integrations
           </text>
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#333">
+          <text bg={POPUP_BG} fg={t.textFaint}>
             {"─".repeat(innerW - 2)}
           </text>
         </PopupRow>
@@ -181,17 +181,17 @@ export function EditorSettings({ visible, settings, initialScope, onUpdate, onCl
             const bg = isSelected ? POPUP_HL : POPUP_BG;
             return (
               <PopupRow key={item.key} bg={bg} w={innerW}>
-                <text bg={bg} fg={isSelected ? "#FF0040" : "#555"}>
+                <text bg={bg} fg={isSelected ? t.brandSecondary : t.textMuted}>
                   {isSelected ? "› " : "  "}
                 </text>
-                <text bg={bg} fg={isEnabled ? "#2d5" : "#555"}>
+                <text bg={bg} fg={isEnabled ? t.success : t.textMuted}>
                   [{isEnabled ? "x" : " "}]
                 </text>
-                <text bg={bg} fg={isEnabled ? "white" : "#666"}>
+                <text bg={bg} fg={isEnabled ? "white" : t.textMuted}>
                   {" "}
                   {item.label.padEnd(20)}
                 </text>
-                <text bg={bg} fg="#555" truncate>
+                <text bg={bg} fg={t.textMuted} truncate>
                   {item.desc}
                 </text>
               </PopupRow>
@@ -200,7 +200,7 @@ export function EditorSettings({ visible, settings, initialScope, onUpdate, onCl
         </box>
         {ITEMS.length > maxVisible && (
           <PopupRow w={innerW}>
-            <text fg="#555" bg={POPUP_BG}>
+            <text fg={t.textMuted} bg={POPUP_BG}>
               {scrollOffset > 0 ? "↑ " : "  "}
               {String(cursor + 1)}/{String(ITEMS.length)}
               {scrollOffset + maxVisible < ITEMS.length ? " ↓" : ""}
@@ -209,20 +209,20 @@ export function EditorSettings({ visible, settings, initialScope, onUpdate, onCl
         )}
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#333">
+          <text bg={POPUP_BG} fg={t.textFaint}>
             {"─".repeat(innerW - 2)}
           </text>
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#555">
+          <text bg={POPUP_BG} fg={t.textMuted}>
             {"Scope: "}
           </text>
           {CONFIG_SCOPES.map((s) => (
             <text
               key={s}
               bg={POPUP_BG}
-              fg={s === scope ? "#8B5CF6" : "#444"}
+              fg={s === scope ? t.brandAlt : t.textDim}
               attributes={s === scope ? TextAttributes.BOLD : undefined}
             >
               {s === scope ? `[${s}]` : ` ${s} `}
@@ -232,13 +232,13 @@ export function EditorSettings({ visible, settings, initialScope, onUpdate, onCl
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#333">
+          <text bg={POPUP_BG} fg={t.textFaint}>
             {"─".repeat(innerW - 2)}
           </text>
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#888">
+          <text bg={POPUP_BG} fg={t.textSecondary}>
             {"  Agent editor access: "}
           </text>
           {AGENT_ACCESS_MODES.map((mode) => {
@@ -247,7 +247,7 @@ export function EditorSettings({ visible, settings, initialScope, onUpdate, onCl
               <text
                 key={mode}
                 bg={POPUP_BG}
-                fg={active ? AGENT_ACCESS_COLORS[mode] : "#444"}
+                fg={active ? getAgentAccessColors(t)[mode] : t.textDim}
                 attributes={active ? TextAttributes.BOLD : undefined}
               >
                 {active ? `[${AGENT_ACCESS_LABELS[mode]}]` : ` ${AGENT_ACCESS_LABELS[mode]} `}
@@ -258,7 +258,7 @@ export function EditorSettings({ visible, settings, initialScope, onUpdate, onCl
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#555">
+          <text bg={POPUP_BG} fg={t.textMuted}>
             {"↑↓"} navigate | {"⏎"} toggle | a all | n none | e agent access | {"← →"} scope | esc
           </text>
         </PopupRow>

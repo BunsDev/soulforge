@@ -1,6 +1,7 @@
 import { TextAttributes } from "@opentui/core";
 import { useTerminalDimensions } from "@opentui/react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTheme } from "../../core/theme/index.js";
 import type { ChatMessage } from "../../types/index.js";
 
 const DISMISS_DELAY = 5000;
@@ -130,24 +131,34 @@ export function SystemBanner({ messages, expanded = false }: Props) {
   const extraLines = allLines.slice(1);
   const multiLine = extraLines.length > 0;
 
-  const bgColor = err ? "#3a1010" : "#1a1028";
-  const accentColor = err ? "#f44" : "#9B30FF";
-  const textColor = err ? "#faa" : "#c8b8e8";
-  const iconColor = err ? "#f66" : "#b388ff";
-  const dimColor = "#333";
+  const tk = useTheme();
+  const bgColor = err ? tk.bgBannerError : tk.bgBanner;
+  const accentColor = err ? tk.error : tk.brand;
+  const textColor = err ? tk.error : tk.brandAlt;
+  const iconColor = err ? tk.error : tk.brand;
+  const dimColor = tk.textFaint;
 
   const fadeFactor = phase === "exit" ? fadeStep / FADE_STEPS : 0;
 
   const { fAccent, fText, fIcon, fDim, fBg } = useMemo(() => {
-    const fadeTarget = "#111";
+    const fadeTarget = tk.bgSecondary;
     return {
       fAccent: lerpColor(accentColor, fadeTarget, fadeFactor),
       fText: lerpColor(textColor, fadeTarget, fadeFactor),
       fIcon: lerpColor(iconColor, fadeTarget, fadeFactor),
       fDim: lerpColor(dimColor, fadeTarget, fadeFactor),
-      fBg: lerpColor(bgColor, "#000", fadeFactor),
+      fBg: lerpColor(bgColor, tk.bgPrimary, fadeFactor),
     };
-  }, [fadeFactor, bgColor, accentColor, textColor, iconColor]);
+  }, [
+    fadeFactor,
+    bgColor,
+    accentColor,
+    textColor,
+    iconColor,
+    dimColor,
+    tk.bgPrimary,
+    tk.bgSecondary,
+  ]);
 
   const bannerIcon = err ? "✗" : "⚡";
 
@@ -189,7 +200,7 @@ export function SystemBanner({ messages, expanded = false }: Props) {
             {multiLine && phase !== "enter" && !showExpanded && (
               <>
                 <span fg={fDim}> (+{String(extraLines.length)} lines</span>
-                <span fg="#666"> ^O</span>
+                <span fg={tk.textMuted}> ^O</span>
                 <span fg={fDim}>)</span>
               </>
             )}

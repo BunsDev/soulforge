@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CATEGORIES, type CommandDef, getCommandDefs } from "../../core/commands/registry.js";
 import { fuzzyMatch } from "../../core/history/fuzzy.js";
 import { icon } from "../../core/icons.js";
+import { useTheme } from "../../core/theme/index.js";
 import { usePopupScroll } from "../../hooks/usePopupScroll.js";
 import { Overlay, POPUP_BG, POPUP_HL, PopupRow } from "../layout/shared.js";
 
@@ -19,17 +20,6 @@ const CATEGORY_ICONS: Record<string, string> = {
   Intelligence: "brain",
   Tabs: "tabs",
   System: "ghost",
-};
-
-const CATEGORY_COLORS: Record<string, string> = {
-  Git: "#FF8C00",
-  Session: "#00BFFF",
-  Models: "#8B5CF6",
-  Settings: "#9B30FF",
-  Editor: "#2d5",
-  Intelligence: "#FF0040",
-  Tabs: "#FF8C00",
-  System: "#666",
 };
 
 interface PaletteItem {
@@ -113,11 +103,26 @@ interface Props {
 }
 
 export function CommandPalette({ visible, onClose, onExecute }: Props) {
+  const t = useTheme();
   const { width: termCols, height: termRows } = useTerminalDimensions();
   const containerRows = termRows - 2;
   const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.85));
   const innerW = popupWidth - 2;
   const maxVisible = Math.max(6, Math.floor(containerRows * 0.75) - CHROME_ROWS);
+
+  const categoryColors: Record<string, string> = useMemo(
+    () => ({
+      Git: t.warning,
+      Session: t.info,
+      Models: t.brandAlt,
+      Settings: t.brand,
+      Editor: t.success,
+      Intelligence: t.brandSecondary,
+      Tabs: t.warning,
+      System: t.textMuted,
+    }),
+    [t],
+  );
 
   const [query, setQuery] = useState("");
   const { cursor, setCursor, scrollOffset, adjustScroll, resetScroll } = usePopupScroll(maxVisible);
@@ -223,32 +228,32 @@ export function CommandPalette({ visible, onClose, onExecute }: Props) {
         flexDirection="column"
         borderStyle="rounded"
         border={true}
-        borderColor="#8B5CF6"
+        borderColor={t.brandAlt}
         width={popupWidth}
       >
         {/* Title */}
         <PopupRow w={innerW}>
-          <text fg="#9B30FF" bg={POPUP_BG}>
+          <text fg={t.brand} bg={POPUP_BG}>
             {icon("lightning")}{" "}
           </text>
-          <text fg="white" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
+          <text fg={t.textPrimary} attributes={TextAttributes.BOLD} bg={POPUP_BG}>
             Command Palette
           </text>
         </PopupRow>
 
         {/* Search input */}
         <PopupRow w={innerW}>
-          <text fg="#8B5CF6" bg={POPUP_BG}>
+          <text fg={t.brandAlt} bg={POPUP_BG}>
             {icon("search")} {"> "}
           </text>
-          <text fg="white" bg={POPUP_BG}>
+          <text fg={t.textPrimary} bg={POPUP_BG}>
             {query}
           </text>
-          <text fg="#8B5CF6" bg={POPUP_BG}>
+          <text fg={t.brandAlt} bg={POPUP_BG}>
             {"▎"}
           </text>
           {!query && (
-            <text fg="#444" bg={POPUP_BG}>
+            <text fg={t.textDim} bg={POPUP_BG}>
               {" type to search…"}
             </text>
           )}
@@ -256,7 +261,7 @@ export function CommandPalette({ visible, onClose, onExecute }: Props) {
 
         {/* Separator */}
         <PopupRow w={innerW}>
-          <text fg="#222" bg={POPUP_BG}>
+          <text fg={t.textSubtle} bg={POPUP_BG}>
             {"─".repeat(innerW - 4)}
           </text>
         </PopupRow>
@@ -272,7 +277,7 @@ export function CommandPalette({ visible, onClose, onExecute }: Props) {
 
             if (item.type === "header") {
               const cat = item.category ?? "";
-              const catColor = CATEGORY_COLORS[cat] ?? "#666";
+              const catColor = categoryColors[cat] ?? t.textMuted;
               const catIcon = CATEGORY_ICONS[cat];
               return (
                 <PopupRow key={`h-${cat}`} w={innerW}>
@@ -288,21 +293,21 @@ export function CommandPalette({ visible, onClose, onExecute }: Props) {
             if (!def) return null;
             const isActive = idx === cursor;
             const bg = isActive ? POPUP_HL : POPUP_BG;
-            const catColor = CATEGORY_COLORS[item.category ?? ""] ?? "#8B5CF6";
-            const cmdColor = isActive ? catColor : "#888";
-            const descColor = isActive ? "#bbb" : "#555";
+            const catColor = categoryColors[item.category ?? ""] ?? t.brandAlt;
+            const cmdColor = isActive ? catColor : t.textSecondary;
+            const descColor = isActive ? t.textSecondary : t.textMuted;
             const cmdText = def.cmd;
 
             return (
               <PopupRow key={def.cmd} bg={bg} w={innerW}>
-                <text fg={isActive ? catColor : "#333"} bg={bg}>
+                <text fg={isActive ? catColor : t.textFaint} bg={bg}>
                   {isActive ? "› " : "  "}
                 </text>
                 {renderHighlightedCmd(
                   cmdText,
                   item.matchIndices,
                   cmdColor,
-                  isActive ? "#fff" : catColor,
+                  isActive ? t.textPrimary : catColor,
                   bg,
                   isActive,
                 )}
@@ -320,7 +325,7 @@ export function CommandPalette({ visible, onClose, onExecute }: Props) {
         {/* Scroll indicator */}
         {items.length > maxVisible && (
           <PopupRow w={innerW}>
-            <text fg="#444" bg={POPUP_BG}>
+            <text fg={t.textDim} bg={POPUP_BG}>
               {scrollOffset > 0 ? "↑ " : "  "}
               {String(Math.max(1, items.slice(0, cursor + 1).filter(isSelectable).length))}/
               {String(items.filter(isSelectable).length)}
@@ -331,7 +336,7 @@ export function CommandPalette({ visible, onClose, onExecute }: Props) {
 
         {/* Footer */}
         <PopupRow w={innerW}>
-          <text fg="#444" bg={POPUP_BG}>
+          <text fg={t.textDim} bg={POPUP_BG}>
             {"↑↓"} navigate
             {!query ? " │ ⇥ jump" : ""}
             {" │ ⏎ run │ esc "}

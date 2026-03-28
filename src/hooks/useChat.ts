@@ -2373,7 +2373,7 @@ export function useChat({
           } else {
             planModeRef.current = false;
             planRequestRef.current = null;
-            contextManager.setForgeMode("default");
+            setForgeMode("default");
 
             if (postAction.action === "cancel") {
               setMessages((prev) => [
@@ -2480,6 +2480,7 @@ export function useChat({
       promptDestructive,
       tabId,
       tabLabel,
+      setForgeMode,
     ],
   );
   handleSubmitRef.current = handleSubmit;

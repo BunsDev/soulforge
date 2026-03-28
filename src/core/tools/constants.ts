@@ -31,7 +31,7 @@ export const DEFERRED_TOOL_CATALOG: Record<string, string> = {
   web_search: "Search the web for documentation, APIs, error messages",
   fetch_page: "Fetch and extract content from a URL",
   git: "Git operations: status, diff, log, commit, push, pull, stash, branch",
-  list_dir: "List directory contents",
+  list_dir: "List directory contents (supports multiple paths + recursive depth in one call)",
   rename_symbol: "Rename a symbol across all files (LSP-powered)",
   move_symbol: "Move a symbol between files with import updates",
   rename_file: "Rename/move a file with import path updates",

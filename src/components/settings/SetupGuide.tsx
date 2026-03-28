@@ -15,6 +15,7 @@ import {
   getInstallCommands,
   type PrerequisiteStatus,
 } from "../../core/setup/prerequisites.js";
+import { useTheme } from "../../core/theme/index.js";
 import { Overlay, POPUP_BG, POPUP_HL, PopupRow } from "../layout/shared.js";
 
 const MAX_POPUP_WIDTH = 74;
@@ -34,6 +35,7 @@ export function SetupGuide({ visible, onClose, onSystemMessage }: Props) {
   const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.8));
   const innerW = popupWidth - 2;
   const maxVisible = Math.max(4, Math.floor(containerRows * 0.8) - CHROME_ROWS);
+  const t = useTheme();
   const [statuses, setStatuses] = useState<PrerequisiteStatus[]>(() => checkPrerequisites());
   const [cursor, setCursor] = useState(0);
   const [scrollOffset, setScrollOffset] = useState(0);
@@ -238,18 +240,18 @@ export function SetupGuide({ visible, onClose, onSystemMessage }: Props) {
         flexDirection="column"
         borderStyle="rounded"
         border={true}
-        borderColor="#8B5CF6"
+        borderColor={t.brandAlt}
         width={popupWidth}
       >
         <PopupRow w={innerW}>
-          <text fg="#9B30FF" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
+          <text fg={t.brand} attributes={TextAttributes.BOLD} bg={POPUP_BG}>
             {icon("ghost")}
           </text>
-          <text fg="white" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
+          <text fg={t.textPrimary} attributes={TextAttributes.BOLD} bg={POPUP_BG}>
             {" "}
             SoulForge Setup
           </text>
-          <text fg="#555" bg={POPUP_BG}>
+          <text fg={t.textMuted} bg={POPUP_BG}>
             {"  "}
             {osLabel}
           </text>
@@ -257,17 +259,17 @@ export function SetupGuide({ visible, onClose, onSystemMessage }: Props) {
 
         <PopupRow w={innerW}>
           <text
-            fg={tab === "tools" ? "#9B30FF" : "#555"}
+            fg={tab === "tools" ? t.brand : t.textMuted}
             attributes={tab === "tools" ? TextAttributes.BOLD : undefined}
             bg={POPUP_BG}
           >
             [1] Tools
           </text>
-          <text fg="#333" bg={POPUP_BG}>
+          <text fg={t.textFaint} bg={POPUP_BG}>
             {"  "}
           </text>
           <text
-            fg={tab === "fonts" ? "#9B30FF" : "#555"}
+            fg={tab === "fonts" ? t.brand : t.textMuted}
             attributes={tab === "fonts" ? TextAttributes.BOLD : undefined}
             bg={POPUP_BG}
           >
@@ -276,7 +278,7 @@ export function SetupGuide({ visible, onClose, onSystemMessage }: Props) {
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text fg="#333" bg={POPUP_BG}>
+          <text fg={t.textFaint} bg={POPUP_BG}>
             {"─".repeat(innerW - 4)}
           </text>
         </PopupRow>
@@ -285,13 +287,13 @@ export function SetupGuide({ visible, onClose, onSystemMessage }: Props) {
           <>
             {allInstalled ? (
               <PopupRow w={innerW}>
-                <text fg="#2d5" bg={POPUP_BG}>
+                <text fg={t.success} bg={POPUP_BG}>
                   ✓ All prerequisites are installed!
                 </text>
               </PopupRow>
             ) : (
               <PopupRow w={innerW}>
-                <text fg="#FF8C00" bg={POPUP_BG}>
+                <text fg={t.warning} bg={POPUP_BG}>
                   {String(missingCount)} missing — select to install
                 </text>
               </PopupRow>
@@ -312,15 +314,19 @@ export function SetupGuide({ visible, onClose, onSystemMessage }: Props) {
                 const bg = isActive ? POPUP_HL : POPUP_BG;
                 const icon = s.installed ? "✓" : s.prerequisite.required ? "✗" : "○";
                 const iconColor = s.installed
-                  ? "#2d5"
+                  ? t.success
                   : s.prerequisite.required
-                    ? "#f44"
-                    : "#FF8C00";
-                const nameColor = s.installed ? "#555" : isActive ? "#FF0040" : "#aaa";
+                    ? t.error
+                    : t.warning;
+                const nameColor = s.installed
+                  ? t.textMuted
+                  : isActive
+                    ? t.brandSecondary
+                    : t.textSecondary;
 
                 return (
                   <PopupRow key={s.prerequisite.name} bg={bg} w={innerW}>
-                    <text bg={bg} fg={isActive ? "#FF0040" : "#333"}>
+                    <text bg={bg} fg={isActive ? t.brandSecondary : t.textFaint}>
                       {isActive ? "› " : "  "}
                     </text>
                     <text bg={bg} fg={iconColor}>
@@ -333,7 +339,7 @@ export function SetupGuide({ visible, onClose, onSystemMessage }: Props) {
                     >
                       {s.prerequisite.name.padEnd(28)}
                     </text>
-                    <text bg={bg} fg={s.installed ? "#333" : "#666"}>
+                    <text bg={bg} fg={s.installed ? t.textFaint : t.textMuted}>
                       {s.installed
                         ? "installed"
                         : s.prerequisite.required
@@ -346,7 +352,7 @@ export function SetupGuide({ visible, onClose, onSystemMessage }: Props) {
             </box>
             {statuses.length > maxVisible && (
               <PopupRow w={innerW}>
-                <text fg="#555" bg={POPUP_BG}>
+                <text fg={t.textMuted} bg={POPUP_BG}>
                   {scrollOffset > 0 ? "↑ " : "  "}
                   {String(cursor + 1)}/{String(statuses.length)}
                   {scrollOffset + maxVisible < statuses.length ? " ↓" : ""}
@@ -357,7 +363,7 @@ export function SetupGuide({ visible, onClose, onSystemMessage }: Props) {
         ) : (
           <>
             <PopupRow w={innerW}>
-              <text fg="#555" bg={POPUP_BG}>
+              <text fg={t.textMuted} bg={POPUP_BG}>
                 Select a Nerd Font to install:
               </text>
             </PopupRow>
@@ -377,12 +383,16 @@ export function SetupGuide({ visible, onClose, onSystemMessage }: Props) {
                 const bg = isActive ? POPUP_HL : POPUP_BG;
                 const isInstalled = installedFonts.some((f) => f.id === font.id);
                 const icon = isInstalled ? "✓" : "○";
-                const iconColor = isInstalled ? "#2d5" : "#FF8C00";
-                const nameColor = isInstalled ? "#555" : isActive ? "#FF0040" : "#aaa";
+                const iconColor = isInstalled ? t.success : t.warning;
+                const nameColor = isInstalled
+                  ? t.textMuted
+                  : isActive
+                    ? t.brandSecondary
+                    : t.textSecondary;
 
                 return (
                   <PopupRow key={font.id} bg={bg} w={innerW}>
-                    <text bg={bg} fg={isActive ? "#FF0040" : "#333"}>
+                    <text bg={bg} fg={isActive ? t.brandSecondary : t.textFaint}>
                       {isActive ? "› " : "  "}
                     </text>
                     <text bg={bg} fg={iconColor}>
@@ -395,7 +405,7 @@ export function SetupGuide({ visible, onClose, onSystemMessage }: Props) {
                     >
                       {font.name.padEnd(20)}
                     </text>
-                    <text bg={bg} fg={isInstalled ? "#333" : "#666"}>
+                    <text bg={bg} fg={isInstalled ? t.textFaint : t.textMuted}>
                       {isInstalled ? "installed" : font.description.slice(0, 26)}
                     </text>
                   </PopupRow>
@@ -404,7 +414,7 @@ export function SetupGuide({ visible, onClose, onSystemMessage }: Props) {
             </box>
             {NERD_FONTS.length > maxVisible && (
               <PopupRow w={innerW}>
-                <text fg="#555" bg={POPUP_BG}>
+                <text fg={t.textMuted} bg={POPUP_BG}>
                   {fontScrollOffset > 0 ? "↑ " : "  "}
                   {String(fontCursor + 1)}/{String(NERD_FONTS.length)}
                   {fontScrollOffset + maxVisible < NERD_FONTS.length ? " ↓" : ""}
@@ -417,7 +427,7 @@ export function SetupGuide({ visible, onClose, onSystemMessage }: Props) {
             </PopupRow>
 
             <PopupRow w={innerW}>
-              <text fg="#555" bg={POPUP_BG}>
+              <text fg={t.textMuted} bg={POPUP_BG}>
                 After install, set terminal font to the name shown
               </text>
             </PopupRow>
@@ -430,14 +440,14 @@ export function SetupGuide({ visible, onClose, onSystemMessage }: Props) {
 
         {installing && (
           <PopupRow w={innerW}>
-            <text fg="#9B30FF" bg={POPUP_BG}>
+            <text fg={t.brand} bg={POPUP_BG}>
               ⠹ Installing {installing}...
             </text>
           </PopupRow>
         )}
 
         <PopupRow w={innerW}>
-          <text fg="#555" bg={POPUP_BG}>
+          <text fg={t.textMuted} bg={POPUP_BG}>
             {"⏎"}/i install{tab === "tools" ? " | a install all" : ""} | r refresh | tab switch |
             esc close
           </text>

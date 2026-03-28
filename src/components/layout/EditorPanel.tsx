@@ -2,6 +2,7 @@ import { TextAttributes } from "@opentui/core";
 import { memo, useEffect, useRef, useState } from "react";
 import type { ScreenSegment } from "../../core/editor/screen.js";
 import { UI_ICONS } from "../../core/icons.js";
+import { type ThemeTokens, useTheme } from "../../core/theme/index.js";
 
 interface Props {
   isOpen: boolean;
@@ -21,17 +22,19 @@ interface Props {
 type Direction = "opening" | "idle";
 const ANIMATION_FRAMES = ["  ░", " ░▒", "░▒▓", "▒▓█", "▓██", "███"];
 
-const MODE_COLORS: Record<string, string> = {
-  normal: "#6A0DAD",
-  insert: "#00AA00",
-  visual: "#FF8C00",
-  "visual line": "#FF8C00",
-  "visual block": "#FF8C00",
-  replace: "#FF0040",
-  command: "#4488FF",
-  cmdline_normal: "#4488FF",
-  terminal: "#888888",
-};
+function getModeColors(t: ThemeTokens): Record<string, string> {
+  return {
+    normal: t.brand,
+    insert: t.success,
+    visual: t.warning,
+    "visual line": t.warning,
+    "visual block": t.warning,
+    replace: t.brandSecondary,
+    command: t.info,
+    cmdline_normal: t.info,
+    terminal: t.textSecondary,
+  };
+}
 
 function modeLabel(mode: string): string {
   if (mode.startsWith("cmdline")) return "COMMAND";
@@ -83,6 +86,7 @@ export const EditorPanel = memo(function EditorPanel({
   error,
   split = 60,
 }: Props) {
+  const t = useTheme();
   const [animFrame, setAnimFrame] = useState(0);
   const [direction, setDirection] = useState<Direction>("idle");
   const prevOpen = useRef(isOpen);
@@ -117,7 +121,7 @@ export const EditorPanel = memo(function EditorPanel({
     return null;
   }
 
-  const borderColor = focused ? "#FF0040" : "#333";
+  const borderColor = focused ? t.borderFocused : t.border;
 
   if (direction === "opening") {
     return (
@@ -130,8 +134,8 @@ export const EditorPanel = memo(function EditorPanel({
         alignItems="center"
         justifyContent="center"
       >
-        <text fg="#9B30FF">{ANIMATION_FRAMES[animFrame]}</text>
-        <text fg="#444" attributes={TextAttributes.DIM}>
+        <text fg={t.brand}>{ANIMATION_FRAMES[animFrame]}</text>
+        <text fg={t.textDim} attributes={TextAttributes.DIM}>
           loading forge...
         </text>
       </box>
@@ -148,13 +152,13 @@ export const EditorPanel = memo(function EditorPanel({
         borderColor={borderColor}
       >
         <box flexDirection="row" paddingX={1} flexShrink={0} height={1}>
-          <text bg="#6A0DAD" fg="white" attributes={TextAttributes.BOLD}>
+          <text bg={t.brand} fg="white" attributes={TextAttributes.BOLD}>
             {` ${UI_ICONS.editor} `}
           </text>
-          <text fg="#888"> editor</text>
+          <text fg={t.textSecondary}> editor</text>
         </box>
         <box paddingX={1} flexShrink={0} height={1}>
-          <text fg="#333" truncate>
+          <text fg={t.textFaint} truncate>
             {"─".repeat(200)}
           </text>
         </box>
@@ -162,15 +166,15 @@ export const EditorPanel = memo(function EditorPanel({
           <NvimNotFoundSplash />
         ) : (
           <box flexDirection="column" flexGrow={1} justifyContent="center" alignItems="center">
-            <text fg="#FF0040" attributes={TextAttributes.BOLD}>
+            <text fg={t.error} attributes={TextAttributes.BOLD}>
               Editor Failed to Start
             </text>
             <text> </text>
-            <text fg="#666">{error}</text>
+            <text fg={t.textSecondary}>{error}</text>
           </box>
         )}
         <box paddingX={1} flexShrink={0} height={1}>
-          <text fg="#333" truncate>
+          <text fg={t.textFaint} truncate>
             {"─".repeat(200)}
           </text>
         </box>
@@ -184,7 +188,7 @@ export const EditorPanel = memo(function EditorPanel({
       : (fileName.split("/").pop() ?? fileName)
     : "no file";
   const bg = defaultBg;
-  const modeColor = MODE_COLORS[modeName] ?? "#6A0DAD";
+  const modeColor = getModeColors(t)[modeName] ?? t.brand;
 
   return (
     <box
@@ -202,10 +206,14 @@ export const EditorPanel = memo(function EditorPanel({
         height={1}
       >
         <box flexDirection="row">
-          <text bg={focused ? "#FF0040" : "#6A0DAD"} fg="white" attributes={TextAttributes.BOLD}>
+          <text
+            bg={focused ? t.borderFocused : t.brand}
+            fg="white"
+            attributes={TextAttributes.BOLD}
+          >
             {` ${UI_ICONS.editor} `}
           </text>
-          <text fg="#888"> {displayName}</text>
+          <text fg={t.textSecondary}> {displayName}</text>
         </box>
         <text>
           <span fg={modeColor}>{"\uE0B6"}</span>
@@ -216,7 +224,7 @@ export const EditorPanel = memo(function EditorPanel({
         </text>
       </box>
       <box paddingX={1} flexShrink={0} height={1}>
-        <text fg="#333" truncate>
+        <text fg={t.textFaint} truncate>
           {"─".repeat(200)}
         </text>
       </box>
@@ -224,7 +232,7 @@ export const EditorPanel = memo(function EditorPanel({
       <box flexDirection="column" flexGrow={1} overflow="hidden">
         {screenLines.length === 0 ? (
           <box justifyContent="center" alignItems="center" flexGrow={1}>
-            <text fg="#333">waiting for nvim...</text>
+            <text fg={t.textFaint}>waiting for nvim...</text>
           </box>
         ) : (
           screenLines.map((segments, row) => (
@@ -235,7 +243,7 @@ export const EditorPanel = memo(function EditorPanel({
       </box>
 
       <box paddingX={1} flexShrink={0} height={1}>
-        <text fg="#333" truncate>
+        <text fg={t.textFaint} truncate>
           {"─".repeat(200)}
         </text>
       </box>
@@ -247,16 +255,16 @@ export const EditorPanel = memo(function EditorPanel({
         flexShrink={0}
         height={1}
       >
-        <text fg="#555" truncate>
+        <text fg={t.textMuted} truncate>
           {fileName ?? ""}
         </text>
         <box flexDirection="row" gap={2}>
           {cursorLine != null && (
-            <text fg="#666">
+            <text fg={t.textSecondary}>
               {String(cursorLine)}:{String((cursorCol ?? 0) + 1)}
             </text>
           )}
-          <text fg="#555" attributes={TextAttributes.BOLD}>
+          <text fg={t.textMuted} attributes={TextAttributes.BOLD}>
             nvim
           </text>
         </box>
@@ -296,34 +304,35 @@ const INSTALL_CMDS: Record<string, { cmd: string; label: string }[]> = {
 };
 
 function NvimNotFoundSplash() {
+  const t = useTheme();
   const cmds = INSTALL_CMDS[process.platform] ?? INSTALL_CMDS.linux ?? [];
   const longest = cmds.reduce((max, c) => Math.max(max, c.cmd.length), 0);
 
   return (
     <box flexDirection="column" flexGrow={1} justifyContent="center" paddingX={4}>
-      <text fg="#FF0040" attributes={TextAttributes.BOLD}>
+      <text fg={t.error} attributes={TextAttributes.BOLD}>
         Neovim Not Found
       </text>
       <text> </text>
-      <text fg="#666">The editor requires Neovim (v0.11+)</text>
+      <text fg={t.textSecondary}>The editor requires Neovim (v0.11+)</text>
       <text> </text>
-      <text fg="#6A0DAD" attributes={TextAttributes.BOLD}>
+      <text fg={t.brand} attributes={TextAttributes.BOLD}>
         Install:
       </text>
       {cmds.map(({ cmd, label }) => (
         <text key={cmd}>
-          <span fg="#555">{"  $ "}</span>
-          <span fg="#00AA00">{cmd}</span>
-          <span fg="#333">
+          <span fg={t.textMuted}>{"  $ "}</span>
+          <span fg={t.success}>{cmd}</span>
+          <span fg={t.textFaint}>
             {" ".repeat(Math.max(2, longest - cmd.length + 2))}
             {label}
           </span>
         </text>
       ))}
       <text> </text>
-      <text fg="#555">https://github.com/neovim/neovim/releases</text>
+      <text fg={t.textMuted}>https://github.com/neovim/neovim/releases</text>
       <text> </text>
-      <text fg="#444" attributes={TextAttributes.DIM}>
+      <text fg={t.textDim} attributes={TextAttributes.DIM}>
         Restart SoulForge after installing.
       </text>
     </box>
@@ -331,6 +340,7 @@ function NvimNotFoundSplash() {
 }
 
 function VimHints({ mode }: { mode: string }) {
+  const t = useTheme();
   const isInsert = mode === "insert";
   const isVisual = mode.startsWith("visual");
 
@@ -356,19 +366,23 @@ function VimHints({ mode }: { mode: string }) {
         <H k="gg" l="top" />
         <H k="G" l="bottom" />
         <H k="w" l="next word" />
-        <text fg="#333">/vim-hints to hide</text>
+        <text fg={t.textFaint}>/vim-hints to hide</text>
       </box>
     </box>
   );
 }
 
 function H({ k, l, on }: { k: string; l: string; on?: boolean }) {
+  const t = useTheme();
   return (
     <text>
-      <span fg={on ? "#00AA00" : "#FF0040"} attributes={on ? TextAttributes.BOLD : undefined}>
+      <span
+        fg={on ? t.success : t.brandSecondary}
+        attributes={on ? TextAttributes.BOLD : undefined}
+      >
         {k}
       </span>
-      <span fg="#444"> {l}</span>
+      <span fg={t.textDim}> {l}</span>
     </text>
   );
 }

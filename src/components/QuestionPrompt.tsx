@@ -2,6 +2,7 @@ import { TextAttributes } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
 import { useState } from "react";
 import { icon } from "../core/icons.js";
+import { useTheme } from "../core/theme/index.js";
 import type { PendingQuestion } from "../types/index.js";
 import { Markdown } from "./chat/Markdown.js";
 
@@ -14,6 +15,7 @@ interface Props {
 const OTHER_IDX = -1;
 
 export function QuestionPrompt({ question, isActive, onAnswer }: Props) {
+  const t = useTheme();
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [typing, setTyping] = useState(false);
   const [inputValue, setInputValue] = useState("");
@@ -82,12 +84,12 @@ export function QuestionPrompt({ question, isActive, onAnswer }: Props) {
       flexDirection="column"
       borderStyle="rounded"
       border={true}
-      borderColor="#FF8C00"
+      borderColor={t.warning}
       paddingX={1}
       width="100%"
     >
       <box>
-        <text fg="#FF8C00" attributes={TextAttributes.BOLD}>
+        <text fg={t.warning} attributes={TextAttributes.BOLD}>
           {icon("question")} Question
         </text>
       </box>
@@ -96,7 +98,7 @@ export function QuestionPrompt({ question, isActive, onAnswer }: Props) {
       </box>
       {typing ? (
         <box flexDirection="row" gap={1}>
-          <text fg="#FF8C00">{" ›"}</text>
+          <text fg={t.warning}>{" ›"}</text>
           <input
             value={inputValue}
             onInput={setInputValue}
@@ -112,9 +114,9 @@ export function QuestionPrompt({ question, isActive, onAnswer }: Props) {
             const isSelected = i === selectedIdx;
             return (
               <text key={opt.value}>
-                <span fg={isSelected ? "#FF8C00" : "#555"}>{isSelected ? " › " : "   "}</span>
+                <span fg={isSelected ? t.warning : t.textMuted}>{isSelected ? " › " : "   "}</span>
                 <span
-                  fg={isSelected ? "#FFF" : "#888"}
+                  fg={isSelected ? "white" : t.textSecondary}
                   attributes={isSelected ? TextAttributes.BOLD : undefined}
                 >
                   {opt.label}
@@ -123,17 +125,17 @@ export function QuestionPrompt({ question, isActive, onAnswer }: Props) {
             );
           })}
           <text>
-            <span fg={selectedIdx === OTHER_IDX ? "#FF8C00" : "#555"}>
+            <span fg={selectedIdx === OTHER_IDX ? t.warning : t.textMuted}>
               {selectedIdx === OTHER_IDX ? " › " : "   "}
             </span>
             <span
-              fg={selectedIdx === OTHER_IDX ? "#FFF" : "#888"}
+              fg={selectedIdx === OTHER_IDX ? "white" : t.textSecondary}
               attributes={selectedIdx === OTHER_IDX ? TextAttributes.BOLD : undefined}
             >
               Other
             </span>
           </text>
-          <text fg="#444">
+          <text fg={t.textDim}>
             {"  "}↑↓ select · ⏎ confirm
             {question.allowSkip ? " · esc skip" : ""}
           </text>

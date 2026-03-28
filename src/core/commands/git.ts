@@ -10,6 +10,7 @@ import {
   gitStashPop,
 } from "../git/status.js";
 import { icon } from "../icons.js";
+import { getThemeTokens } from "../theme/index.js";
 import type { CommandContext, CommandHandler } from "./types.js";
 import { sysMsg } from "./utils.js";
 
@@ -101,49 +102,64 @@ function handleGitStatus(_input: string, ctx: CommandContext): void {
       return;
     }
     const lines: InfoPopupLine[] = [
-      { type: "entry", label: "Branch", desc: status.branch ?? "(detached)", descColor: "#8B5CF6" },
+      {
+        type: "entry",
+        label: "Branch",
+        desc: status.branch ?? "(detached)",
+        descColor: getThemeTokens().brandAlt,
+      },
       { type: "spacer" },
       {
         type: "entry",
         label: "Staged",
         desc: String(status.staged.length),
-        descColor: status.staged.length > 0 ? "#2d5" : "#666",
+        descColor: status.staged.length > 0 ? getThemeTokens().success : getThemeTokens().textMuted,
       },
       {
         type: "entry",
         label: "Modified",
         desc: String(status.modified.length),
-        descColor: status.modified.length > 0 ? "#FF8C00" : "#666",
+        descColor:
+          status.modified.length > 0 ? getThemeTokens().warning : getThemeTokens().textMuted,
       },
       {
         type: "entry",
         label: "Untracked",
         desc: String(status.untracked.length),
-        descColor: status.untracked.length > 0 ? "#FF0040" : "#666",
+        descColor:
+          status.untracked.length > 0
+            ? getThemeTokens().brandSecondary
+            : getThemeTokens().textMuted,
       },
     ];
     if (status.ahead > 0)
-      lines.push({ type: "entry", label: "Ahead", desc: String(status.ahead), descColor: "#2d5" });
+      lines.push({
+        type: "entry",
+        label: "Ahead",
+        desc: String(status.ahead),
+        descColor: getThemeTokens().success,
+      });
     if (status.behind > 0)
       lines.push({
         type: "entry",
         label: "Behind",
         desc: String(status.behind),
-        descColor: "#FF8C00",
+        descColor: getThemeTokens().warning,
       });
     if (status.staged.length > 0) {
       lines.push({ type: "spacer" }, { type: "header", label: "Staged Files" });
-      for (const f of status.staged) lines.push({ type: "text", label: `  ${f}`, color: "#2d5" });
+      for (const f of status.staged)
+        lines.push({ type: "text", label: `  ${f}`, color: getThemeTokens().success });
     }
     if (status.modified.length > 0) {
       lines.push({ type: "spacer" }, { type: "header", label: "Modified Files" });
       for (const f of status.modified)
-        lines.push({ type: "text", label: `  ${f}`, color: "#FF8C00" });
+        lines.push({ type: "text", label: `  ${f}`, color: getThemeTokens().warning });
     }
     if (status.untracked.length > 0) {
       lines.push({ type: "spacer" }, { type: "header", label: "Untracked Files" });
       for (const f of status.untracked)
-        lines.push({ type: "text", label: `  ${f}`, color: "#FF0040" });
+        lines.push({ type: "text", label: `  ${f}`, color: getThemeTokens().brandSecondary });
     }
     ctx.openInfoPopup({ title: "Git Status", icon: icon("git"), lines });
   });
@@ -205,7 +221,7 @@ function handleLog(_input: string, ctx: CommandContext): void {
         type: "entry" as const,
         label: e.hash,
         desc: `${e.subject} (${e.date})`,
-        color: "#FF8C00",
+        color: getThemeTokens().warning,
       }));
       ctx.openInfoPopup({
         title: "Git Log",

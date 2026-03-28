@@ -1,21 +1,9 @@
 import { TextAttributes } from "@opentui/core";
-import { useEffect, useRef, useState } from "react";
-import { BRAND_PURPLE, BRAND_RED, type BrandSegment } from "../../core/utils/splash.js";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useTheme } from "../../core/theme/index.js";
+import type { BrandSegment } from "../../core/utils/splash.js";
 
-const PHRASES: BrandSegment[][] = [
-  [
-    { text: "by ", color: "#333" },
-    { text: "Proxy", color: BRAND_PURPLE },
-    { text: "Soul", color: BRAND_RED },
-  ],
-  [
-    { text: "proxy", color: BRAND_PURPLE },
-    { text: "soul", color: BRAND_RED },
-    { text: ".com", color: "#555" },
-  ],
-];
-
-const FIXED_WIDTH = Math.max(...PHRASES.map((p) => p.reduce((n, s) => n + s.text.length, 0))) + 1;
+const FIXED_WIDTH = 15;
 const HOLD_MS = 12_000;
 const TYPE_MS = 45;
 const ERASE_MS = 30;
@@ -33,6 +21,22 @@ interface BrandState {
 }
 
 export function BrandTag() {
+  const t = useTheme();
+  const PHRASES: BrandSegment[][] = useMemo(
+    () => [
+      [
+        { text: "by ", color: t.textFaint },
+        { text: "Proxy", color: t.brand },
+        { text: "Soul", color: t.brandSecondary },
+      ],
+      [
+        { text: "proxy", color: t.brand },
+        { text: "soul", color: t.brandSecondary },
+        { text: ".com", color: t.textMuted },
+      ],
+    ],
+    [t.brand, t.brandSecondary, t.textFaint, t.textMuted],
+  );
   const [state, setState] = useState<BrandState>({
     phraseIdx: 0,
     visibleChars: 0,
@@ -91,7 +95,7 @@ export function BrandTag() {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [phase, visibleChars, totalChars]);
+  }, [phase, visibleChars, totalChars, PHRASES.length]);
 
   let remaining = visibleChars;
   const parts: { text: string; color: string }[] = [];
@@ -114,7 +118,7 @@ export function BrandTag() {
             {p.text}
           </span>
         ))}
-        {animating && <span fg={BRAND_RED}>█</span>}
+        {animating && <span fg={t.brandSecondary}>█</span>}
       </text>
     </box>
   );

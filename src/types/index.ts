@@ -238,7 +238,9 @@ export interface AppConfig {
     args: string[];
   };
   theme: {
-    accentColor: string;
+    name: string;
+    transparent?: boolean;
+    accentColor?: string;
   };
   nvimPath?: string;
   nvimConfig?: NvimConfigMode;

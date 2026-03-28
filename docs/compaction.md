@@ -167,7 +167,7 @@ The compacted summary is a single structured message:
 - **soul_analyze**: Top 20 identifiers by cross-file reference count...
 - **navigate**: References to 'emitSubagentStep' (13): 5 files
 - **rename_symbol**: Renamed across 5 files [lsp], verified zero remaining
-- **project**: typecheck passed, lint passed, 2080 tests passed
+- **project**: typecheck passed, lint passed, 2292 tests passed
 
 ## Errors & Failures
 - project: typecheck failed — TS5090 non-relative paths

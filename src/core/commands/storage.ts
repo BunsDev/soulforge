@@ -3,6 +3,7 @@ import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { icon } from "../icons.js";
 import { SessionManager } from "../sessions/manager.js";
+import { getThemeTokens } from "../theme/index.js";
 import type { CommandContext, CommandHandler } from "./types.js";
 import { computeStorageSizes, fileSize, formatBytes, sysMsg } from "./utils.js";
 
@@ -28,7 +29,7 @@ function openStorageMenu(ctx: CommandContext): void {
         {
           value: "_h_project",
           label: `Project ${formatBytes(s.projectTotal)}`,
-          color: "#9B30FF",
+          color: getThemeTokens().brand,
           disabled: true,
         },
         {
@@ -65,7 +66,7 @@ function openStorageMenu(ctx: CommandContext): void {
         {
           value: "_h_global",
           label: `Global ${formatBytes(s.globalTotal)}`,
-          color: "#00BFFF",
+          color: getThemeTokens().info,
           disabled: true,
         },
         {

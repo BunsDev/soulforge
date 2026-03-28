@@ -2,6 +2,7 @@ import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { memo } from "react";
 import { icon } from "../../core/icons.js";
+import { useTheme } from "../../core/theme/index.js";
 import { usePopupScroll } from "../../hooks/usePopupScroll.js";
 import type { TaskRouter } from "../../types/index.js";
 import type { ConfigScope } from "../layout/shared.js";
@@ -122,6 +123,7 @@ const SectionHeader = memo(function SectionHeader({
   subtitle: string;
   innerW: number;
 }) {
+  const t = useTheme();
   const lineW = Math.max(0, innerW - title.length - 5);
   return (
     <>
@@ -129,16 +131,16 @@ const SectionHeader = memo(function SectionHeader({
         <text bg={POPUP_BG}>{""}</text>
       </PopupRow>
       <PopupRow w={innerW}>
-        <text bg={POPUP_BG} fg="#8B5CF6" attributes={TextAttributes.BOLD}>
+        <text bg={POPUP_BG} fg={t.brandAlt} attributes={TextAttributes.BOLD}>
           {title}
         </text>
-        <text bg={POPUP_BG} fg="#2a2a40">
+        <text bg={POPUP_BG} fg={t.textSubtle}>
           {" "}
           {"─".repeat(lineW)}
         </text>
       </PopupRow>
       <PopupRow w={innerW}>
-        <text bg={POPUP_BG} fg="#555">
+        <text bg={POPUP_BG} fg={t.textMuted}>
           {subtitle}
         </text>
       </PopupRow>
@@ -159,6 +161,7 @@ const SlotRowView = memo(function SlotRowView({
   selected: boolean;
   innerW: number;
 }) {
+  const t = useTheme();
   const bg = selected ? POPUP_HL : POPUP_BG;
   const displayModel = modelId ?? activeModel;
   const isCustom = !!modelId;
@@ -169,17 +172,17 @@ const SlotRowView = memo(function SlotRowView({
 
   return (
     <PopupRow bg={bg} w={innerW}>
-      <text bg={bg} fg={selected ? "#9B30FF" : "#444"}>
+      <text bg={bg} fg={selected ? t.brand : t.textDim}>
         {selected ? "› " : "  "}
       </text>
       <text
         bg={bg}
-        fg={selected ? "white" : "#bbb"}
+        fg={selected ? "white" : t.textPrimary}
         attributes={selected ? TextAttributes.BOLD : undefined}
       >
         {slot.label.padEnd(labelW)}
       </text>
-      <text bg={bg} fg={isCustom ? "#2d5" : "#555"}>
+      <text bg={bg} fg={isCustom ? t.success : t.textMuted}>
         {isCustom ? "" : "↳ "}
         {truncModel}
       </text>
@@ -210,6 +213,7 @@ export function RouterSettings({
   onClearSlot,
   onClose,
 }: Props) {
+  const t = useTheme();
   const { width: termCols, height: termRows } = useTerminalDimensions();
   const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.85));
   const innerW = popupWidth - 2;
@@ -292,25 +296,25 @@ export function RouterSettings({
         flexDirection="column"
         borderStyle="rounded"
         border={true}
-        borderColor="#8B5CF6"
+        borderColor={t.brandAlt}
         width={popupWidth}
       >
         {/* ── Title ── */}
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#9B30FF" attributes={TextAttributes.BOLD}>
+          <text bg={POPUP_BG} fg={t.brand} attributes={TextAttributes.BOLD}>
             {icon("router")}
           </text>
-          <text bg={POPUP_BG} fg="white" attributes={TextAttributes.BOLD}>
+          <text bg={POPUP_BG} fg={t.textPrimary} attributes={TextAttributes.BOLD}>
             {" "}
             Task Router
           </text>
-          <text bg={POPUP_BG} fg="#555">
+          <text bg={POPUP_BG} fg={t.textMuted}>
             {" — assign models to different tasks"}
           </text>
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#2a2a40">
+          <text bg={POPUP_BG} fg={t.textSubtle}>
             {"─".repeat(innerW - 2)}
           </text>
         </PopupRow>
@@ -348,7 +352,7 @@ export function RouterSettings({
         {/* ── Scroll indicator ── */}
         {SELECTABLE.length > maxVisible && (
           <PopupRow w={innerW}>
-            <text fg="#555" bg={POPUP_BG}>
+            <text fg={t.textMuted} bg={POPUP_BG}>
               {"  "}
               {scrollOffset > 0 ? "↑ " : "  "}
               {String(cursor + 1)}/{String(SELECTABLE.length)}
@@ -359,31 +363,31 @@ export function RouterSettings({
 
         {/* ── Selected slot hint ── */}
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#2a2a40">
+          <text bg={POPUP_BG} fg={t.textSubtle}>
             {"─".repeat(innerW - 2)}
           </text>
         </PopupRow>
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#888">
+          <text bg={POPUP_BG} fg={t.textSecondary}>
             {selectedHint}
           </text>
         </PopupRow>
 
         {/* ── Scope selector ── */}
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#2a2a40">
+          <text bg={POPUP_BG} fg={t.textSubtle}>
             {"─".repeat(innerW - 2)}
           </text>
         </PopupRow>
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#666">
+          <text bg={POPUP_BG} fg={t.textMuted}>
             {"Scope "}
           </text>
           {CONFIG_SCOPES.map((s) => (
             <text
               key={s}
               bg={POPUP_BG}
-              fg={s === scope ? "#8B5CF6" : "#444"}
+              fg={s === scope ? t.brandAlt : t.textDim}
               attributes={s === scope ? TextAttributes.BOLD : undefined}
             >
               {s === scope ? ` [${s}] ` : `  ${s}  `}
@@ -393,7 +397,7 @@ export function RouterSettings({
 
         {/* ── Keybindings ── */}
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#555">
+          <text bg={POPUP_BG} fg={t.textMuted}>
             {"↑↓"} navigate {"│"} {"⏎"} pick model {"│"} d reset {"│"} {"←→"} scope {"│"} esc close
           </text>
         </PopupRow>

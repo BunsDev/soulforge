@@ -1,5 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { ContextManager } from "../core/context/manager.js";
+import { applyTheme } from "../core/theme/index.js";
 import { useUIStore } from "../stores/ui.js";
 import type { AppConfig } from "../types/index.js";
 
@@ -75,4 +76,19 @@ export function useConfigSync({
     if (effectiveConfig.editorSplit !== undefined)
       useUIStore.setState({ editorSplit: effectiveConfig.editorSplit });
   }, [effectiveConfig.editorSplit]);
+
+  const themeName = effectiveConfig.theme?.name;
+  const themeTransparent = effectiveConfig.theme?.transparent;
+  const prevTheme = useRef(themeName);
+  const prevTransparent = useRef(themeTransparent);
+  useEffect(() => {
+    if (
+      themeName &&
+      (themeName !== prevTheme.current || themeTransparent !== prevTransparent.current)
+    ) {
+      prevTheme.current = themeName;
+      prevTransparent.current = themeTransparent;
+      applyTheme(themeName, themeTransparent);
+    }
+  }, [themeName, themeTransparent]);
 }

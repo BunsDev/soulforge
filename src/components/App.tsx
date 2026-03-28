@@ -25,6 +25,7 @@ import { initForbidden } from "../core/security/forbidden.js";
 import { SessionManager } from "../core/sessions/manager.js";
 import { getMissingRequired } from "../core/setup/prerequisites.js";
 import { suspendAndRun } from "../core/terminal/suspend.js";
+import { useTheme, useThemeStore } from "../core/theme/index.js";
 import { garble, WORDMARK as SHUTDOWN_WORDMARK } from "../core/utils/splash.js";
 import type { ChatInstance, WorkspaceSnapshot } from "../hooks/useChat.js";
 import { useConfigSync } from "../hooks/useConfigSync.js";
@@ -115,6 +116,7 @@ function ShutdownSplash({
     return () => clearInterval(timer);
   }, []);
 
+  const t = useTheme();
   const ghostFade = ["▓", "▒", "░", " ", " ", "░", "▒", "▓"];
   const fadeIdx = Math.min(tick, ghostFade.length - 1);
   const ghostChar = tick < ghostFade.length ? ghostFade[fadeIdx] : icon("ghost");
@@ -122,15 +124,15 @@ function ShutdownSplash({
 
   return (
     <box flexDirection="column" height={height} justifyContent="center" alignItems="center">
-      <text fg="#9B30FF" attributes={TextAttributes.BOLD}>
+      <text fg={t.brand} attributes={TextAttributes.BOLD}>
         {ghostChar}
       </text>
-      <text fg="#4a1a6b" attributes={TextAttributes.DIM}>
+      <text fg={t.brandDim} attributes={TextAttributes.DIM}>
         ∿~∿
       </text>
       <box height={1} />
       {SHUTDOWN_WORDMARK.map((line: string) => (
-        <text key={line} fg="#9B30FF" attributes={TextAttributes.BOLD}>
+        <text key={line} fg={t.brand} attributes={TextAttributes.BOLD}>
           {tick < 4 ? garble(line) : line}
         </text>
       ))}
@@ -141,8 +143,8 @@ function ShutdownSplash({
           const done = i < phase;
           return (
             <box key={label} gap={1} flexDirection="row">
-              <text fg={done ? "#4a7" : "#9B30FF"}>{done ? "✓" : spin}</text>
-              <text fg={done ? "#555" : "#aaa"}>{label}</text>
+              <text fg={done ? t.success : t.brand}>{done ? "✓" : spin}</text>
+              <text fg={done ? t.textMuted : t.textSecondary}>{label}</text>
             </box>
           );
         })}
@@ -150,8 +152,8 @@ function ShutdownSplash({
           <>
             <box height={1} />
             <text>
-              <span fg="#555">Resume: </span>
-              <span fg="#8B5CF6">soulforge --session {shortId}</span>
+              <span fg={t.textMuted}>Resume: </span>
+              <span fg={t.brandAlt}>soulforge --session {shortId}</span>
             </text>
           </>
         )}
@@ -195,6 +197,9 @@ export function App({
 }: Props) {
   const renderer = useRenderer();
   const { height: termHeight, width: termWidth } = useTerminalDimensions();
+  // Subscribe to theme changes so the entire tree re-renders with new colors
+  useThemeStore((s) => s.name);
+  const t = useTheme();
   const [shutdownPhase, setShutdownPhase] = useState(-1);
   const savedSessionIdRef = useRef<string | null>(null);
 
@@ -910,7 +915,7 @@ export function App({
   const anyModalOpen = shutdownPhase >= 0 || isModalOpen;
 
   return (
-    <box flexDirection="column" height={termHeight}>
+    <box flexDirection="column" height={termHeight} backgroundColor={t.bgApp}>
       <box
         flexShrink={0}
         width="100%"
@@ -920,35 +925,37 @@ export function App({
         flexDirection="row"
       >
         <box flexShrink={0}>
-          <text fg="#9B30FF" attributes={TextAttributes.BOLD}>
+          <text fg={t.brand} attributes={TextAttributes.BOLD}>
             {icon("ghost")} SoulForge
           </text>
         </box>
         <box gap={1} flexShrink={1} flexDirection="row" justifyContent="center" overflow="hidden">
           <text truncate>
             {isProxy && (
-              <span fg="#8B5CF6">
-                {icon("proxy")} proxy<span fg="#444">›</span>
+              <span fg={t.brandAlt}>
+                {icon("proxy")} proxy<span fg={t.textDim}>›</span>
               </span>
             )}
             {isGateway && (
-              <span fg="#555">
-                {icon("vercel_gateway")} gateway<span fg="#444">›</span>
+              <span fg={t.textMuted}>
+                {icon("vercel_gateway")} gateway<span fg={t.textDim}>›</span>
               </span>
             )}
-            <span fg="#666">{providerIcon(displayProvider)} </span>
+            <span fg={t.textMuted}>{providerIcon(displayProvider)} </span>
             {displayProvider !== displayModel && (
               <>
-                <span fg="#555">{displayProvider}</span>
-                <span fg="#444">›</span>
+                <span fg={t.textMuted}>{displayProvider}</span>
+                <span fg={t.textDim}>›</span>
               </>
             )}
-            <span fg="#888">{truncate(displayModel, isProxy || isGateway ? 20 : 28)}</span>
+            <span fg={t.textSecondary}>
+              {truncate(displayModel, isProxy || isGateway ? 20 : 28)}
+            </span>
           </text>
           {git.isRepo && (
             <>
-              <text fg="#333">│</text>
-              <text fg={git.isDirty ? "#b87333" : "#4a7"} truncate>
+              <text fg={t.textFaint}>│</text>
+              <text fg={git.isDirty ? t.amber : t.success} truncate>
                 {UI_ICONS.git} {truncate(git.branch ?? "HEAD", termWidth >= 120 ? 30 : 15)}
                 {git.isDirty ? "*" : ""}
               </text>
@@ -956,19 +963,19 @@ export function App({
           )}
           {tabMgr.tabCount <= 1 && forgeMode !== "default" && (
             <>
-              <text fg="#333">│</text>
+              <text fg={t.textFaint}>│</text>
               <text fg={modeColor} attributes={TextAttributes.BOLD}>
                 [{modeLabel}]
               </text>
             </>
           )}
-          <text fg="#333">│</text>
+          <text fg={t.textFaint}>│</text>
           <ContextBar
             contextManager={contextManager}
             modelId={activeModelForHeader}
             suppressCompacting={tabMgr.tabCount > 1}
           />
-          <text fg="#333">│</text>
+          <text fg={t.textFaint}>│</text>
           <TokenDisplay />
         </box>
         {termWidth >= 80 && <BrandTag />}

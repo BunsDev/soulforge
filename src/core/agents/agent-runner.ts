@@ -1,7 +1,6 @@
 import type { ProviderOptions } from "@ai-sdk/provider-utils";
 import { type LanguageModel, RetryError } from "ai";
 import { logBackgroundError } from "../../stores/errors.js";
-import { isAnthropicNative } from "../llm/provider-options.js";
 import { taskListTool } from "../tools/task-list.js";
 import {
   type AgentBus,
@@ -270,11 +269,9 @@ export async function runAgentTask(
     enrichedPrompt += `\n\n--- Return format: ${task.returnFormat} ---\n${RETURN_FORMAT_INSTRUCTIONS[task.returnFormat]}`;
   }
 
-  // miniForge: when using forge system prompt, inject role instructions into the user message
-  const useMiniForge =
-    models.forgeInstructions != null &&
-    isAnthropicNative(selectedModelId) &&
-    taskTier !== "trivial";
+  // miniForge: when using forge system prompt, inject role instructions into the user message.
+  // Works across all providers — automatic caching (OpenAI, Gemini, DeepSeek) benefits from shared prefix.
+  const useMiniForge = models.forgeInstructions != null && taskTier !== "trivial";
   if (useMiniForge) {
     const isCode = task.role === "code";
     const isInvestigate = task.role === "investigate";

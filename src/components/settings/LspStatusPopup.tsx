@@ -2,6 +2,7 @@ import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useEffect, useMemo, useState } from "react";
 import { getDetailedLspServers, getNvimLspClients } from "../../core/intelligence/instance.js";
+import { useTheme } from "../../core/theme/index.js";
 import { useErrorStore } from "../../stores/errors.js";
 import { Overlay, POPUP_BG, POPUP_HL, PopupRow } from "../layout/shared.js";
 
@@ -27,12 +28,23 @@ interface NvimClient {
   pid: number | null;
 }
 
-const SEVERITY_LABEL: Record<number, { text: string; color: string }> = {
-  1: { text: "ERR", color: "#FF0040" },
-  2: { text: "WRN", color: "#FF8C00" },
-  3: { text: "INF", color: "#5af" },
-  4: { text: "HNT", color: "#555" },
-};
+function getSeverityLabel(
+  severity: number,
+  t: { error: string; warning: string; info: string; textMuted: string },
+): { text: string; color: string } {
+  switch (severity) {
+    case 1:
+      return { text: "ERR", color: t.error };
+    case 2:
+      return { text: "WRN", color: t.warning };
+    case 3:
+      return { text: "INF", color: t.info };
+    case 4:
+      return { text: "HNT", color: t.textMuted };
+    default:
+      return { text: "ERR", color: t.error };
+  }
+}
 
 function shortCommand(cmd: string): string {
   return cmd.split("/").pop() ?? cmd;
@@ -55,6 +67,7 @@ interface Props {
 }
 
 export function LspStatusPopup({ visible, onClose }: Props) {
+  const t = useTheme();
   const [cursor, setCursor] = useState(0);
   const [detailIdx, setDetailIdx] = useState<number | null>(null);
   const [detailScroll, setDetailScroll] = useState(0);
@@ -114,7 +127,7 @@ export function LspStatusPopup({ visible, onClose }: Props) {
       lines.push("  No diagnostics");
     } else {
       for (const d of selectedServer.diagnostics) {
-        const sev = SEVERITY_LABEL[d.severity] ?? { text: "ERR", color: "#FF0040" };
+        const sev = getSeverityLabel(d.severity, t);
         const file = shortPath(d.file, 30);
         lines.push(`  [${sev.text}] ${file}: ${d.message}`);
       }
@@ -132,7 +145,7 @@ export function LspStatusPopup({ visible, onClose }: Props) {
     }
 
     return lines;
-  }, [selectedServer, lspErrors]);
+  }, [selectedServer, lspErrors, t]);
 
   const maxDetailLines = Math.max(4, popupHeight - 6);
 
@@ -177,7 +190,7 @@ export function LspStatusPopup({ visible, onClose }: Props) {
   if (!visible) return null;
 
   if (inDetail && selectedServer) {
-    const statusColor = selectedServer.ready ? "#2d5" : "#FF8C00";
+    const statusColor = selectedServer.ready ? t.success : t.warning;
     const statusIcon = selectedServer.ready ? "\u25CF" : "\u25CB";
 
     return (
@@ -186,25 +199,25 @@ export function LspStatusPopup({ visible, onClose }: Props) {
           flexDirection="column"
           borderStyle="rounded"
           border={true}
-          borderColor="#8B5CF6"
+          borderColor={t.brandAlt}
           width={popupWidth}
         >
           <PopupRow w={innerW}>
             <text fg={statusColor} bg={POPUP_BG}>
               {statusIcon}
             </text>
-            <text fg="white" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
+            <text fg={t.textPrimary} attributes={TextAttributes.BOLD} bg={POPUP_BG}>
               {" "}
               {shortCommand(selectedServer.command)}
             </text>
-            <text fg="#555" bg={POPUP_BG}>
+            <text fg={t.textMuted} bg={POPUP_BG}>
               {"  "}
               {selectedServer.language}
             </text>
           </PopupRow>
 
           <PopupRow w={innerW}>
-            <text fg="#333" bg={POPUP_BG}>
+            <text fg={t.textFaint} bg={POPUP_BG}>
               {"\u2500".repeat(innerW - 4)}
             </text>
           </PopupRow>
@@ -218,7 +231,13 @@ export function LspStatusPopup({ visible, onClose }: Props) {
               const isSection = line.startsWith("\u2500\u2500");
               const isError = line.includes("[ERR]");
               const isWarn = line.includes("[WRN]");
-              const fg = isSection ? "#8B5CF6" : isError ? "#FF0040" : isWarn ? "#FF8C00" : "#aaa";
+              const fg = isSection
+                ? t.brandAlt
+                : isError
+                  ? t.brandSecondary
+                  : isWarn
+                    ? t.warning
+                    : t.textSecondary;
               return (
                 <PopupRow key={String(vi + detailScroll)} w={innerW}>
                   <text
@@ -235,7 +254,7 @@ export function LspStatusPopup({ visible, onClose }: Props) {
           </box>
           {detailLines.length > maxDetailLines && (
             <PopupRow w={innerW}>
-              <text fg="#555" bg={POPUP_BG}>
+              <text fg={t.textMuted} bg={POPUP_BG}>
                 {detailScroll > 0 ? "\u2191 " : "  "}
                 {String(detailScroll + 1)}-
                 {String(Math.min(detailScroll + maxDetailLines, detailLines.length))}/
@@ -250,7 +269,7 @@ export function LspStatusPopup({ visible, onClose }: Props) {
           </PopupRow>
 
           <PopupRow w={innerW}>
-            <text fg="#555" bg={POPUP_BG}>
+            <text fg={t.textMuted} bg={POPUP_BG}>
               {"\u2191\u2193"} scroll | esc back
             </text>
           </PopupRow>
@@ -265,18 +284,18 @@ export function LspStatusPopup({ visible, onClose }: Props) {
         flexDirection="column"
         borderStyle="rounded"
         border={true}
-        borderColor="#8B5CF6"
+        borderColor={t.brandAlt}
         width={popupWidth}
       >
         <PopupRow w={innerW}>
-          <text fg="#9B30FF" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
+          <text fg={t.brand} attributes={TextAttributes.BOLD} bg={POPUP_BG}>
             {"\uDB81\uDCA4"}
           </text>
-          <text fg="white" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
+          <text fg={t.textPrimary} attributes={TextAttributes.BOLD} bg={POPUP_BG}>
             {" "}
             Language Servers
           </text>
-          <text fg="#555" bg={POPUP_BG}>
+          <text fg={t.textMuted} bg={POPUP_BG}>
             {" "}
             ({String(servers.length)} standalone
             {nvimClients.length > 0 ? ` + ${String(nvimClients.length)} neovim` : ""})
@@ -284,7 +303,7 @@ export function LspStatusPopup({ visible, onClose }: Props) {
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text fg="#333" bg={POPUP_BG}>
+          <text fg={t.textFaint} bg={POPUP_BG}>
             {"\u2500".repeat(innerW - 4)}
           </text>
         </PopupRow>
@@ -296,7 +315,7 @@ export function LspStatusPopup({ visible, onClose }: Props) {
         >
           {servers.length === 0 && nvimClients.length === 0 ? (
             <PopupRow w={innerW}>
-              <text fg="#555" bg={POPUP_BG}>
+              <text fg={t.textMuted} bg={POPUP_BG}>
                 No language servers running
               </text>
             </PopupRow>
@@ -305,16 +324,16 @@ export function LspStatusPopup({ visible, onClose }: Props) {
               {servers.slice(0, maxListVisible).map((srv, i) => {
                 const isActive = i === cursor;
                 const bg = isActive ? POPUP_HL : POPUP_BG;
-                const statusColor = srv.ready ? "#2d5" : "#FF8C00";
+                const statusColor = srv.ready ? t.success : t.warning;
                 const statusIcon = srv.ready ? "\u25CF" : "\u25CB";
                 const cmd = shortCommand(srv.command);
                 const diagLabel =
                   srv.diagnosticCount > 0 ? ` ${String(srv.diagnosticCount)} diag` : "";
-                const diagColor = srv.diagnosticCount > 0 ? "#FF8C00" : "#555";
+                const diagColor = srv.diagnosticCount > 0 ? t.warning : t.textMuted;
 
                 return (
                   <PopupRow key={`s-${srv.language}-${String(srv.pid)}`} bg={bg} w={innerW}>
-                    <text bg={bg} fg={isActive ? "#FF0040" : "#555"}>
+                    <text bg={bg} fg={isActive ? t.brandSecondary : t.textMuted}>
                       {isActive ? "\u203A " : "  "}
                     </text>
                     <text bg={bg} fg={statusColor}>
@@ -322,16 +341,16 @@ export function LspStatusPopup({ visible, onClose }: Props) {
                     </text>
                     <text
                       bg={bg}
-                      fg={isActive ? "white" : "#aaa"}
+                      fg={isActive ? "white" : t.textSecondary}
                       attributes={isActive ? TextAttributes.BOLD : undefined}
                     >
                       {cmd}
                     </text>
-                    <text bg={bg} fg="#666">
+                    <text bg={bg} fg={t.textMuted}>
                       {"  "}
                       {srv.language}
                     </text>
-                    <text bg={bg} fg="#2dd4bf">
+                    <text bg={bg} fg={t.info}>
                       {" [standalone]"}
                     </text>
                     <text bg={bg} fg={diagColor}>
@@ -342,16 +361,16 @@ export function LspStatusPopup({ visible, onClose }: Props) {
               })}
               {nvimClients.map((nc) => (
                 <PopupRow key={`n-${nc.name}-${String(nc.pid)}`} w={innerW}>
-                  <text fg="#555">{"  "}</text>
-                  <text fg="#57A143">{"\u25CF "}</text>
-                  <text fg="#aaa">{nc.name}</text>
-                  <text fg="#666">
+                  <text fg={t.textMuted}>{"  "}</text>
+                  <text fg={t.success}>{"\u25CF "}</text>
+                  <text fg={t.textSecondary}>{nc.name}</text>
+                  <text fg={t.textMuted}>
                     {"  "}
                     {nc.language}
                   </text>
-                  <text fg="#57A143">{" [neovim]"}</text>
+                  <text fg={t.success}>{" [neovim]"}</text>
                   {nc.pid ? (
-                    <text fg="#444">
+                    <text fg={t.textDim}>
                       {"  pid:"}
                       {String(nc.pid)}
                     </text>
@@ -365,12 +384,12 @@ export function LspStatusPopup({ visible, onClose }: Props) {
         {lspErrors.length > 0 && (
           <>
             <PopupRow w={innerW}>
-              <text fg="#333" bg={POPUP_BG}>
+              <text fg={t.textFaint} bg={POPUP_BG}>
                 {"\u2500".repeat(innerW - 4)}
               </text>
             </PopupRow>
             <PopupRow w={innerW}>
-              <text fg="#FF0040" bg={POPUP_BG}>
+              <text fg={t.brandSecondary} bg={POPUP_BG}>
                 {String(lspErrors.length)} background error{lspErrors.length === 1 ? "" : "s"}
               </text>
             </PopupRow>
@@ -382,7 +401,7 @@ export function LspStatusPopup({ visible, onClose }: Props) {
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text fg="#555" bg={POPUP_BG}>
+          <text fg={t.textMuted} bg={POPUP_BG}>
             {"\u2191\u2193"} nav | {"\u23CE"} details | esc close
           </text>
         </PopupRow>

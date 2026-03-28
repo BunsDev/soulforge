@@ -10,7 +10,7 @@ export async function listProviders(): Promise<void> {
 
   for (const s of statuses) {
     const tag = customIds.has(s.id) ? ` ${DIM}[custom]${RST}` : "";
-    const mark = s.available ? `${GREEN}ready${RST}` : `${DIM}no key${RST}`;
+    const mark = s.available ? `${GREEN()}ready${RST}` : `${DIM}no key${RST}`;
     const env = s.envVar ? `  ${DIM}(${s.envVar})${RST}` : "";
     process.stdout.write(
       `${s.available ? GREEN : DIM}${s.id.padEnd(18)}${RST} ${mark}${env}${tag}\n`,
@@ -23,7 +23,7 @@ export async function listModels(providerId?: string): Promise<void> {
   const targets = providerId ? providers.filter((p) => p.id === providerId) : providers;
 
   if (targets.length === 0) {
-    process.stderr.write(`${RED}Error:${RST} Unknown provider "${providerId ?? ""}"\n`);
+    process.stderr.write(`${RED()}Error:${RST} Unknown provider "${providerId ?? ""}"\n`);
     process.stderr.write(`Available: ${providers.map((p) => p.id).join(", ")}\n`);
     process.exit(EXIT_ERROR);
   }
@@ -34,7 +34,7 @@ export async function listModels(providerId?: string): Promise<void> {
 
     const tag = provider.custom ? ` ${DIM}[custom]${RST}` : "";
     process.stdout.write(
-      `${BOLD}${PURPLE}${provider.name}${RST} ${DIM}(${provider.id})${RST}${tag}\n`,
+      `${BOLD}${PURPLE()}${provider.name}${RST} ${DIM}(${provider.id})${RST}${tag}\n`,
     );
 
     let models = await provider.fetchModels().catch((err: unknown) => {
@@ -71,9 +71,9 @@ export function setKey(providerId: string, key: string): void {
     const result = setSecret(builtinKey as Parameters<typeof setSecret>[0], key);
     if (result.success) {
       const where = result.storage === "keychain" ? "system keychain" : "~/.soulforge/secrets.json";
-      process.stdout.write(`${GREEN}Saved${RST} ${providerId} key to ${where}\n`);
+      process.stdout.write(`${GREEN()}Saved${RST} ${providerId} key to ${where}\n`);
     } else {
-      process.stderr.write(`${RED}Error:${RST} Failed to save key\n`);
+      process.stderr.write(`${RED()}Error:${RST} Failed to save key\n`);
       process.exit(EXIT_ERROR);
     }
     return;
@@ -84,16 +84,16 @@ export function setKey(providerId: string, key: string): void {
     const result = setCustomSecret(provider.envVar, key);
     if (result.success) {
       const where = result.storage === "keychain" ? "system keychain" : "~/.soulforge/secrets.json";
-      process.stdout.write(`${GREEN}Saved${RST} ${providerId} key to ${where}\n`);
+      process.stdout.write(`${GREEN()}Saved${RST} ${providerId} key to ${where}\n`);
     } else {
-      process.stderr.write(`${RED}Error:${RST} Failed to save key\n`);
+      process.stderr.write(`${RED()}Error:${RST} Failed to save key\n`);
       process.exit(EXIT_ERROR);
     }
     return;
   }
 
   const allIds = getAllProviders().map((p) => p.id);
-  process.stderr.write(`${RED}Error:${RST} Unknown provider "${providerId}"\n`);
+  process.stderr.write(`${RED()}Error:${RST} Unknown provider "${providerId}"\n`);
   process.stderr.write(`Available: ${allIds.join(", ")}\n`);
   process.exit(EXIT_ERROR);
 }

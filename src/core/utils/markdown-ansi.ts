@@ -1,4 +1,5 @@
 import { Marked, type Tokens } from "marked";
+import { getThemeTokens } from "../theme/index.js";
 import { codeToAnsi } from "./shiki.js";
 
 const RST = "\x1b[0m";
@@ -7,67 +8,76 @@ const DIM = "\x1b[2m";
 const ITALIC = "\x1b[3m";
 const UNDERLINE = "\x1b[4m";
 const STRIKETHROUGH = "\x1b[9m";
-const PURPLE = "\x1b[38;2;155;48;255m";
-const BLUE = "\x1b[38;2;126;182;255m";
-const GREEN = "\x1b[38;2;195;232;141m";
-const YELLOW = "\x1b[38;2;255;203;107m";
-const CYAN = "\x1b[38;2;137;221;255m";
-const GRAY = "\x1b[38;2;136;136;136m";
-const CODE_BG = "\x1b[48;2;30;30;46m";
 
-const HEADING_COLORS = [
-  PURPLE, // h1
-  PURPLE, // h2
-  BLUE, // h3
-  CYAN, // h4
-  GRAY, // h5
-  GRAY, // h6
-];
+function hexToAnsiFg(hex: string): string {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return `\x1b[38;2;${(n >> 16) & 0xff};${(n >> 8) & 0xff};${n & 0xff}m`;
+}
+
+function hexToAnsiBg(hex: string): string {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return `\x1b[48;2;${(n >> 16) & 0xff};${(n >> 8) & 0xff};${n & 0xff}m`;
+}
+
+function colors() {
+  const t = getThemeTokens();
+  return {
+    PURPLE: hexToAnsiFg(t.brand),
+    BLUE: hexToAnsiFg(t.info),
+    GREEN: hexToAnsiFg(t.success),
+    YELLOW: hexToAnsiFg(t.warning),
+    CYAN: hexToAnsiFg(t.info),
+    GRAY: hexToAnsiFg(t.textSecondary),
+    CODE_BG: hexToAnsiBg(t.bgElevated),
+  };
+}
 
 /**
  * Render markdown to ANSI-formatted terminal text.
  * Code blocks are syntax-highlighted via shiki.
  */
 export async function renderMarkdownToAnsi(markdown: string): Promise<string> {
+  const { PURPLE, BLUE, GREEN, YELLOW, CYAN, GRAY, CODE_BG } = colors();
+  const HEADING_COLORS = [PURPLE, PURPLE, BLUE, CYAN, GRAY, GRAY];
+
   const codeBlocks: Array<{ placeholder: string; lang: string; code: string }> = [];
   let blockIdx = 0;
 
-  // Custom renderer that outputs ANSI-formatted text
   const renderer: Record<string, (...args: unknown[]) => string> = {
     heading(this: { parser: { parseInline(tokens: Tokens.Generic[]): string } }, token: unknown) {
-      const t = token as Tokens.Heading;
-      const text = this.parser.parseInline(t.tokens);
-      const color = HEADING_COLORS[t.depth - 1] ?? GRAY;
-      const prefix = t.depth <= 2 ? `${"━".repeat(Math.max(1, 4 - t.depth))} ` : "";
+      const tk = token as Tokens.Heading;
+      const text = this.parser.parseInline(tk.tokens);
+      const color = HEADING_COLORS[tk.depth - 1] ?? GRAY;
+      const prefix = tk.depth <= 2 ? `${"━".repeat(Math.max(1, 4 - tk.depth))} ` : "";
       return `\n${color}${BOLD}${prefix}${text}${RST}\n\n`;
     },
 
     paragraph(this: { parser: { parseInline(tokens: Tokens.Generic[]): string } }, token: unknown) {
-      const t = token as Tokens.Paragraph;
-      return `${this.parser.parseInline(t.tokens)}\n\n`;
+      const tk = token as Tokens.Paragraph;
+      return `${this.parser.parseInline(tk.tokens)}\n\n`;
     },
 
     code(_token: unknown) {
-      const t = _token as Tokens.Code;
+      const tk = _token as Tokens.Code;
       const placeholder = `\x00CODEBLOCK_${String(blockIdx)}\x00`;
-      codeBlocks.push({ placeholder, lang: t.lang ?? "", code: t.text });
+      codeBlocks.push({ placeholder, lang: tk.lang ?? "", code: tk.text });
       blockIdx++;
       return `${placeholder}\n`;
     },
 
     blockquote(this: { parser: { parse(tokens: Tokens.Generic[]): string } }, token: unknown) {
-      const t = token as Tokens.Blockquote;
-      const body = this.parser.parse(t.tokens);
+      const tk = token as Tokens.Blockquote;
+      const body = this.parser.parse(tk.tokens);
       const lines = body.trimEnd().split("\n");
       const quoted = lines.map((l: string) => `${GRAY}  │${RST} ${ITALIC}${l}${RST}`).join("\n");
       return `${quoted}\n\n`;
     },
 
     list(this: { listitem(item: Tokens.ListItem, ordered?: boolean): string }, token: unknown) {
-      const t = token as Tokens.List;
+      const tk = token as Tokens.List;
       const items: string[] = [];
-      for (const item of t.items) {
-        items.push(this.listitem(item, t.ordered));
+      for (const item of tk.items) {
+        items.push(this.listitem(item, tk.ordered));
       }
       return `${items.join("")}\n`;
     },
@@ -92,14 +102,14 @@ export async function renderMarkdownToAnsi(markdown: string): Promise<string> {
     },
 
     table(this: { parser: { parseInline(tokens: Tokens.Generic[]): string } }, token: unknown) {
-      const t = token as Tokens.Table;
+      const tk = token as Tokens.Table;
       const rows: string[] = [];
-      const headerCells = t.header.map(
+      const headerCells = tk.header.map(
         (cell) => `${BOLD}${this.parser.parseInline(cell.tokens)}${RST}`,
       );
       rows.push(`  ${headerCells.join(`${DIM} │ ${RST}`)}`);
       rows.push(`  ${DIM}${"─".repeat(40)}${RST}`);
-      for (const row of t.rows) {
+      for (const row of tk.rows) {
         const cells = row.map((cell) => this.parser.parseInline(cell.tokens));
         rows.push(`  ${cells.join(`${DIM} │ ${RST}`)}`);
       }
@@ -107,34 +117,34 @@ export async function renderMarkdownToAnsi(markdown: string): Promise<string> {
     },
 
     strong(this: { parser: { parseInline(tokens: Tokens.Generic[]): string } }, token: unknown) {
-      const t = token as Tokens.Strong;
-      return `${BOLD}${this.parser.parseInline(t.tokens)}${RST}`;
+      const tk = token as Tokens.Strong;
+      return `${BOLD}${this.parser.parseInline(tk.tokens)}${RST}`;
     },
 
     em(this: { parser: { parseInline(tokens: Tokens.Generic[]): string } }, token: unknown) {
-      const t = token as Tokens.Em;
-      return `${ITALIC}${this.parser.parseInline(t.tokens)}${RST}`;
+      const tk = token as Tokens.Em;
+      return `${ITALIC}${this.parser.parseInline(tk.tokens)}${RST}`;
     },
 
     codespan(token: unknown) {
-      const t = token as Tokens.Codespan;
-      return `${CODE_BG}${CYAN} ${t.text} ${RST}`;
+      const tk = token as Tokens.Codespan;
+      return `${CODE_BG}${CYAN} ${tk.text} ${RST}`;
     },
 
     del(this: { parser: { parseInline(tokens: Tokens.Generic[]): string } }, token: unknown) {
-      const t = token as Tokens.Del;
-      return `${STRIKETHROUGH}${this.parser.parseInline(t.tokens)}${RST}`;
+      const tk = token as Tokens.Del;
+      return `${STRIKETHROUGH}${this.parser.parseInline(tk.tokens)}${RST}`;
     },
 
     link(this: { parser: { parseInline(tokens: Tokens.Generic[]): string } }, token: unknown) {
-      const t = token as Tokens.Link;
-      const text = this.parser.parseInline(t.tokens);
-      return `${UNDERLINE}${BLUE}${text}${RST} ${DIM}(${t.href})${RST}`;
+      const tk = token as Tokens.Link;
+      const text = this.parser.parseInline(tk.tokens);
+      return `${UNDERLINE}${BLUE}${text}${RST} ${DIM}(${tk.href})${RST}`;
     },
 
     image(token: unknown) {
-      const t = token as Tokens.Image;
-      return `${DIM}[image: ${t.text ?? t.href}]${RST}`;
+      const tk = token as Tokens.Image;
+      return `${DIM}[image: ${tk.text ?? tk.href}]${RST}`;
     },
 
     br() {
@@ -142,16 +152,16 @@ export async function renderMarkdownToAnsi(markdown: string): Promise<string> {
     },
 
     html(token: unknown) {
-      const t = token as Tokens.HTML;
-      return t.text.replace(/<[^>]*>/g, "");
+      const tk = token as Tokens.HTML;
+      return tk.text.replace(/<[^>]*>/g, "");
     },
 
     text(this: { parser: { parseInline(tokens: Tokens.Generic[]): string } }, token: unknown) {
-      const t = token as Tokens.Text;
-      if ("tokens" in t && t.tokens) {
-        return this.parser.parseInline(t.tokens);
+      const tk = token as Tokens.Text;
+      if ("tokens" in tk && tk.tokens) {
+        return this.parser.parseInline(tk.tokens);
       }
-      return t.text;
+      return tk.text;
     },
 
     space() {
@@ -162,7 +172,6 @@ export async function renderMarkdownToAnsi(markdown: string): Promise<string> {
   const marked = new Marked({ renderer, async: false });
   let result = marked.parse(markdown) as string;
 
-  // Replace code block placeholders with shiki-highlighted code
   for (const block of codeBlocks) {
     try {
       const highlighted = await codeToAnsi(block.code, block.lang || undefined);
@@ -177,7 +186,6 @@ export async function renderMarkdownToAnsi(markdown: string): Promise<string> {
     }
   }
 
-  // Clean up excessive newlines
   result = result.replace(/\n{3,}/g, "\n\n").trim();
 
   return result;

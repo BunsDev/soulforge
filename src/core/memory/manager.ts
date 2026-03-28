@@ -16,6 +16,7 @@ export class MemoryManager {
   private cwd: string;
   private _scopeConfig: MemoryScopeConfig = { ...DEFAULT_CONFIG };
   private _settingsScope: SettingsScope = "project";
+  private _generation = 0;
 
   get scopeConfig(): MemoryScopeConfig {
     return this._scopeConfig;
@@ -114,11 +115,17 @@ export class MemoryManager {
     return [this.projectDb, this.globalDb];
   }
 
+  get generation(): number {
+    return this._generation;
+  }
+
   write(
     scope: MemoryScope,
     record: Omit<MemoryRecord, "id" | "created_at" | "updated_at"> & { id?: string },
   ): MemoryRecord {
-    return this.getDb(scope).write(record);
+    const result = this.getDb(scope).write(record);
+    this._generation++;
+    return result;
   }
 
   list(
@@ -149,7 +156,9 @@ export class MemoryManager {
   }
 
   delete(scope: MemoryScope, id: string): boolean {
-    return this.getDb(scope).delete(id);
+    const result = this.getDb(scope).delete(id);
+    if (result) this._generation++;
+    return result;
   }
 
   clearScope(scope: MemoryScope | "all"): number {
@@ -158,6 +167,7 @@ export class MemoryManager {
     for (const db of dbs) {
       cleared += db.deleteAll();
     }
+    if (cleared > 0) this._generation++;
     return cleared;
   }
 

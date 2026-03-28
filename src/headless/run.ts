@@ -452,7 +452,7 @@ export async function runPrompt(opts: HeadlessRunOptions, merged: AppConfig): Pr
     if (showProgress) {
       const shortId = savedId.slice(0, 8);
       process.stderr.write(
-        `${PURPLE}Resume:${RST} soulforge --headless --session ${shortId} "your next prompt"\n`,
+        `${PURPLE()}Resume:${RST} soulforge --headless --session ${shortId} "your next prompt"\n`,
       );
     }
   }
@@ -498,7 +498,7 @@ export async function runPrompt(opts: HeadlessRunOptions, merged: AppConfig): Pr
     if (!isQuiet) {
       if (turn.filesEdited.length > 0 && opts.diff) {
         separator();
-        process.stderr.write(`${PURPLE}Files changed:${RST}\n`);
+        process.stderr.write(`${PURPLE()}Files changed:${RST}\n`);
         for (const f of turn.filesEdited) process.stderr.write(`  ${f}\n`);
       }
       separator();
@@ -651,7 +651,7 @@ export async function runChat(opts: HeadlessChatOptions, merged: AppConfig): Pro
       if (savedId) {
         const shortId = savedId.slice(0, 8);
         process.stderr.write(
-          `${PURPLE}Resume:${RST} soulforge --headless --chat --session ${shortId}\n`,
+          `${PURPLE()}Resume:${RST} soulforge --headless --chat --session ${shortId}\n`,
         );
       }
     }
@@ -672,7 +672,7 @@ export async function runChat(opts: HeadlessChatOptions, merged: AppConfig): Pro
   });
 
   if (isEvents) writeEvent({ type: "ready" });
-  if (showProgress) process.stderr.write(`${PURPLE}▸${RST} `);
+  if (showProgress) process.stderr.write(`${PURPLE()}▸${RST} `);
 
   while (!aborted) {
     const prompt = await readPromptFromStdin();
@@ -753,7 +753,7 @@ export async function runChat(opts: HeadlessChatOptions, merged: AppConfig): Pro
         process.stderr.write(
           `${DIM}turn ${String(turns)} — ${String(turn.steps)} steps — ${formatTokens(turn.tokens)}${RST}\n`,
         );
-        if (!aborted) process.stderr.write(`${PURPLE}▸${RST} `);
+        if (!aborted) process.stderr.write(`${PURPLE()}▸${RST} `);
       }
     }
 

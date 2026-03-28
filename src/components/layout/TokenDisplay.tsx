@@ -1,5 +1,6 @@
 import { fg as fgStyle, StyledText, type TextRenderable } from "@opentui/core";
 import { useEffect, useRef } from "react";
+import { getThemeTokens } from "../../core/theme/index.js";
 import { computeTotalCostFromBreakdown, useStatusBarStore } from "../../stores/statusbar.js";
 
 const STEP_MS = 50;
@@ -17,9 +18,10 @@ function fmtCost(usd: number): string {
 }
 
 function buildContent(costCents: number, cacheHitPct: number): StyledText {
+  const tk = getThemeTokens();
   const cost = costCents / 100;
-  if (cost <= 0) return new StyledText([fgStyle("#333")("$0")]);
-  const color = cacheHitPct > 50 ? "#1a6" : "#999";
+  if (cost <= 0) return new StyledText([fgStyle(tk.textFaint)("$0")]);
+  const color = cacheHitPct > 50 ? tk.success : tk.textSecondary;
   return new StyledText([fgStyle(color)(fmtCost(cost))]);
 }
 

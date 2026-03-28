@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { getThemeTokens, useTheme } from "../../core/theme/index.js";
 import { useCompactionLogStore } from "../../stores/compaction-logs.js";
 import { timeAgo, truncLine } from "../../utils/time.js";
 import { LogViewer, type LogViewerConfig, type LogViewerEntry } from "./LogViewer.js";
@@ -17,33 +18,48 @@ interface CompactionEntry extends LogViewerEntry {
   summaryLength?: number;
 }
 
-const KIND_ICONS: Record<string, { icon: string; color: string }> = {
-  compact: { icon: "◆", color: "#9B30FF" },
-  "strategy-change": { icon: "⇄", color: "#f80" },
-  "auto-trigger": { icon: "⚡", color: "#2d5" },
-  error: { icon: "✗", color: "#FF0040" },
-};
+function getKindIcons(): Record<string, { icon: string; color: string }> {
+  const tk = getThemeTokens();
+  return {
+    compact: { icon: "◆", color: tk.brand },
+    "strategy-change": { icon: "⇄", color: tk.warning },
+    "auto-trigger": { icon: "⚡", color: tk.success },
+    error: { icon: "✗", color: tk.brandSecondary },
+  };
+}
 
 const COMPACTION_CONFIG: LogViewerConfig<CompactionEntry> = {
   title: "Compaction Log",
   titleIcon: "◆",
-  titleColor: "#336",
-  borderColor: "#336",
-  accentColor: "#336",
-  cursorColor: "#336",
+  get titleColor() {
+    return getThemeTokens().brandDim;
+  },
+  get borderColor() {
+    return getThemeTokens().brandDim;
+  },
+  get accentColor() {
+    return getThemeTokens().brandDim;
+  },
+  get cursorColor() {
+    return getThemeTokens().brandDim;
+  },
   heightRatio: 0.8,
   emptyMessage: "no compaction events yet",
   emptyFilterMessage: "no matching events",
   filterPlaceholder: "type to filter...",
   countLabel: (n) => `${String(n)} ${n === 1 ? "event" : "events"}`,
-  detailSectionColor: "#336",
+  get detailSectionColor() {
+    return getThemeTokens().brandDim;
+  },
   filterFn: (e, q) =>
     e.kind.includes(q) ||
     e.message.toLowerCase().includes(q) ||
     (e.model?.toLowerCase().includes(q) ?? false) ||
     (e.summarySnippet?.toLowerCase().includes(q) ?? false),
   renderListRow: (entry, innerW) => {
-    const kindInfo = KIND_ICONS[entry.kind] ?? { icon: "•", color: "#aaa" };
+    const tk = getThemeTokens();
+    const kindIcons = getKindIcons();
+    const kindInfo = kindIcons[entry.kind] ?? { icon: "•", color: tk.textSecondary };
     const kindLabel = entry.kind.padEnd(16);
     const ts = timeAgo(entry.timestamp);
     const modelStr = entry.model ? ` [${entry.model}]` : "";
@@ -54,18 +70,20 @@ const COMPACTION_CONFIG: LogViewerConfig<CompactionEntry> = {
       label: kindLabel,
       summary: truncLine(entry.message, summaryMax),
       extra: modelStr || undefined,
-      extraColor: "#9B30FF",
+      extraColor: tk.brand,
       timeStr: ts,
     };
   },
   getDetailHeader: (entry) => {
-    const kindInfo = KIND_ICONS[entry.kind] ?? { icon: "•", color: "#aaa" };
+    const tk = getThemeTokens();
+    const kindIcons = getKindIcons();
+    const kindInfo = kindIcons[entry.kind] ?? { icon: "•", color: tk.textSecondary };
     return {
       icon: kindInfo.icon,
       iconColor: kindInfo.color,
       label: entry.kind,
       sublabel: entry.model,
-      sublabelColor: "#9B30FF",
+      sublabelColor: tk.brand,
       timeStr: timeAgo(entry.timestamp),
     };
   },
@@ -100,6 +118,7 @@ interface Props {
 }
 
 export function CompactionLog({ visible, onClose }: Props) {
+  useTheme();
   const storeEntries = useCompactionLogStore((s) => s.entries);
   const entries = useMemo(
     () =>

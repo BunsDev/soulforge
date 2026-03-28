@@ -10,6 +10,7 @@ import type { ProviderStatus } from "../../core/llm/provider.js";
 import { clearTabSessionPatterns } from "../../core/security/forbidden.js";
 import type { SessionManager } from "../../core/sessions/manager.js";
 import type { PrerequisiteStatus } from "../../core/setup/prerequisites.js";
+import { type ThemeTokens, useTheme } from "../../core/theme/index.js";
 import { clearEditStacks } from "../../core/tools/edit-stack.js";
 import { planFileName } from "../../core/tools/index.js";
 import { disposeTaskScope, setActiveTaskTab } from "../../core/tools/task-list.js";
@@ -75,13 +76,15 @@ interface TabInstanceProps {
 const MAX_RENDERED = 60;
 const SCROLLBOX_STYLE = { contentOptions: { justifyContent: "flex-end" as const } };
 const SCROLLBAR_HIDDEN = { visible: false } as const;
-const SCROLLBAR_VISIBLE = {
-  visible: true,
-  trackOptions: {
-    foregroundColor: "#555",
-    backgroundColor: "#222",
-  },
-} as const;
+function getScrollbarVisible(tk: ThemeTokens) {
+  return {
+    visible: true as const,
+    trackOptions: {
+      foregroundColor: tk.textMuted,
+      backgroundColor: tk.textSubtle,
+    },
+  };
+}
 
 export const TabInstance = memo(function TabInstance({
   tabId,
@@ -117,6 +120,7 @@ export const TabInstance = memo(function TabInstance({
   editorVisualSelection,
   clearEditorSelection,
 }: TabInstanceProps) {
+  const t = useTheme();
   const scrollRef = useRef<ScrollBoxRenderable>(null);
 
   // Per-tab ContextManager sharing expensive resources
@@ -452,14 +456,14 @@ export const TabInstance = memo(function TabInstance({
               flexShrink={1}
               minHeight={0}
               style={SCROLLBOX_STYLE}
-              verticalScrollbarOptions={scrollbarReady ? SCROLLBAR_VISIBLE : SCROLLBAR_HIDDEN}
+              verticalScrollbarOptions={scrollbarReady ? getScrollbarVisible(t) : SCROLLBAR_HIDDEN}
               horizontalScrollbarOptions={SCROLLBAR_HIDDEN}
             >
               <CodeExpandedProvider value={codeExpanded}>
                 <ReasoningExpandedProvider value={reasoningExpanded}>
                   {hiddenCount > 0 && (
                     <box paddingX={1} marginBottom={1}>
-                      <text fg="#444">
+                      <text fg={t.textDim}>
                         ── {String(hiddenCount)} earlier message{hiddenCount > 1 ? "s" : ""} ──
                       </text>
                     </box>
@@ -480,12 +484,12 @@ export const TabInstance = memo(function TabInstance({
                       <box
                         flexDirection="column"
                         border={["left"]}
-                        borderColor="#9B30FF"
+                        borderColor={t.brand}
                         customBorderChars={RAIL_BORDER}
                         paddingLeft={2}
                       >
                         <box>
-                          <text fg="#9B30FF">{icon("ai")} Forge</text>
+                          <text fg={t.brand}>{icon("ai")} Forge</text>
                         </box>
                         <StreamSegmentList
                           segments={chat.streamSegments}
@@ -567,10 +571,14 @@ export const TabInstance = memo(function TabInstance({
                   const extraLines = latest.split("\n").length - 1;
                   const prevCount = chat.messageQueue.length - 1;
                   return (
-                    <text fg="#FF8C00" truncate>
+                    <text fg={t.warning} truncate>
                       │ Steering: {firstLine}
-                      {extraLines > 0 && <span fg="#666"> (+{String(extraLines)} lines)</span>}
-                      {prevCount > 0 && <span fg="#666"> (+{String(prevCount)} queued)</span>}
+                      {extraLines > 0 && (
+                        <span fg={t.textMuted}> (+{String(extraLines)} lines)</span>
+                      )}
+                      {prevCount > 0 && (
+                        <span fg={t.textMuted}> (+{String(prevCount)} queued)</span>
+                      )}
                     </text>
                   );
                 })()}

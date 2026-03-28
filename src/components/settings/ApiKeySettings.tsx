@@ -15,6 +15,7 @@ import {
   setDefaultKeyPriority,
   setSecret,
 } from "../../core/secrets.js";
+import { useTheme } from "../../core/theme/index.js";
 import { Overlay, POPUP_BG, POPUP_HL, PopupRow } from "../layout/shared.js";
 
 const MAX_POPUP_WIDTH = 72;
@@ -125,6 +126,7 @@ export function ApiKeySettings({ visible, onClose }: Props) {
   const innerW = popupWidth - 2;
   const maxVisible = Math.max(4, Math.floor((termRows - 2) * 0.8) - CHROME_ROWS);
 
+  const t = useTheme();
   const keys = useApiKeyStore((s) => s.keys);
   const priority = useApiKeyStore((s) => s.priority);
   const refresh = useApiKeyStore((s) => s.refresh);
@@ -307,28 +309,28 @@ export function ApiKeySettings({ visible, onClose }: Props) {
           flexDirection="column"
           borderStyle="rounded"
           border={true}
-          borderColor="#8B5CF6"
+          borderColor={t.brandAlt}
           width={popupWidth}
         >
           <PopupRow w={innerW}>
-            <text bg={POPUP_BG} fg="#9B30FF" attributes={TextAttributes.BOLD}>
+            <text bg={POPUP_BG} fg={t.brand} attributes={TextAttributes.BOLD}>
               {icon("key") ?? ""}
             </text>
-            <text bg={POPUP_BG} fg="white" attributes={TextAttributes.BOLD}>
+            <text bg={POPUP_BG} fg={t.textPrimary} attributes={TextAttributes.BOLD}>
               {" "}
               {target?.label ?? "API Key"}
             </text>
           </PopupRow>
 
           <PopupRow w={innerW}>
-            <text bg={POPUP_BG} fg="#333">
+            <text bg={POPUP_BG} fg={t.textFaint}>
               {"─".repeat(innerW - 2)}
             </text>
           </PopupRow>
 
           {existingSources?.env && (
             <PopupRow w={innerW}>
-              <text bg={POPUP_BG} fg="#FF8C00">
+              <text bg={POPUP_BG} fg={t.warning}>
                 env var already set — this will add an app key
                 {priority === "app" ? " (takes priority)" : " (env takes priority)"}
               </text>
@@ -336,28 +338,28 @@ export function ApiKeySettings({ visible, onClose }: Props) {
           )}
 
           <PopupRow w={innerW}>
-            <text bg={POPUP_BG} fg="#888">
+            <text bg={POPUP_BG} fg={t.textSecondary}>
               Paste your key:
             </text>
           </PopupRow>
 
           <PopupRow w={innerW}>
-            <text bg="#1a1a2e" fg="#8B5CF6">
+            <text bg={t.bgPopupHighlight} fg={t.brandAlt}>
               {masked || " "}
             </text>
-            <text bg="#1a1a2e" fg="#FF0040">
+            <text bg={t.bgPopupHighlight} fg={t.brandSecondary}>
               _
             </text>
           </PopupRow>
 
           <PopupRow w={innerW}>
-            <text bg={POPUP_BG} fg="#333">
+            <text bg={POPUP_BG} fg={t.textFaint}>
               {"─".repeat(innerW - 2)}
             </text>
           </PopupRow>
 
           <PopupRow w={innerW}>
-            <text bg={POPUP_BG} fg="#555">
+            <text bg={POPUP_BG} fg={t.textMuted}>
               {"⏎"} save | esc cancel | stored in {backendLabel}
             </text>
           </PopupRow>
@@ -372,31 +374,31 @@ export function ApiKeySettings({ visible, onClose }: Props) {
         flexDirection="column"
         borderStyle="rounded"
         border={true}
-        borderColor="#8B5CF6"
+        borderColor={t.brandAlt}
         width={popupWidth}
       >
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#9B30FF" attributes={TextAttributes.BOLD}>
+          <text bg={POPUP_BG} fg={t.brand} attributes={TextAttributes.BOLD}>
             {icon("key") ?? ""}
           </text>
-          <text bg={POPUP_BG} fg="white" attributes={TextAttributes.BOLD}>
+          <text bg={POPUP_BG} fg={t.textPrimary} attributes={TextAttributes.BOLD}>
             {" "}
             API Keys
           </text>
-          <text bg={POPUP_BG} fg="#555">
+          <text bg={POPUP_BG} fg={t.textMuted}>
             {`  ${String(configuredCount)}/${String(KEY_ITEMS.length)} configured`}
           </text>
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#333">
+          <text bg={POPUP_BG} fg={t.textFaint}>
             {"─".repeat(innerW - 2)}
           </text>
         </PopupRow>
 
         {/* Priority setting */}
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#888" attributes={TextAttributes.BOLD}>
+          <text bg={POPUP_BG} fg={t.textSecondary} attributes={TextAttributes.BOLD}>
             Resolution Priority
           </text>
         </PopupRow>
@@ -409,10 +411,10 @@ export function ApiKeySettings({ visible, onClose }: Props) {
           if (mi.type === "priority") {
             return (
               <PopupRow key="priority" w={innerW}>
-                <text bg={bg} fg={isSelected ? "white" : "#ccc"}>
+                <text bg={bg} fg={isSelected ? "white" : t.textPrimary}>
                   {isSelected ? "›" : " "} Priority
                 </text>
-                <text bg={bg} fg={priority === "app" ? "#FF8C00" : "#2d9bf0"}>
+                <text bg={bg} fg={priority === "app" ? t.warning : t.info}>
                   {" "}
                   [{priorityLabel}]
                 </text>
@@ -423,7 +425,7 @@ export function ApiKeySettings({ visible, onClose }: Props) {
           if (mi.type === "action") {
             return (
               <PopupRow key={mi.id} w={innerW}>
-                <text bg={bg} fg={isSelected ? "#FF0040" : "#555"}>
+                <text bg={bg} fg={isSelected ? t.brandSecondary : t.textMuted}>
                   {isSelected ? "›" : " "}
                   {"    "}
                   {mi.label}
@@ -439,10 +441,10 @@ export function ApiKeySettings({ visible, onClose }: Props) {
 
           return (
             <PopupRow key={item.id} w={innerW}>
-              <text bg={bg} fg={isSelected ? "white" : "#ccc"}>
+              <text bg={bg} fg={isSelected ? "white" : t.textPrimary}>
                 {isSelected ? "›" : " "} {item.label}
               </text>
-              <text bg={bg} fg={hasAny ? "#2d5" : "#555"}>
+              <text bg={bg} fg={hasAny ? t.success : t.textMuted}>
                 {" "}
                 {badges}
               </text>
@@ -455,7 +457,7 @@ export function ApiKeySettings({ visible, onClose }: Props) {
           if (selected?.type === "key") {
             return (
               <PopupRow w={innerW}>
-                <text bg={POPUP_BG} fg="#555">
+                <text bg={POPUP_BG} fg={t.textMuted}>
                   {"   "}
                   {selected.item.desc}
                 </text>
@@ -465,7 +467,7 @@ export function ApiKeySettings({ visible, onClose }: Props) {
           if (selected?.type === "priority") {
             return (
               <PopupRow w={innerW}>
-                <text bg={POPUP_BG} fg="#555">
+                <text bg={POPUP_BG} fg={t.textMuted}>
                   {"   "}
                   {priority === "env" ? "env vars override app keys" : "app keys override env vars"}
                 </text>
@@ -477,7 +479,7 @@ export function ApiKeySettings({ visible, onClose }: Props) {
 
         {menuItems.length > maxVisible && (
           <PopupRow w={innerW}>
-            <text bg={POPUP_BG} fg="#555">
+            <text bg={POPUP_BG} fg={t.textMuted}>
               {`  ${String(effectiveScrollOffset + 1)}-${String(Math.min(effectiveScrollOffset + maxVisible, menuItems.length))}/${String(menuItems.length)}`}
             </text>
           </PopupRow>
@@ -485,7 +487,7 @@ export function ApiKeySettings({ visible, onClose }: Props) {
 
         {statusMsg && (
           <PopupRow w={innerW}>
-            <text bg={POPUP_BG} fg="#FF9500">
+            <text bg={POPUP_BG} fg={t.warning}>
               {" "}
               {statusMsg}
             </text>
@@ -493,19 +495,19 @@ export function ApiKeySettings({ visible, onClose }: Props) {
         )}
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#333">
+          <text bg={POPUP_BG} fg={t.textFaint}>
             {"─".repeat(innerW - 2)}
           </text>
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#555">
+          <text bg={POPUP_BG} fg={t.textMuted}>
             {"↑↓ navigate  ↵ set/toggle  esc close"}
           </text>
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#555">
+          <text bg={POPUP_BG} fg={t.textMuted}>
             {"[active] (available)  Storage: "}
             {backendLabel}
           </text>

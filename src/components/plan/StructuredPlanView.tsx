@@ -1,30 +1,18 @@
 import { TextAttributes } from "@opentui/core";
+import { type ThemeTokens, useTheme } from "../../core/theme/index.js";
 import type { PlanOutput } from "../../types/index.js";
 
-const BORDER = "#333";
-const TITLE_COLOR = "#00BFFF";
-const SECTION_COLOR = "#8B5CF6";
-const FILE_PATH_COLOR = "#ccc";
-const STEP_NUM_COLOR = "#8B5CF6";
-const TEXT_COLOR = "#bbb";
-const CHECK_COLOR = "#4a7";
-
-const ACTION_COLORS: Record<string, string> = {
-  create: "#4a7",
-  modify: "#c89030",
-  delete: "#a55",
-};
+function getActionColors(t: ThemeTokens): Record<string, string> {
+  return { create: t.success, modify: t.amber, delete: t.error };
+}
 const ACTION_ICONS: Record<string, string> = {
   create: "+",
   modify: "~",
   delete: "-",
 };
-const SYMBOL_ACTION_COLORS: Record<string, string> = {
-  add: "#4a7",
-  modify: "#c89030",
-  remove: "#a55",
-  rename: "#5af",
-};
+function getSymbolActionColors(t: ThemeTokens): Record<string, string> {
+  return { add: t.success, modify: t.amber, remove: t.error, rename: t.info };
+}
 
 const MAX_VISIBLE = 5;
 
@@ -36,6 +24,14 @@ interface Props {
 }
 
 export function StructuredPlanView({ plan, result, planFile, collapsed }: Props) {
+  const t = useTheme();
+  const BORDER = t.textFaint;
+  const TITLE_COLOR = t.info;
+  const SECTION_COLOR = t.brandAlt;
+  const FILE_PATH_COLOR = t.textPrimary;
+  const STEP_NUM_COLOR = t.brandAlt;
+  const TEXT_COLOR = t.textSecondary;
+  const CHECK_COLOR = t.success;
   const files = plan.files ?? [];
   const steps = plan.steps ?? [];
   const verification = plan.verification ?? [];
@@ -57,8 +53,8 @@ export function StructuredPlanView({ plan, result, planFile, collapsed }: Props)
     isRevised && result ? result.replace("User wants changes to the plan: ", "") : null;
   const isRejected = isCancelled || isRevised;
 
-  const borderColor = isRejected ? "#222" : BORDER;
-  const titleColor = isRejected ? "#555" : TITLE_COLOR;
+  const borderColor = isRejected ? t.textSubtle : BORDER;
+  const titleColor = isRejected ? t.textMuted : TITLE_COLOR;
 
   if (collapsed) {
     const files = plan.files ?? [];
@@ -70,15 +66,15 @@ export function StructuredPlanView({ plan, result, planFile, collapsed }: Props)
           <span fg={TITLE_COLOR} attributes={TextAttributes.BOLD}>
             {plan.title}
           </span>
-          <span fg="#555">
+          <span fg={t.textMuted}>
             {" "}
             ({String(files.length)} file{files.length !== 1 ? "s" : ""}, {String(steps.length)} step
             {steps.length !== 1 ? "s" : ""})
           </span>
           {resolvedFile ? (
             <>
-              <span fg="#333"> ─ </span>
-              <span fg="#555">{resolvedFile}</span>
+              <span fg={t.textFaint}> ─ </span>
+              <span fg={t.textMuted}>{resolvedFile}</span>
             </>
           ) : null}
         </text>
@@ -99,7 +95,7 @@ export function StructuredPlanView({ plan, result, planFile, collapsed }: Props)
           height={1}
           flexShrink={0}
           paddingX={1}
-          backgroundColor="#1a1a1a"
+          backgroundColor={t.bgSecondary}
           alignSelf="flex-start"
           marginTop={-1}
         >
@@ -110,19 +106,19 @@ export function StructuredPlanView({ plan, result, planFile, collapsed }: Props)
             </span>
             {resolvedFile ? (
               <>
-                <span fg="#333"> ─ </span>
-                <span fg="#444">{resolvedFile}</span>
+                <span fg={t.textFaint}> ─ </span>
+                <span fg={t.textDim}>{resolvedFile}</span>
               </>
             ) : null}
           </text>
         </box>
         <box paddingX={1}>
           {isCancelled ? (
-            <text fg="#f44">✗ Plan cancelled</text>
+            <text fg={t.error}>✗ Plan cancelled</text>
           ) : (
             <text>
-              <span fg="#FF8C00">↻ Revision requested: </span>
-              <span fg="#bbb">{reviseFeedback}</span>
+              <span fg={t.warning}>↻ Revision requested: </span>
+              <span fg={t.textSecondary}>{reviseFeedback}</span>
             </text>
           )}
         </box>
@@ -136,7 +132,7 @@ export function StructuredPlanView({ plan, result, planFile, collapsed }: Props)
         height={1}
         flexShrink={0}
         paddingX={1}
-        backgroundColor="#1a1a1a"
+        backgroundColor={t.bgSecondary}
         alignSelf="flex-start"
         marginTop={-1}
       >
@@ -147,8 +143,8 @@ export function StructuredPlanView({ plan, result, planFile, collapsed }: Props)
           </span>
           {resolvedFile ? (
             <>
-              <span fg="#333"> ─ </span>
-              <span fg="#555">{resolvedFile}</span>
+              <span fg={t.textFaint}> ─ </span>
+              <span fg={t.textMuted}>{resolvedFile}</span>
             </>
           ) : null}
         </text>
@@ -173,30 +169,32 @@ export function StructuredPlanView({ plan, result, planFile, collapsed }: Props)
             <span fg={SECTION_COLOR} attributes={TextAttributes.BOLD}>
               Files
             </span>
-            <span fg="#555"> ({String(files.length)})</span>
+            <span fg={t.textMuted}> ({String(files.length)})</span>
           </text>
           {files.slice(0, MAX_VISIBLE).map((f) => (
             <box key={f.path} flexDirection="column">
               <text>
-                <span fg={ACTION_COLORS[f.action] ?? "#888"}>{ACTION_ICONS[f.action] ?? "?"} </span>
+                <span fg={getActionColors(t)[f.action] ?? t.textSecondary}>
+                  {ACTION_ICONS[f.action] ?? "?"}{" "}
+                </span>
                 <span fg={FILE_PATH_COLOR}>{f.path}</span>
               </text>
-              <text fg="#777">
+              <text fg={t.textMuted}>
                 {"   "}
                 {f.description}
               </text>
               {f.symbols?.map((s, si) => (
-                <text key={`${f.path}-s${String(si)}`} fg="#666">
+                <text key={`${f.path}-s${String(si)}`} fg={t.textMuted}>
                   {"     "}
-                  <span fg={SYMBOL_ACTION_COLORS[s.action] ?? "#888"}>{s.action}</span>{" "}
-                  <span fg="#aaa">{s.name}</span>
-                  <span fg="#555"> ({s.kind})</span>
+                  <span fg={getSymbolActionColors(t)[s.action] ?? t.textSecondary}>{s.action}</span>{" "}
+                  <span fg={t.textSecondary}>{s.name}</span>
+                  <span fg={t.textMuted}> ({s.kind})</span>
                 </text>
               ))}
             </box>
           ))}
           {files.length > MAX_VISIBLE && (
-            <text fg="#555">+{String(files.length - MAX_VISIBLE)} more</text>
+            <text fg={t.textMuted}>+{String(files.length - MAX_VISIBLE)} more</text>
           )}
         </box>
       )}
@@ -207,7 +205,7 @@ export function StructuredPlanView({ plan, result, planFile, collapsed }: Props)
             <span fg={SECTION_COLOR} attributes={TextAttributes.BOLD}>
               Steps
             </span>
-            <span fg="#555"> ({String(steps.length)})</span>
+            <span fg={t.textMuted}> ({String(steps.length)})</span>
           </text>
           {steps.slice(0, MAX_VISIBLE).map((s, i) => (
             <text key={s.id}>
@@ -216,7 +214,7 @@ export function StructuredPlanView({ plan, result, planFile, collapsed }: Props)
             </text>
           ))}
           {steps.length > MAX_VISIBLE && (
-            <text fg="#555">+{String(steps.length - MAX_VISIBLE)} more</text>
+            <text fg={t.textMuted}>+{String(steps.length - MAX_VISIBLE)} more</text>
           )}
         </box>
       )}

@@ -8,7 +8,6 @@ import { logBackgroundError } from "../../stores/errors.js";
 import type { AgentFeatures } from "../../types/index.js";
 import { getWorkspaceCoordinator } from "../coordination/WorkspaceCoordinator.js";
 import { getModelContextWindow } from "../llm/models.js";
-import { isAnthropicNative } from "../llm/provider-options.js";
 import { isForbidden } from "../security/forbidden.js";
 // detectModelFamily removed — subagent pruning is now always disabled
 import { getActiveTaskTab } from "../tools/task-list.js";
@@ -185,10 +184,9 @@ export function createAgent(
   const modelId =
     typeof model === "object" && "modelId" in model ? String(model.modelId) : "unknown";
 
-  // miniForge: share forge system prompt for Anthropic prefix cache hits.
+  // miniForge: share forge system prompt for prefix cache hits across all providers.
   // Trivial tier uses a cheaper model (different cache namespace), so skip.
-  const useMiniForge =
-    models.forgeInstructions != null && isAnthropicNative(modelId) && tier !== "trivial";
+  const useMiniForge = models.forgeInstructions != null && tier !== "trivial";
 
   let subagentProviderOptions = useMiniForge
     ? models.providerOptions

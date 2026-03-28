@@ -3,7 +3,7 @@ import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useCallback, useEffect, useState } from "react";
 import { getGitDiff, getGitStatus, gitAdd, gitCommit } from "../../core/git/status.js";
 import { icon } from "../../core/icons.js";
-
+import { useTheme } from "../../core/theme/index.js";
 import { Overlay, POPUP_BG, POPUP_HL, PopupRow } from "../layout/shared.js";
 
 const MAX_POPUP_WIDTH = 64;
@@ -18,6 +18,7 @@ interface Props {
 }
 
 export function GitCommitModal({ visible, cwd, coAuthor, onClose, onCommitted, onRefresh }: Props) {
+  const t = useTheme();
   const { width: termCols } = useTerminalDimensions();
   const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.8));
   const innerW = popupWidth - 2;
@@ -106,59 +107,62 @@ export function GitCommitModal({ visible, cwd, coAuthor, onClose, onCommitted, o
         flexDirection="column"
         borderStyle="rounded"
         border={true}
-        borderColor="#FF8C00"
+        borderColor={t.warning}
         width={popupWidth}
         backgroundColor={POPUP_BG}
       >
         <PopupRow w={innerW}>
-          <text fg="white" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
+          <text fg={t.textPrimary} attributes={TextAttributes.BOLD} bg={POPUP_BG}>
             {icon("git")} Git Commit
           </text>
         </PopupRow>
         <PopupRow w={innerW}>
-          <text fg="#333" bg={POPUP_BG}>
+          <text fg={t.textFaint} bg={POPUP_BG}>
             {"─".repeat(innerW - 4)}
           </text>
         </PopupRow>
 
         {stagedFiles.length > 0 && (
           <PopupRow w={innerW}>
-            <text fg="#2d5" bg={POPUP_BG}>
+            <text fg={t.success} bg={POPUP_BG}>
               ● {String(stagedFiles.length)} staged
             </text>
           </PopupRow>
         )}
         {modifiedFiles.length > 0 && (
           <PopupRow w={innerW}>
-            <text fg="#FF8C00" bg={POPUP_BG}>
+            <text fg={t.warning} bg={POPUP_BG}>
               ● {String(modifiedFiles.length)} modified
             </text>
           </PopupRow>
         )}
         {untrackedFiles.length > 0 && (
           <PopupRow w={innerW}>
-            <text fg="#f44" bg={POPUP_BG}>
+            <text fg={t.error} bg={POPUP_BG}>
               ● {String(untrackedFiles.length)} untracked
             </text>
           </PopupRow>
         )}
         {totalChanges === 0 && (
           <PopupRow w={innerW}>
-            <text fg="#555" bg={POPUP_BG}>
+            <text fg={t.textMuted} bg={POPUP_BG}>
               No changes to commit
             </text>
           </PopupRow>
         )}
 
         <PopupRow w={innerW}>
-          <text fg="#555" bg={POPUP_BG}>
+          <text fg={t.textMuted} bg={POPUP_BG}>
             {diffSummary}
           </text>
         </PopupRow>
 
         {(modifiedFiles.length > 0 || untrackedFiles.length > 0) && (
           <PopupRow w={innerW} bg={stageAll ? POPUP_HL : POPUP_BG}>
-            <text fg={stageAll ? "#FF0040" : "#666"} bg={stageAll ? POPUP_HL : POPUP_BG}>
+            <text
+              fg={stageAll ? t.brandSecondary : t.textMuted}
+              bg={stageAll ? POPUP_HL : POPUP_BG}
+            >
               [Tab] {stageAll ? "✓" : "○"} Stage all changes
             </text>
           </PopupRow>
@@ -169,7 +173,7 @@ export function GitCommitModal({ visible, cwd, coAuthor, onClose, onCommitted, o
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text fg="#aaa" bg={POPUP_BG}>
+          <text fg={t.textSecondary} bg={POPUP_BG}>
             Message:
           </text>
         </PopupRow>
@@ -177,7 +181,7 @@ export function GitCommitModal({ visible, cwd, coAuthor, onClose, onCommitted, o
           <box
             borderStyle="rounded"
             border={true}
-            borderColor="#6A0DAD"
+            borderColor={t.brandDim}
             paddingX={1}
             width={innerW - 2}
             backgroundColor={POPUP_BG}
@@ -195,7 +199,7 @@ export function GitCommitModal({ visible, cwd, coAuthor, onClose, onCommitted, o
 
         {error && (
           <PopupRow w={innerW}>
-            <text fg="#f44" bg={POPUP_BG}>
+            <text fg={t.error} bg={POPUP_BG}>
               {error}
             </text>
           </PopupRow>
@@ -205,7 +209,7 @@ export function GitCommitModal({ visible, cwd, coAuthor, onClose, onCommitted, o
           <text>{""}</text>
         </PopupRow>
         <PopupRow w={innerW}>
-          <text fg="#555" bg={POPUP_BG}>
+          <text fg={t.textMuted} bg={POPUP_BG}>
             {"⏎"} commit | tab stage-all | esc cancel
           </text>
         </PopupRow>

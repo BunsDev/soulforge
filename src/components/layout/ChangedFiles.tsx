@@ -1,6 +1,7 @@
 import { basename, relative } from "node:path";
 import { useMemo } from "react";
 import { icon } from "../../core/icons.js";
+import { useTheme } from "../../core/theme/index.js";
 import type { ChatMessage } from "../../types/index.js";
 
 interface FileEntry {
@@ -50,6 +51,7 @@ interface BarProps {
 }
 
 export function ChangedFilesBar({ messages }: BarProps) {
+  const t = useTheme();
   const files = useChangedFiles(messages);
   if (files.length === 0) return null;
 
@@ -61,19 +63,19 @@ export function ChangedFilesBar({ messages }: BarProps) {
   return (
     <box height={1} paddingX={1}>
       <text truncate>
-        <span fg="#555">{icon("changes")} </span>
-        {created > 0 && <span fg="#5a8">+{String(created)} </span>}
-        {modified > 0 && <span fg="#b87333">~{String(modified)} </span>}
-        <span fg="#333">│ </span>
+        <span fg={t.textMuted}>{icon("changes")} </span>
+        {created > 0 && <span fg={t.success}>+{String(created)} </span>}
+        {modified > 0 && <span fg={t.amber}>~{String(modified)} </span>}
+        <span fg={t.textFaint}>│ </span>
         {preview.map((f, i) => (
           <span key={f.path}>
-            {i > 0 ? <span fg="#333"> </span> : null}
-            <span fg={f.created ? "#5a8" : "#b87333"}>{basename(f.path)}</span>
+            {i > 0 ? <span fg={t.textFaint}> </span> : null}
+            <span fg={f.created ? t.success : t.amber}>{basename(f.path)}</span>
           </span>
         ))}
-        {remaining > 0 && <span fg="#444"> +{String(remaining)}</span>}
-        <span fg="#333"> │ </span>
-        <span fg="#444">/changes</span>
+        {remaining > 0 && <span fg={t.textDim}> +{String(remaining)}</span>}
+        <span fg={t.textFaint}> │ </span>
+        <span fg={t.textDim}>/changes</span>
       </text>
     </box>
   );
@@ -174,6 +176,7 @@ interface PanelProps {
 }
 
 export function ChangesPanel({ messages, cwd }: PanelProps) {
+  const t = useTheme();
   const files = useChangedFiles(messages);
 
   const rows = useMemo(() => {
@@ -186,19 +189,25 @@ export function ChangesPanel({ messages, cwd }: PanelProps) {
   const modified = files.length - created;
 
   return (
-    <box flexDirection="column" width="20%" borderStyle="rounded" border={true} borderColor="#333">
+    <box
+      flexDirection="column"
+      width="20%"
+      borderStyle="rounded"
+      border={true}
+      borderColor={t.textFaint}
+    >
       <box height={1} flexShrink={0} paddingX={1} marginTop={-1}>
         <text>
-          <span fg="#8B5CF6">{icon("changes")}</span>
-          <span fg="#888"> Changes </span>
-          {created > 0 && <span fg="#5a8">+{String(created)}</span>}
-          {created > 0 && modified > 0 && <span fg="#444"> </span>}
-          {modified > 0 && <span fg="#b87333">~{String(modified)}</span>}
+          <span fg={t.brandAlt}>{icon("changes")}</span>
+          <span fg={t.textSecondary}> Changes </span>
+          {created > 0 && <span fg={t.success}>+{String(created)}</span>}
+          {created > 0 && modified > 0 && <span fg={t.textDim}> </span>}
+          {modified > 0 && <span fg={t.amber}>~{String(modified)}</span>}
         </text>
       </box>
       {files.length === 0 ? (
         <box paddingX={1} paddingY={1}>
-          <text fg="#444">No changes yet</text>
+          <text fg={t.textDim}>No changes yet</text>
         </box>
       ) : (
         <scrollbox flexGrow={1} flexShrink={1} minHeight={0}>
@@ -208,9 +217,9 @@ export function ChangesPanel({ messages, cwd }: PanelProps) {
               return (
                 <box key={`d-${row.name}-${String(i)}`} paddingLeft={1} height={1}>
                   <text truncate>
-                    <span fg="#333">{prefix}</span>
-                    <span fg="#8B5CF6">{icon("folder")}</span>
-                    <span fg="#777"> {row.name}</span>
+                    <span fg={t.textFaint}>{prefix}</span>
+                    <span fg={t.brandAlt}>{icon("folder")}</span>
+                    <span fg={t.textMuted}> {row.name}</span>
                   </text>
                 </box>
               );
@@ -218,15 +227,15 @@ export function ChangesPanel({ messages, cwd }: PanelProps) {
             const f = row.file;
             const isNew = f?.created ?? false;
             const statusIcon = isNew ? "A" : "M";
-            const statusColor = isNew ? "#5a8" : "#b87333";
-            const nameColor = isNew ? "#7cb" : "#bbb";
+            const statusColor = isNew ? t.success : t.amber;
+            const nameColor = isNew ? t.info : t.textSecondary;
             return (
               <box key={f?.path ?? `f-${String(i)}`} paddingLeft={1} height={1}>
                 <text truncate>
-                  <span fg="#333">{prefix}</span>
+                  <span fg={t.textFaint}>{prefix}</span>
                   <span fg={statusColor}>{statusIcon} </span>
                   <span fg={nameColor}>{row.name}</span>
-                  {f && f.editCount > 1 && <span fg="#555"> ×{String(f.editCount)}</span>}
+                  {f && f.editCount > 1 && <span fg={t.textMuted}> ×{String(f.editCount)}</span>}
                 </text>
               </box>
             );

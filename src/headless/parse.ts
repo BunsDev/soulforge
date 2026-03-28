@@ -49,7 +49,7 @@ export async function parseHeadlessArgs(argv: string[]): Promise<HeadlessAction 
     const provider = argv[idx + 1];
     const key = argv[idx + 2];
     if (!provider || !key) {
-      process.stderr.write(`${RED}Error:${RST} --set-key requires <provider> <key>\n`);
+      process.stderr.write(`${RED()}Error:${RST} --set-key requires <provider> <key>\n`);
       process.stderr.write(
         `Providers: ${getAllProviders()
           .map((p) => p.id)
@@ -95,7 +95,7 @@ export async function parseHeadlessArgs(argv: string[]): Promise<HeadlessAction 
     } else if (arg === "--mode" && argv[i + 1]) {
       const m = argv[++i] as ForgeMode;
       if (!VALID_MODES.includes(m)) {
-        process.stderr.write(`${RED}Error:${RST} Unknown mode "${m}"\n`);
+        process.stderr.write(`${RED()}Error:${RST} Unknown mode "${m}"\n`);
         process.stderr.write(`Valid: ${VALID_MODES.join(", ")}\n`);
         process.exit(EXIT_ERROR);
       }

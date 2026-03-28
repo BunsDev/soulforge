@@ -1,5 +1,6 @@
 import { TextAttributes } from "@opentui/core";
 import { icon } from "../../core/icons.js";
+import { useTheme } from "../../core/theme/index.js";
 import type { Task } from "../../core/tools/task-list.js";
 import type { Plan, PlanStepStatus } from "../../types/index.js";
 import { Spinner } from "../layout/shared.js";
@@ -12,13 +13,6 @@ const STATUS_ICONS: Record<PlanStepStatus, () => string> = {
   skipped: () => icon("skip"),
 };
 
-const STATUS_COLORS: Record<PlanStepStatus, string> = {
-  done: "#4a7",
-  active: "#9B30FF",
-  pending: "#555",
-  skipped: "#444",
-};
-
 const MAX_VISIBLE = 7;
 
 interface Props {
@@ -27,6 +21,13 @@ interface Props {
 }
 
 export function PlanProgress({ plan, tasks }: Props) {
+  const t = useTheme();
+  const STATUS_COLORS: Record<PlanStepStatus, string> = {
+    done: t.success,
+    active: t.brand,
+    pending: t.textMuted,
+    skipped: t.textDim,
+  };
   const done = plan.steps.filter((s) => s.status === "done").length;
   const allDone = done === plan.steps.length;
   const hasTasks = tasks && tasks.length > 0;
@@ -56,19 +57,19 @@ export function PlanProgress({ plan, tasks }: Props) {
       flexDirection="column"
       borderStyle="rounded"
       border={true}
-      borderColor={allDone ? "#4a7" : "#8B5CF6"}
+      borderColor={allDone ? t.success : t.brandAlt}
       paddingX={1}
       width="100%"
     >
       <box gap={1} flexDirection="row">
-        <text fg={allDone ? "#4a7" : "#8B5CF6"} attributes={TextAttributes.BOLD}>
+        <text fg={allDone ? t.success : t.brandAlt} attributes={TextAttributes.BOLD}>
           {icon("plan")} {plan.title}
         </text>
-        <text fg="#555">
+        <text fg={t.textMuted}>
           {String(done)}/{String(plan.steps.length)}
         </text>
       </box>
-      {hiddenBefore > 0 && <text fg="#444">{String(hiddenBefore)} completed above</text>}
+      {hiddenBefore > 0 && <text fg={t.textDim}>{String(hiddenBefore)} completed above</text>}
       {visibleSteps.map((step) => (
         <box key={step.id} flexDirection="column">
           <box gap={1} flexDirection="row">
@@ -78,7 +79,7 @@ export function PlanProgress({ plan, tasks }: Props) {
               <text fg={STATUS_COLORS[step.status]}>{STATUS_ICONS[step.status]()}</text>
             )}
             <text
-              fg={step.status === "active" ? "#eee" : STATUS_COLORS[step.status]}
+              fg={step.status === "active" ? t.textPrimary : STATUS_COLORS[step.status]}
               attributes={step.status === "active" ? TextAttributes.BOLD : undefined}
             >
               {step.label}
@@ -87,7 +88,7 @@ export function PlanProgress({ plan, tasks }: Props) {
           {step.status === "active" && hasTasks && <TaskList tasks={tasks} nested />}
         </box>
       ))}
-      {hiddenAfter > 0 && <text fg="#444">{String(hiddenAfter)} more pending</text>}
+      {hiddenAfter > 0 && <text fg={t.textDim}>{String(hiddenAfter)} more pending</text>}
     </box>
   );
 }

@@ -8,6 +8,7 @@ import { getCommandDefs } from "../../core/commands/registry.js";
 import { HistoryDB } from "../../core/history/db.js";
 import { type FuzzyMatch, fuzzyFilter, fuzzyMatch } from "../../core/history/fuzzy.js";
 import { icon } from "../../core/icons.js";
+import { useTheme } from "../../core/theme/index.js";
 
 interface Props {
   onSubmit: (value: string) => void;
@@ -38,7 +39,8 @@ const HighlightedText = memo(function HighlightedText({
   text: string;
   indices: number[];
 }) {
-  if (indices.length === 0) return <text fg="#ccc">{text}</text>;
+  const t = useTheme();
+  if (indices.length === 0) return <text fg={t.textPrimary}>{text}</text>;
   const indexSet = new Set(indices);
   const spans: { text: string; hl: boolean }[] = [];
   for (let i = 0; i < text.length; i++) {
@@ -57,7 +59,7 @@ const HighlightedText = memo(function HighlightedText({
         <span
           // biome-ignore lint/suspicious/noArrayIndexKey: stable span order
           key={i}
-          fg={s.hl ? "#FF0040" : "#ccc"}
+          fg={s.hl ? t.brandSecondary : t.textPrimary}
           attributes={s.hl ? TextAttributes.BOLD : undefined}
         >
           {s.text}
@@ -558,17 +560,19 @@ export const InputBox = memo(function InputBox({
   // Max rows for the textarea before it scrolls internally
   const maxInputRows = Math.max(4, Math.floor(termRows * 0.4));
 
+  const t = useTheme();
+
   // Border color per state
   const slashMode = value.startsWith("/") && focused;
   const borderColor = fuzzyMode
-    ? "#FF8C00"
+    ? t.warning
     : slashMode
-      ? "#3a7bd5"
+      ? t.borderSlash
       : showBusy
-        ? "#59122a"
+        ? t.brandDim
         : focused
-          ? "#FF0040"
-          : "#333";
+          ? t.borderFocused
+          : t.border;
 
   const lines = value.split("\n");
   const isMultiline = lines.length > 1;
@@ -583,23 +587,25 @@ export const InputBox = memo(function InputBox({
               flexDirection="column"
               borderStyle="rounded"
               border={true}
-              borderColor="#3a7bd5"
+              borderColor={t.borderSlash}
               width="100%"
             >
-              <box flexDirection="column" backgroundColor="#0d1520">
+              <box flexDirection="column" backgroundColor={t.bgInput}>
                 <scrollbox ref={acScrollRef} height={Math.min(matches.length, maxVisible)}>
                   {matches.map((match, i) => {
                     const isSelected = i === selectedIdx;
                     return (
                       <box key={match.cmd} gap={1} paddingX={1} height={1} flexDirection="row">
-                        <text fg={isSelected ? "#3a7bd5" : "#333"}>{isSelected ? "›" : " "}</text>
+                        <text fg={isSelected ? t.borderSlash : t.textFaint}>
+                          {isSelected ? "›" : " "}
+                        </text>
                         <text
-                          fg={isSelected ? "#5a9bf5" : "#3a7bd5"}
+                          fg={isSelected ? t.info : t.borderSlash}
                           attributes={isSelected ? TextAttributes.BOLD : undefined}
                         >
                           {match.cmd}
                         </text>
-                        <text fg={isSelected ? "#666" : "#444"} truncate>
+                        <text fg={isSelected ? t.textSecondary : t.textDim} truncate>
                           {match.desc}
                         </text>
                       </box>
@@ -608,7 +614,7 @@ export const InputBox = memo(function InputBox({
                 </scrollbox>
                 {matches.length > maxVisible && (
                   <box paddingX={1} height={1}>
-                    <text fg="#444">
+                    <text fg={t.textDim}>
                       {selectedIdx + 1}/{String(matches.length)}
                     </text>
                   </box>
@@ -625,15 +631,15 @@ export const InputBox = memo(function InputBox({
               flexDirection="column"
               borderStyle="rounded"
               border={true}
-              borderColor="#FF8C00"
+              borderColor={t.warning}
               width="100%"
             >
-              <box flexDirection="column" backgroundColor="#111">
+              <box flexDirection="column" backgroundColor={t.bgSecondary}>
                 <box paddingX={1} height={1} flexDirection="row">
-                  <text fg="#FF8C00" attributes={TextAttributes.BOLD}>
+                  <text fg={t.warning} attributes={TextAttributes.BOLD}>
                     {icon("clock_alt")} history
                   </text>
-                  <text fg="#555">
+                  <text fg={t.textMuted}>
                     {"  "}
                     {String(fuzzyResults.length)} match{fuzzyResults.length === 1 ? "" : "es"}
                   </text>
@@ -656,11 +662,13 @@ export const InputBox = memo(function InputBox({
                         height={1}
                         flexDirection="row"
                       >
-                        <text fg={isSelected ? "#FF0040" : "#333"}>{isSelected ? "› " : "  "}</text>
+                        <text fg={isSelected ? t.brandSecondary : t.textFaint}>
+                          {isSelected ? "› " : "  "}
+                        </text>
                         {displayMatch ? (
                           <HighlightedText text={displayText} indices={displayMatch.indices} />
                         ) : (
-                          <text fg={isSelected ? "#fff" : "#ccc"} truncate>
+                          <text fg={isSelected ? "white" : t.textPrimary} truncate>
                             {displayText}
                           </text>
                         )}
@@ -685,15 +693,15 @@ export const InputBox = memo(function InputBox({
         >
           {fuzzyMode ? (
             <box flexDirection="row">
-              <text fg="#FF8C00" attributes={TextAttributes.BOLD}>
+              <text fg={t.warning} attributes={TextAttributes.BOLD}>
                 {"search: "}
               </text>
-              <text fg="#fff">{fuzzyQuery}</text>
-              <text fg="#FF8C00">▌</text>
+              <text fg={t.textPrimary}>{fuzzyQuery}</text>
+              <text fg={t.warning}>▌</text>
             </box>
           ) : (
             <box flexDirection="row" width="100%">
-              <text fg="#FF0040" attributes={TextAttributes.BOLD} flexShrink={0}>
+              <text fg={t.brandSecondary} attributes={TextAttributes.BOLD} flexShrink={0}>
                 {">"}{" "}
               </text>
               <textarea
@@ -707,21 +715,21 @@ export const InputBox = memo(function InputBox({
                     ? "'/' for commands · or steer by sending a new message"
                     : "speak to the forge..."
                 }
-                placeholderColor="#555"
+                placeholderColor={t.textMuted}
                 focused={focused}
                 wrapMode="char"
                 width={textareaWidth}
                 height={Math.min(maxInputRows, Math.max(1, visualLines))}
                 flexShrink={0}
                 backgroundColor="transparent"
-                textColor="#ccc"
+                textColor={t.textPrimary}
               />
               {showBusy && !showAutocomplete ? (
-                <text fg="#555" flexShrink={0}>
+                <text fg={t.textMuted} flexShrink={0}>
                   {" ^X stop"}
                 </text>
               ) : ghost ? (
-                <text fg="#444" flexShrink={0}>
+                <text fg={t.textDim} flexShrink={0}>
                   {ghost}
                 </text>
               ) : null}
@@ -732,8 +740,8 @@ export const InputBox = memo(function InputBox({
         {/* ── Hints bar ── */}
         {focused && !fuzzyMode && isMultiline && (
           <box paddingX={2} height={1}>
-            <text fg="#333">
-              <span fg="#444">S-⏎</span> newline <span fg="#444">^U</span> del line
+            <text fg={t.textFaint}>
+              <span fg={t.textDim}>S-⏎</span> newline <span fg={t.textDim}>^U</span> del line
             </text>
           </box>
         )}

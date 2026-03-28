@@ -14,8 +14,8 @@ import {
   type SkillSearchResult,
   searchSkills,
 } from "../../core/skills/manager.js";
+import { useTheme } from "../../core/theme/index.js";
 import { usePopupScroll } from "../../hooks/usePopupScroll.js";
-
 import { Overlay, POPUP_BG, POPUP_HL, PopupRow } from "../layout/shared.js";
 
 const MAX_POPUP_WIDTH = 100;
@@ -46,6 +46,7 @@ export const SkillSearch = memo(function SkillSearch({
   onClose,
   onSystemMessage,
 }: Props) {
+  const t = useTheme();
   const [tab, setTab] = useState<Tab>("search");
   const [query, setQuery] = useState("");
   const [popular, setPopular] = useState<SkillSearchResult[]>([]);
@@ -313,61 +314,61 @@ export const SkillSearch = memo(function SkillSearch({
         flexDirection="column"
         borderStyle="rounded"
         border={true}
-        borderColor="#8B5CF6"
+        borderColor={t.brandAlt}
         width={popupWidth}
       >
         <PopupRow w={innerW}>
-          <text fg="white" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
+          <text fg={t.textPrimary} attributes={TextAttributes.BOLD} bg={POPUP_BG}>
             {"\uDB82\uDD2A"} Skills
           </text>
         </PopupRow>
 
         <PopupRow w={innerW}>
-          {TABS.map((t, i) => (
-            <text key={t} bg={POPUP_BG}>
+          {TABS.map((tabItem, i) => (
+            <text key={tabItem} bg={POPUP_BG}>
               {i > 0 ? (
-                <span fg="#333" bg={POPUP_BG}>
+                <span fg={t.textFaint} bg={POPUP_BG}>
                   {" │ "}
                 </span>
               ) : (
                 ""
               )}
               <span
-                fg={i === tabIdx ? "#FF0040" : "#666"}
+                fg={i === tabIdx ? t.brandSecondary : t.textMuted}
                 attributes={i === tabIdx ? TextAttributes.BOLD : undefined}
                 bg={POPUP_BG}
               >
-                {TAB_LABELS[t]}
+                {TAB_LABELS[tabItem]}
               </span>
             </text>
           ))}
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text fg="#333" bg={POPUP_BG}>
+          <text fg={t.textFaint} bg={POPUP_BG}>
             {"─".repeat(innerW - 4)}
           </text>
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text fg="#9B30FF" bg={POPUP_BG}>
+          <text fg={t.brand} bg={POPUP_BG}>
             {" "}
           </text>
           {query ? (
             <>
-              <text fg="white" bg={POPUP_BG}>
+              <text fg={t.textPrimary} bg={POPUP_BG}>
                 {query}
               </text>
-              <text fg="#FF0040" bg={POPUP_BG}>
+              <text fg={t.brandSecondary} bg={POPUP_BG}>
                 {"█"}
               </text>
             </>
           ) : (
             <>
-              <text fg="#FF0040" bg={POPUP_BG}>
+              <text fg={t.brandSecondary} bg={POPUP_BG}>
                 {"█"}
               </text>
-              <text fg="#555" bg={POPUP_BG}>
+              <text fg={t.textMuted} bg={POPUP_BG}>
                 {tab === "search"
                   ? "type to filter / search skills.sh..."
                   : tab === "installed"
@@ -390,13 +391,13 @@ export const SkillSearch = memo(function SkillSearch({
             >
               {searching ? (
                 <PopupRow w={innerW}>
-                  <text fg="#9B30FF" bg={POPUP_BG}>
+                  <text fg={t.brand} bg={POPUP_BG}>
                     searching...
                   </text>
                 </PopupRow>
               ) : displayResults.length === 0 ? (
                 <PopupRow w={innerW}>
-                  <text fg="#555" bg={POPUP_BG}>
+                  <text fg={t.textMuted} bg={POPUP_BG}>
                     {query ? "no results" : "loading popular skills..."}
                   </text>
                 </PopupRow>
@@ -411,30 +412,30 @@ export const SkillSearch = memo(function SkillSearch({
                     activeSkills.includes(skill.skillId) || activeSkills.includes(skill.name);
                   return (
                     <PopupRow key={skill.id} bg={bg} w={innerW}>
-                      <text bg={bg} fg={isActive ? "#FF0040" : "#555"}>
+                      <text bg={bg} fg={isActive ? t.brandSecondary : t.textMuted}>
                         {isActive ? "› " : "  "}
                       </text>
                       {isLoaded ? (
-                        <text bg={bg} fg="#00FF00">
+                        <text bg={bg} fg={t.success}>
                           ●{" "}
                         </text>
                       ) : isInstalled ? (
-                        <text bg={bg} fg="#4a7">
+                        <text bg={bg} fg={t.success}>
                           ✓{" "}
                         </text>
                       ) : null}
                       <text
                         bg={bg}
-                        fg={isActive ? "#FF0040" : "#aaa"}
+                        fg={isActive ? t.brandSecondary : t.textSecondary}
                         attributes={isActive ? TextAttributes.BOLD : undefined}
                       >
                         {skill.skillId}
                       </text>
-                      <text bg={bg} fg="#555">
+                      <text bg={bg} fg={t.textMuted}>
                         {" "}
                         {skill.source}
                       </text>
-                      <text bg={bg} fg="#444">
+                      <text bg={bg} fg={t.textDim}>
                         {" "}
                         {skill.installs.toLocaleString()}↓
                       </text>
@@ -445,7 +446,7 @@ export const SkillSearch = memo(function SkillSearch({
             </box>
             {displayResults.length > maxVisible && (
               <PopupRow w={innerW}>
-                <text fg="#555" bg={POPUP_BG}>
+                <text fg={t.textMuted} bg={POPUP_BG}>
                   {scrollOffset > 0 ? "↑ " : "  "}
                   {String(cursor + 1)}/{String(displayResults.length)}
                   {scrollOffset + maxVisible < displayResults.length ? " ↓" : ""}
@@ -459,7 +460,7 @@ export const SkillSearch = memo(function SkillSearch({
                   <text>{""}</text>
                 </PopupRow>
                 <PopupRow w={innerW}>
-                  <text fg="white" attributes={TextAttributes.BOLD} bg={POPUP_BG}>
+                  <text fg={t.textPrimary} attributes={TextAttributes.BOLD} bg={POPUP_BG}>
                     Install "{pendingInstall.skillId}" to:
                   </text>
                 </PopupRow>
@@ -468,17 +469,17 @@ export const SkillSearch = memo(function SkillSearch({
                   const bg = isActive ? POPUP_HL : POPUP_BG;
                   return (
                     <PopupRow key={label} bg={bg} w={innerW}>
-                      <text bg={bg} fg={isActive ? "#FF0040" : "#555"}>
+                      <text bg={bg} fg={isActive ? t.brandSecondary : t.textMuted}>
                         {isActive ? "› " : "  "}
                       </text>
                       <text
                         bg={bg}
-                        fg={isActive ? "#FF0040" : "#aaa"}
+                        fg={isActive ? t.brandSecondary : t.textSecondary}
                         attributes={isActive ? TextAttributes.BOLD : undefined}
                       >
                         {label}
                       </text>
-                      <text bg={bg} fg="#555">
+                      <text bg={bg} fg={t.textMuted}>
                         {" "}
                         {i === 0
                           ? ".agents/skills/ (this repo)"
@@ -492,7 +493,7 @@ export const SkillSearch = memo(function SkillSearch({
 
             {installing && (
               <PopupRow w={innerW}>
-                <text fg="#9B30FF" bg={POPUP_BG}>
+                <text fg={t.brand} bg={POPUP_BG}>
                   installing...
                 </text>
               </PopupRow>
@@ -509,7 +510,7 @@ export const SkillSearch = memo(function SkillSearch({
             >
               {filteredInstalled.length === 0 ? (
                 <PopupRow w={innerW}>
-                  <text fg="#555" bg={POPUP_BG}>
+                  <text fg={t.textMuted} bg={POPUP_BG}>
                     {query ? "no matching skills" : "no installed skills found"}
                   </text>
                 </PopupRow>
@@ -521,22 +522,22 @@ export const SkillSearch = memo(function SkillSearch({
                   const bg = isActive ? POPUP_HL : POPUP_BG;
                   return (
                     <PopupRow key={skill.path} bg={bg} w={innerW}>
-                      <text bg={bg} fg={isActive ? "#FF0040" : "#555"}>
+                      <text bg={bg} fg={isActive ? t.brandSecondary : t.textMuted}>
                         {isActive ? "› " : "  "}
                       </text>
                       <text
                         bg={bg}
-                        fg={isActive ? "#FF0040" : "#aaa"}
+                        fg={isActive ? t.brandSecondary : t.textSecondary}
                         attributes={isActive ? TextAttributes.BOLD : undefined}
                       >
                         {skill.name}
                       </text>
-                      <text bg={bg} fg="#555">
+                      <text bg={bg} fg={t.textMuted}>
                         {" "}
                         {skill.scope === "project" ? "(project)" : "(global)"}
                       </text>
                       {isLoaded && (
-                        <text bg={bg} fg="#00FF00">
+                        <text bg={bg} fg={t.success}>
                           {" "}
                           ●
                         </text>
@@ -548,7 +549,7 @@ export const SkillSearch = memo(function SkillSearch({
             </box>
             {filteredInstalled.length > maxVisible && (
               <PopupRow w={innerW}>
-                <text fg="#555" bg={POPUP_BG}>
+                <text fg={t.textMuted} bg={POPUP_BG}>
                   {scrollOffset > 0 ? "↑ " : "  "}
                   {String(cursor + 1)}/{String(filteredInstalled.length)}
                   {scrollOffset + maxVisible < filteredInstalled.length ? " ↓" : ""}
@@ -567,7 +568,7 @@ export const SkillSearch = memo(function SkillSearch({
             >
               {filteredActive.length === 0 ? (
                 <PopupRow w={innerW}>
-                  <text fg="#555" bg={POPUP_BG}>
+                  <text fg={t.textMuted} bg={POPUP_BG}>
                     {query ? "no matching skills" : "no active skills — load from Installed tab"}
                   </text>
                 </PopupRow>
@@ -578,12 +579,12 @@ export const SkillSearch = memo(function SkillSearch({
                   const bg = isActive ? POPUP_HL : POPUP_BG;
                   return (
                     <PopupRow key={name} bg={bg} w={innerW}>
-                      <text bg={bg} fg={isActive ? "#FF0040" : "#555"}>
+                      <text bg={bg} fg={isActive ? t.brandSecondary : t.textMuted}>
                         {isActive ? "› " : "  "}
                       </text>
                       <text
                         bg={bg}
-                        fg={isActive ? "#FF0040" : "#00FF00"}
+                        fg={isActive ? t.brandSecondary : t.success}
                         attributes={isActive ? TextAttributes.BOLD : undefined}
                       >
                         {name}
@@ -595,7 +596,7 @@ export const SkillSearch = memo(function SkillSearch({
             </box>
             {filteredActive.length > maxVisible && (
               <PopupRow w={innerW}>
-                <text fg="#555" bg={POPUP_BG}>
+                <text fg={t.textMuted} bg={POPUP_BG}>
                   {scrollOffset > 0 ? "↑ " : "  "}
                   {String(cursor + 1)}/{String(filteredActive.length)}
                   {scrollOffset + maxVisible < filteredActive.length ? " ↓" : ""}
@@ -609,19 +610,19 @@ export const SkillSearch = memo(function SkillSearch({
           <text>{""}</text>
         </PopupRow>
         <PopupRow w={innerW}>
-          <text fg="#555" bg={POPUP_BG}>
+          <text fg={t.textMuted} bg={POPUP_BG}>
             Agent access:{" "}
           </text>
-          <text fg={agentSkillsEnabled ? "#00FF00" : "#c55"} bg={POPUP_BG}>
+          <text fg={agentSkillsEnabled ? t.success : t.error} bg={POPUP_BG}>
             {agentSkillsEnabled ? "on" : "off"}
           </text>
-          <text fg="#444" bg={POPUP_BG}>
+          <text fg={t.textDim} bg={POPUP_BG}>
             {" "}
             (a to toggle)
           </text>
         </PopupRow>
         <PopupRow w={innerW}>
-          <text fg="#555" bg={POPUP_BG}>
+          <text fg={t.textMuted} bg={POPUP_BG}>
             {"↑↓"} nav | {"⏎"}{" "}
             {tab === "search" ? "install" : tab === "installed" ? "load" : "unload"}
             {tab === "installed" ? " | ^D remove" : tab === "active" ? " | ^D unload" : ""}

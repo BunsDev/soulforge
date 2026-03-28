@@ -20,5 +20,6 @@ export const SHARED_RULES = `
 - Never assume a library is available — check imports and package files first.
 - Add comments only when the code is complex and requires context.
 - Follow security best practices. Keep secrets out of code.
+- Don't waste turns fixing indentation or formatting mid-session — use project(format) at the end to auto-fix.
 
 Only commit changes when the user explicitly asks you to.`;

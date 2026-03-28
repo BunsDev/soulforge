@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { useTheme } from "../../core/theme/index.js";
 
 interface AnimatedBorderProps {
   active: boolean;
@@ -6,14 +7,12 @@ interface AnimatedBorderProps {
   idleColor?: string;
 }
 
-const ACTIVE_COLOR = "#FF0040";
-const IDLE_COLOR = "#222";
-
 export const AnimatedBorder = memo(function AnimatedBorder({
   active,
   children,
-  idleColor = IDLE_COLOR,
+  idleColor,
 }: AnimatedBorderProps) {
+  const t = useTheme();
   return (
     <box
       flexGrow={1}
@@ -21,7 +20,7 @@ export const AnimatedBorder = memo(function AnimatedBorder({
       minHeight={0}
       border
       borderStyle="rounded"
-      borderColor={active ? ACTIVE_COLOR : idleColor}
+      borderColor={active ? t.brandSecondary : (idleColor ?? t.textSubtle)}
     >
       {children}
     </box>

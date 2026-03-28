@@ -2,6 +2,7 @@ import { TextAttributes } from "@opentui/core";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentStatsEvent, SubagentStep } from "../../core/agents/subagent-events.js";
 import { icon } from "../../core/icons.js";
+import { useTheme } from "../../core/theme/index.js";
 import {
   CATEGORY_COLORS,
   getBackendLabel,
@@ -19,7 +20,7 @@ import {
   humanizeTokens,
   shortModelId,
 } from "./multi-agent-display.js";
-import { buildLiveToolRowProps, ROW_COLORS, StaticToolRow } from "./StaticToolRow.js";
+import { buildLiveToolRowProps, StaticToolRow } from "./StaticToolRow.js";
 
 export interface LiveToolCall {
   id: string;
@@ -34,13 +35,12 @@ export interface LiveToolCall {
 
 export const SUBAGENT_NAMES = new Set(["dispatch", "web_search"]);
 
-const SPINNER_DEFAULT_COLOR = "#9B30FF";
-
 export const RENDER_DEBOUNCE = 80;
 
 const Spinner = memo(function Spinner({ color }: { color?: string }) {
+  const t = useTheme();
   const frame = useSpinnerFrame();
-  return <span fg={color ?? SPINNER_DEFAULT_COLOR}>{SPINNER_FRAMES[frame]}</span>;
+  return <span fg={color ?? t.brand}>{SPINNER_FRAMES[frame]}</span>;
 });
 
 function useElapsedTimers(calls: LiveToolCall[]) {
@@ -102,51 +102,55 @@ function formatDuration(seconds: number): string {
 
 const ChildStepRow = memo(
   function ChildStepRow({ step }: { step: SubagentStep }) {
+    const t = useTheme();
     const {
       icon,
       iconColor,
       label,
       category: staticCategory,
-    } = resolveToolDisplay(step.toolName, "#666");
+    } = resolveToolDisplay(step.toolName, t.textMuted);
     const hasSplit = !!(step.backend && staticCategory && step.backend !== staticCategory);
     const category = hasSplit ? staticCategory : (step.backend ?? staticCategory);
     const backendTag = hasSplit ? step.backend : null;
     const categoryColor =
       (staticCategory ? CATEGORY_COLORS[staticCategory as ToolCategory] : null) ??
-      (step.backend ? (CATEGORY_COLORS[step.backend as ToolCategory] ?? "#888") : undefined) ??
-      "#888";
+      (step.backend
+        ? (CATEGORY_COLORS[step.backend as ToolCategory] ?? t.textSecondary)
+        : undefined) ??
+      t.textSecondary;
     const backendColor = backendTag
-      ? (CATEGORY_COLORS[backendTag as ToolCategory] ?? "#888")
+      ? (CATEGORY_COLORS[backendTag as ToolCategory] ?? t.textSecondary)
       : undefined;
     const isDone = step.state !== "running";
 
     const cacheIcon = step.cacheState ? (CACHE_ICONS[step.cacheState] ?? "") : "";
-    const cacheColor = step.cacheState ? (CACHE_COLORS[step.cacheState] ?? "#888") : "";
+    const _cc = getCacheColors(t);
+    const cacheColor = step.cacheState ? (_cc[step.cacheState] ?? t.textSecondary) : "";
     const cacheLabel = getCacheLabel(step);
 
     return (
       <box height={1} flexShrink={0} marginLeft={3}>
         <text truncate>
-          <span fg="#333">├ </span>
+          <span fg={t.textFaint}>├ </span>
           {step.cacheState === "wait" ? (
-            <Spinner color={CACHE_COLORS.wait} />
+            <Spinner color={_cc.wait} />
           ) : step.state === "running" ? (
-            <Spinner color="#666" />
+            <Spinner color={t.textMuted} />
           ) : step.state === "done" ? (
-            <span fg="#4a7">✓</span>
+            <span fg={t.success}>✓</span>
           ) : (
-            <span fg="#f44">✗</span>
+            <span fg={t.error}>✗</span>
           )}
-          <span fg={isDone ? "#444" : iconColor}> {icon} </span>
-          {category ? <span fg={isDone ? "#333" : categoryColor}>[{category}]</span> : null}
+          <span fg={isDone ? t.textDim : iconColor}> {icon} </span>
+          {category ? <span fg={isDone ? t.textFaint : categoryColor}>[{category}]</span> : null}
           {backendTag ? (
-            <span fg={isDone ? "#333" : backendColor}>[{getBackendLabel(backendTag)}] </span>
+            <span fg={isDone ? t.textFaint : backendColor}>[{getBackendLabel(backendTag)}] </span>
           ) : category ? (
             <span> </span>
           ) : null}
-          <span fg={isDone ? "#444" : "#888"}>{label}</span>
-          {step.agentId ? <span fg={isDone ? "#333" : "#9B30FF"}> [{step.agentId}]</span> : null}
-          {step.args ? <span fg={isDone ? "#333" : "#666"}> {step.args}</span> : null}
+          <span fg={isDone ? t.textDim : t.textSecondary}>{label}</span>
+          {step.agentId ? <span fg={isDone ? t.textFaint : t.brand}> [{step.agentId}]</span> : null}
+          {step.args ? <span fg={isDone ? t.textFaint : t.textMuted}> {step.args}</span> : null}
           {cacheIcon ? (
             <span fg={cacheColor}>
               {" "}
@@ -167,12 +171,18 @@ const ChildStepRow = memo(
     prev.step.agentId === next.step.agentId,
 );
 
-const CACHE_COLORS: Record<string, string> = {
-  hit: "#4a7",
-  wait: "#FFDD57",
-  store: "#5af",
-  invalidate: "#f80",
-};
+function getCacheColors(t: {
+  success: string;
+  warning: string;
+  info: string;
+}): Record<string, string> {
+  return {
+    hit: t.success,
+    wait: t.warning,
+    store: t.info,
+    invalidate: t.warning,
+  };
+}
 
 function getCacheLabel(step: SubagentStep): string {
   switch (step.cacheState) {
@@ -203,6 +213,7 @@ const MultiAgentChildRow = memo(
     childSteps: SubagentStep[];
     liveStats?: AgentStatsEvent;
   }) {
+    const t = useTheme();
     const roleIcon =
       info.role === "investigate"
         ? icon("investigate")
@@ -210,7 +221,7 @@ const MultiAgentChildRow = memo(
           ? icon("explore")
           : icon("code");
     const roleColor =
-      info.role === "investigate" ? "#00CED1" : info.role === "code" ? "#FF6B2B" : "#9B30FF";
+      info.role === "investigate" ? t.info : info.role === "code" ? t.warning : t.brand;
     const isDone = info.state === "done" || info.state === "error";
     const isPending = info.state === "pending";
     const taskStr = info.task.length > 40 ? `${info.task.slice(0, 37)}...` : info.task;
@@ -228,55 +239,55 @@ const MultiAgentChildRow = memo(
     const hasTier = isTrivial || isDesloppify;
     const tierIcon = isTrivial ? icon("trivial") : isDesloppify ? icon("cleanup") : "";
     const tierName = isTrivial ? "trivial" : isDesloppify ? "cleanup" : "";
-    const tierColor = isTrivial ? "#d9a020" : "#2dd4bf";
+    const tierColor = isTrivial ? t.amber : t.info;
 
     return (
       <>
         <box height={1} flexShrink={0} marginLeft={3}>
           <text truncate>
-            <span fg="#333">{connector}</span>
+            <span fg={t.textFaint}>{connector}</span>
             {info.state === "running" ? (
               <Spinner color={roleColor} />
             ) : info.state === "done" ? (
               info.calledDone ? (
-                <span fg="#4a7">✓</span>
+                <span fg={t.success}>✓</span>
               ) : (
-                <span fg="#d9a020">!</span>
+                <span fg={t.amber}>!</span>
               )
             ) : info.state === "error" ? (
-              <span fg="#f44">✗</span>
+              <span fg={t.error}>✗</span>
             ) : (
-              <span fg="#555">○</span>
+              <span fg={t.textMuted}>○</span>
             )}
-            <span fg={isDone ? "#444" : roleColor}> {roleIcon} </span>
+            <span fg={isDone ? t.textDim : roleColor}> {roleIcon} </span>
             <span
-              fg={isDone ? "#444" : "#ddd"}
+              fg={isDone ? t.textDim : t.textPrimary}
               attributes={!isDone ? TextAttributes.BOLD : undefined}
             >
               {agentId}
             </span>
-            <span fg={isDone ? "#333" : roleColor}> [{info.role}]</span>
+            <span fg={isDone ? t.textFaint : roleColor}> [{info.role}]</span>
             {hasTier ? (
-              <span fg={isDone ? "#444" : tierColor}>
+              <span fg={isDone ? t.textDim : tierColor}>
                 [{tierIcon} {tierName}]
               </span>
             ) : null}
             {modelLabel ? (
-              <span fg={isDone ? "#444" : "#5a9"}>
+              <span fg={isDone ? t.textDim : t.success}>
                 [{icon("model")} {modelLabel}]
               </span>
             ) : null}
             {stepCount != null && stepCount > 0 && !isDone ? (
-              <span fg="#8a6">
+              <span fg={t.success}>
                 [{icon("gear")} {String(stepCount)}]
               </span>
             ) : toolUses != null && toolUses > 0 ? (
-              <span fg={isDone ? "#444" : "#8a6"}>
+              <span fg={isDone ? t.textDim : t.success}>
                 [{icon("gear")} {String(toolUses)}]
               </span>
             ) : null}
             {tokenUsage && tokenUsage.total > 0 ? (
-              <span fg={isDone ? "#444" : "#7a8"}>
+              <span fg={isDone ? t.textDim : t.success}>
                 [{icon("gauge")}{" "}
                 {isDone && tokenUsage.input > 0
                   ? `${humanizeTokens(tokenUsage.input)}↓ ${humanizeTokens(tokenUsage.output)}↑`
@@ -285,14 +296,14 @@ const MultiAgentChildRow = memo(
               </span>
             ) : null}
             {cacheHits && cacheHits > 0 ? (
-              <span fg={isDone ? "#444" : "#d9a020"}>
+              <span fg={isDone ? t.textDim : t.amber}>
                 [{icon("cache")} {humanizeTokens(cacheHits)}]
               </span>
             ) : null}
             {isPending && info.dependsOn && info.dependsOn.length > 0 ? (
-              <span fg="#555"> waiting on {info.dependsOn.join(", ")}</span>
+              <span fg={t.textMuted}> waiting on {info.dependsOn.join(", ")}</span>
             ) : (
-              <span fg={isDone ? "#333" : "#666"}> {taskStr}</span>
+              <span fg={isDone ? t.textFaint : t.textMuted}> {taskStr}</span>
             )}
           </text>
         </box>
@@ -314,21 +325,21 @@ const MultiAgentChildRow = memo(
               {hiddenCount > 0 && (
                 <box height={1} flexShrink={0} marginLeft={3}>
                   <text truncate>
-                    <span fg="#333">
+                    <span fg={t.textFaint}>
                       {continuation}
                       {"  "}├{" "}
                     </span>
-                    <span fg="#444">+{String(hiddenCount)} completed</span>
+                    <span fg={t.textDim}>+{String(hiddenCount)} completed</span>
                   </text>
                 </box>
               )}
-              {visible.map((step, i) => {
+              {visible.map((step, si) => {
                 const {
                   icon: stepIcon,
                   iconColor: stepColor,
                   label: stepLabel,
                   category: stepStaticCategory,
-                } = resolveToolDisplay(step.toolName, "#666");
+                } = resolveToolDisplay(step.toolName, t.textMuted);
                 const stepHasSplit = !!(
                   step.backend &&
                   stepStaticCategory &&
@@ -343,19 +354,22 @@ const MultiAgentChildRow = memo(
                     ? CATEGORY_COLORS[stepStaticCategory as ToolCategory]
                     : null) ??
                   (step.backend
-                    ? (CATEGORY_COLORS[step.backend as ToolCategory] ?? "#888")
+                    ? (CATEGORY_COLORS[step.backend as ToolCategory] ?? t.textSecondary)
                     : undefined) ??
-                  "#888";
+                  t.textSecondary;
                 const stepBackendColor = stepBackendTag
-                  ? (CATEGORY_COLORS[stepBackendTag as ToolCategory] ?? "#888")
+                  ? (CATEGORY_COLORS[stepBackendTag as ToolCategory] ?? t.textSecondary)
                   : undefined;
                 const stepDone = step.state !== "running";
-                const stepLast = i === visible.length - 1 && !showThinking;
+                const stepLast = si === visible.length - 1 && !showThinking;
                 const stepConnector = stepLast ? "└ " : "├ ";
                 const origIdx = childSteps.indexOf(step);
 
+                const stepCacheColors = getCacheColors(t);
                 const cacheIcon = step.cacheState ? (CACHE_ICONS[step.cacheState] ?? "") : "";
-                const cacheColor = step.cacheState ? (CACHE_COLORS[step.cacheState] ?? "#888") : "";
+                const cacheColor = step.cacheState
+                  ? (stepCacheColors[step.cacheState] ?? t.textSecondary)
+                  : "";
                 const cacheLabel = getCacheLabel(step);
 
                 return (
@@ -366,33 +380,35 @@ const MultiAgentChildRow = memo(
                     marginLeft={3}
                   >
                     <text truncate>
-                      <span fg="#333">
+                      <span fg={t.textFaint}>
                         {continuation}
                         {"  "}
                         {stepConnector}
                       </span>
                       {step.cacheState === "wait" ? (
-                        <Spinner color={CACHE_COLORS.wait} />
+                        <Spinner color={stepCacheColors.wait} />
                       ) : step.state === "running" ? (
-                        <Spinner color="#666" />
+                        <Spinner color={t.textMuted} />
                       ) : step.state === "done" ? (
-                        <span fg="#4a7">✓</span>
+                        <span fg={t.success}>✓</span>
                       ) : (
-                        <span fg="#f44">✗</span>
+                        <span fg={t.error}>✗</span>
                       )}
-                      <span fg={stepDone ? "#444" : stepColor}> {stepIcon} </span>
+                      <span fg={stepDone ? t.textDim : stepColor}> {stepIcon} </span>
                       {stepCategory ? (
-                        <span fg={stepDone ? "#333" : stepCatColor}>[{stepCategory}]</span>
+                        <span fg={stepDone ? t.textFaint : stepCatColor}>[{stepCategory}]</span>
                       ) : null}
                       {stepBackendTag ? (
-                        <span fg={stepDone ? "#333" : stepBackendColor}>
+                        <span fg={stepDone ? t.textFaint : stepBackendColor}>
                           [{getBackendLabel(stepBackendTag)}]{" "}
                         </span>
                       ) : stepCategory ? (
                         <span> </span>
                       ) : null}
-                      <span fg={stepDone ? "#444" : "#888"}>{stepLabel}</span>
-                      {step.args ? <span fg={stepDone ? "#333" : "#666"}> {step.args}</span> : null}
+                      <span fg={stepDone ? t.textDim : t.textSecondary}>{stepLabel}</span>
+                      {step.args ? (
+                        <span fg={stepDone ? t.textFaint : t.textMuted}> {step.args}</span>
+                      ) : null}
                       {cacheIcon ? (
                         <span fg={cacheColor}>
                           {" "}
@@ -406,12 +422,12 @@ const MultiAgentChildRow = memo(
               {showThinking && (
                 <box height={1} flexShrink={0} marginLeft={3}>
                   <text truncate>
-                    <span fg="#333">
+                    <span fg={t.textFaint}>
                       {continuation}
                       {"  "}└{" "}
                     </span>
-                    <Spinner color="#555" />
-                    <span fg="#555"> thinking...</span>
+                    <Spinner color={t.textMuted} />
+                    <span fg={t.textMuted}> thinking...</span>
                   </text>
                 </box>
               )}
@@ -455,6 +471,7 @@ const ToolRow = memo(
     seconds?: number;
     diffStyle?: "default" | "sidebyside" | "compact";
   }) {
+    const t = useTheme();
     const isSubagent = SUBAGENT_NAMES.has(tc.toolName);
     const multiAgentInfo = useMemo(() => {
       if (tc.toolName !== "dispatch" || !tc.args) return null;
@@ -469,11 +486,11 @@ const ToolRow = memo(
               task?: string;
               dependsOn?: string[];
             }>
-          ).map((t, i) => ({
-            agentId: t.id ?? t.agentId ?? `agent-${String(i + 1)}`,
-            role: t.role,
-            task: t.task,
-            dependsOn: t.dependsOn,
+          ).map((entry, i) => ({
+            agentId: entry.id ?? entry.agentId ?? `agent-${String(i + 1)}`,
+            role: entry.role,
+            task: entry.task,
+            dependsOn: entry.dependsOn,
           }));
           return { totalAgents: parsed.tasks.length as number, tasks };
         }
@@ -526,7 +543,7 @@ const ToolRow = memo(
         : 0;
       if (tc.state === "done" && dispatchRejection) {
         suffix = ` → rejected — ${dispatchRejection}`;
-        suffixColor = "#d9a020";
+        suffixColor = t.warning;
       } else if (tc.state === "running") {
         const isMini = multiProgress?.miniForge;
         const agentNoun = isMini ? "mini-forges" : "agents";
@@ -545,7 +562,7 @@ const ToolRow = memo(
       suffix = ` ${formatDuration(seconds)}`;
     } else if (tc.state === "error" && tc.error) {
       suffix = ` → ${tc.error.slice(0, 50)}`;
-      suffixColor = ROW_COLORS.error;
+      suffixColor = t.error;
     }
     // For non-dispatch done calls, suffix comes from buildLiveToolRowProps via formatResult
 
@@ -564,16 +581,16 @@ const ToolRow = memo(
       tc.state === "running" ? (
         <Spinner />
       ) : tc.state === "error" ? (
-        <span fg={ROW_COLORS.error}>✗</span>
+        <span fg={t.error}>✗</span>
       ) : (
         (() => {
           if (tc.result) {
             try {
               const parsed = JSON.parse(tc.result);
-              if (parsed.success === false) return <span fg="#d9a020">!</span>;
+              if (parsed.success === false) return <span fg={t.warning}>!</span>;
             } catch {}
           }
-          return <span fg={ROW_COLORS.checkDone}>✓</span>;
+          return <span fg={t.success}>✓</span>;
         })()
       );
 
@@ -621,8 +638,8 @@ const ToolRow = memo(
                   {hiddenCount > 0 && (
                     <box height={1} flexShrink={0} marginLeft={3}>
                       <text truncate>
-                        <span fg="#333">├ </span>
-                        <span fg="#444">+{String(hiddenCount)} completed</span>
+                        <span fg={t.textFaint}>├ </span>
+                        <span fg={t.textDim}>+{String(hiddenCount)} completed</span>
                       </text>
                     </box>
                   )}
@@ -635,9 +652,9 @@ const ToolRow = memo(
                   {showThinking && (
                     <box height={1} flexShrink={0} marginLeft={3}>
                       <text truncate>
-                        <span fg="#333">└ </span>
-                        <Spinner color="#555" />
-                        <span fg="#555"> thinking...</span>
+                        <span fg={t.textFaint}>└ </span>
+                        <Spinner color={t.textMuted} />
+                        <span fg={t.textMuted}> thinking...</span>
                       </text>
                     </box>
                   )}
@@ -700,6 +717,7 @@ function renderToolCall(
   tc: LiveToolCall,
   seconds: number | undefined,
   diffStyle: "default" | "sidebyside" | "compact",
+  t: { textMuted: string; amber: string; textFaint: string },
   connector?: { isLast: boolean },
 ) {
   if ((tc.toolName === "write_plan" || tc.toolName === "plan") && tc.args) {
@@ -712,9 +730,9 @@ function renderToolCall(
             {tc.state === "running" && (
               <box height={1} flexShrink={0} marginTop={1}>
                 <text>
-                  <span fg="#555">◎ </span>
-                  <span fg="#b87333"> Awaiting review</span>
-                  <span fg="#555"> — select below</span>
+                  <span fg={t.textMuted}>◎ </span>
+                  <span fg={t.amber}> Awaiting review</span>
+                  <span fg={t.textMuted}> — select below</span>
                 </text>
               </box>
             )}
@@ -728,7 +746,7 @@ function renderToolCall(
       <box key={tc.id} flexDirection="row">
         <box width={2} flexShrink={0}>
           <text>
-            <span fg="#333">{connector.isLast ? "└ " : "├ "}</span>
+            <span fg={t.textFaint}>{connector.isLast ? "└ " : "├ "}</span>
           </text>
         </box>
         <box flexGrow={1} flexDirection="column">
@@ -745,6 +763,7 @@ export const ToolCallDisplay = memo(function ToolCallDisplay({
   verbose = false,
   diffStyle = "default",
 }: Props) {
+  const t = useTheme();
   const elapsed = useElapsedTimers(calls);
 
   if (calls.length === 0) return null;
@@ -768,7 +787,7 @@ export const ToolCallDisplay = memo(function ToolCallDisplay({
   if (visible.length <= 1) {
     return (
       <box flexDirection="column">
-        {visible.map((tc) => renderToolCall(tc, elapsed.get(tc.id), diffStyle))}
+        {visible.map((tc) => renderToolCall(tc, elapsed.get(tc.id), diffStyle, t))}
       </box>
     );
   }
@@ -777,7 +796,7 @@ export const ToolCallDisplay = memo(function ToolCallDisplay({
   return (
     <box flexDirection="column">
       {visible.map((tc, i) =>
-        renderToolCall(tc, elapsed.get(tc.id), diffStyle, {
+        renderToolCall(tc, elapsed.get(tc.id), diffStyle, t, {
           isLast: i === visible.length - 1,
         }),
       )}

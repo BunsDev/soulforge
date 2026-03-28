@@ -32,7 +32,8 @@ if (isCompiledBinary) {
   }
 }
 
-import { BRAND_SEGMENTS, garble, WISP_FRAMES, WORDMARK } from "./core/utils/splash.js";
+import { applyTheme, getThemeTokens, watchThemes } from "./core/theme/index.js";
+import { garble, getBrandSegments, WISP_FRAMES, WORDMARK } from "./core/utils/splash.js";
 import { logBackgroundError } from "./stores/errors.js";
 
 const RST = "\x1b[0m";
@@ -45,12 +46,23 @@ function rgb(hex: string): string {
   return `\x1b[38;2;${(n >> 16) & 0xff};${(n >> 8) & 0xff};${n & 0xff}m`;
 }
 
-const PURPLE = rgb("#9B30FF");
-const DIM_PURPLE = rgb("#4a1a6b");
-const FAINT = rgb("#333333");
-const MUTED = rgb("#555555");
-const SUBTLE = rgb("#444444");
-const RED = rgb("#FF0040");
+// Sync-load theme name from config before React mounts
+{
+  try {
+    const raw = readFileSync(join(homedir(), ".soulforge", "config.json"), "utf-8");
+    const cfg = JSON.parse(raw);
+    if (cfg.theme?.name) applyTheme(cfg.theme.name, cfg.theme?.transparent);
+  } catch {}
+}
+watchThemes();
+
+const _t = getThemeTokens();
+const PURPLE = rgb(_t.brand);
+const DIM_PURPLE = rgb(_t.brandDim);
+const FAINT = rgb(_t.textFaint);
+const MUTED = rgb(_t.textMuted);
+const SUBTLE = rgb(_t.textDim);
+const RED = rgb(_t.brandSecondary);
 
 const cols = process.stdout.columns ?? 80;
 const rows = process.stdout.rows ?? 24;
@@ -112,14 +124,19 @@ const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", 
 // Spinner runs in a child process so it stays alive even when the main
 // event loop is blocked by Bun's synchronous module resolution (~3s).
 // BUN_BE_BUN=1 makes compiled binaries act as the bun CLI (supports -e).
+// Pass theme colors to spinner subprocess as hex → ANSI
+function hexToAnsi(hex: string): string {
+  const n = parseInt(hex.slice(1), 16);
+  return `\\x1b[38;2;${(n >> 16) & 0xff};${(n >> 8) & 0xff};${n & 0xff}m`;
+}
 const spinnerProc = Bun.spawn(
   [
     process.execPath,
     "-e",
     `
 const RST = "\\x1b[0m";
-const PURPLE = "\\x1b[38;2;155;48;255m";
-const MUTED = "\\x1b[38;2;85;85;85m";
+const PURPLE = "${hexToAnsi(_t.brand)}";
+const MUTED = "${hexToAnsi(_t.textMuted)}";
 const DIM = "\\x1b[2m";
 const SPINNER = ${JSON.stringify(SPINNER)};
 const row = ${ROW.status};
@@ -217,8 +234,10 @@ center(
 );
 
 await sleep(100);
-const brandParts = BRAND_SEGMENTS.map((s) => ({ text: s.text, color: rgb(s.color) }));
-const brandPlain = BRAND_SEGMENTS.map((s) => s.text).join("");
+const brandParts = getBrandSegments().map((s) => ({ text: s.text, color: rgb(s.color) }));
+const brandPlain = getBrandSegments()
+  .map((s) => s.text)
+  .join("");
 const brandCol = Math.max(1, Math.floor((cols - brandPlain.length) / 2) + 1);
 let charIdx = 0;
 for (const part of brandParts) {

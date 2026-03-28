@@ -2,6 +2,7 @@ import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useEffect, useState } from "react";
 import { icon } from "../../core/icons.js";
+import { useTheme } from "../../core/theme/index.js";
 import { usePopupScroll } from "../../hooks/usePopupScroll.js";
 import type {
   AppConfig,
@@ -283,6 +284,7 @@ export function ProviderSettings({
   const innerW = popupWidth - 2;
   const maxVisible = Math.max(4, Math.floor(containerRows * 0.8) - CHROME_ROWS);
 
+  const t = useTheme();
   const [tab, setTab] = useState<ProviderTab>("claude");
   const { cursor, setCursor, scrollOffset, adjustScroll, resetScroll } = usePopupScroll(maxVisible);
   const [scope, setScope] = useState<ConfigScope>(() => detectInitialScope(projectConfig));
@@ -393,42 +395,42 @@ export function ProviderSettings({
         flexDirection="column"
         borderStyle="rounded"
         border={true}
-        borderColor="#8B5CF6"
+        borderColor={t.brandAlt}
         width={popupWidth}
       >
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#9B30FF" attributes={TextAttributes.BOLD}>
+          <text bg={POPUP_BG} fg={t.brand} attributes={TextAttributes.BOLD}>
             {icon("system")}
           </text>
-          <text bg={POPUP_BG} fg="white" attributes={TextAttributes.BOLD}>
+          <text bg={POPUP_BG} fg={t.textPrimary} attributes={TextAttributes.BOLD}>
             {" "}
             Provider Options
           </text>
         </PopupRow>
 
         <PopupRow w={innerW}>
-          {TABS.map((t, i) => (
-            <text key={t} bg={POPUP_BG}>
+          {TABS.map((tabItem, i) => (
+            <text key={tabItem} bg={POPUP_BG}>
               {i > 0 ? (
-                <span fg="#333" bg={POPUP_BG}>
+                <span fg={t.textFaint} bg={POPUP_BG}>
                   {" │ "}
                 </span>
               ) : (
                 ""
               )}
               <span
-                fg={t === tab ? "#FF0040" : "#666"}
-                attributes={t === tab ? TextAttributes.BOLD : undefined}
+                fg={tabItem === tab ? t.brandSecondary : t.textMuted}
+                attributes={tabItem === tab ? TextAttributes.BOLD : undefined}
                 bg={POPUP_BG}
               >
-                {TAB_ICONS[t]} {TAB_LABELS[t]}
+                {TAB_ICONS[tabItem]} {TAB_LABELS[tabItem]}
               </span>
             </text>
           ))}
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text fg="#333" bg={POPUP_BG}>
+          <text fg={t.textFaint} bg={POPUP_BG}>
             {"─".repeat(innerW - 2)}
           </text>
         </PopupRow>
@@ -442,29 +444,33 @@ export function ProviderSettings({
             const raw = vals[item.key as keyof CurrentValues];
 
             const valColor = disabled
-              ? "#333"
+              ? t.textFaint
               : item.type === "toggle"
                 ? raw
-                  ? "#2d5"
-                  : "#555"
+                  ? t.success
+                  : t.textMuted
                 : raw === "off"
-                  ? "#555"
-                  : "#8B5CF6";
+                  ? t.textMuted
+                  : t.brandAlt;
 
             const displayVal =
               item.type === "toggle" ? (raw ? "x" : " ") : String(raw).padStart(valW - 2);
 
             const srcScope = detectValueScope(item.key, projectConfig);
             const srcTag = srcScope === "project" ? "proj" : "glob";
-            const srcColor = srcScope === "project" ? "#00BFFF" : "#555";
+            const srcColor = srcScope === "project" ? t.info : t.textMuted;
 
             return (
               <box key={item.key} flexDirection="column" flexShrink={0}>
                 <PopupRow bg={bg} w={innerW}>
-                  <text bg={bg} fg={isSelected ? "#FF0040" : "#555"}>
+                  <text bg={bg} fg={isSelected ? t.brandSecondary : t.textMuted}>
                     {isSelected ? "› " : "  "}
                   </text>
-                  <text bg={bg} fg={disabled ? "#333" : "white"} attributes={TextAttributes.BOLD}>
+                  <text
+                    bg={bg}
+                    fg={disabled ? t.textFaint : "white"}
+                    attributes={TextAttributes.BOLD}
+                  >
                     {item.label.padEnd(labelW)}
                   </text>
                   <text bg={bg} fg={valColor}>
@@ -476,7 +482,7 @@ export function ProviderSettings({
                   </text>
                 </PopupRow>
                 <PopupRow bg={bg} w={innerW}>
-                  <text bg={bg} fg="#444">
+                  <text bg={bg} fg={t.textDim}>
                     {"    "}
                     {item.desc}
                   </text>
@@ -486,7 +492,7 @@ export function ProviderSettings({
           })}
           {items.length === 0 && (
             <PopupRow w={innerW}>
-              <text bg={POPUP_BG} fg="#555">
+              <text bg={POPUP_BG} fg={t.textMuted}>
                 {"  "}No options for this provider yet.
               </text>
             </PopupRow>
@@ -494,20 +500,20 @@ export function ProviderSettings({
         </box>
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#333">
+          <text bg={POPUP_BG} fg={t.textFaint}>
             {"─".repeat(innerW - 2)}
           </text>
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#555">
+          <text bg={POPUP_BG} fg={t.textMuted}>
             {"Scope: "}
           </text>
           {CONFIG_SCOPES.map((s) => (
             <text
               key={s}
               bg={POPUP_BG}
-              fg={s === scope ? "#8B5CF6" : "#444"}
+              fg={s === scope ? t.brandAlt : t.textDim}
               attributes={s === scope ? TextAttributes.BOLD : undefined}
             >
               {s === scope ? `[${s}]` : ` ${s} `}
@@ -517,7 +523,7 @@ export function ProviderSettings({
         </PopupRow>
 
         <PopupRow w={innerW}>
-          <text bg={POPUP_BG} fg="#555">
+          <text bg={POPUP_BG} fg={t.textMuted}>
             tab switch | {"↑↓"} nav | {"⏎"} cycle | {"← →"} scope | esc close
           </text>
         </PopupRow>

@@ -7,7 +7,8 @@ import { icon } from "./core/icons.js";
 import { disposeIntelligenceRouter } from "./core/intelligence/index.js";
 import { deactivateCurrentProvider, type ProviderStatus } from "./core/llm/provider.js";
 import type { PrerequisiteStatus } from "./core/setup/prerequisites.js";
-import { BRAND_PURPLE, BRAND_RED, garble } from "./core/utils/splash.js";
+import { getThemeTokens, useTheme } from "./core/theme/index.js";
+import { garble } from "./core/utils/splash.js";
 import { resetStatusBarStore } from "./stores/statusbar.js";
 import { resetUIStore } from "./stores/ui.js";
 import type { AppConfig } from "./types/index.js";
@@ -46,16 +47,26 @@ function runCleanup(): void {
 
 let bannerPrinted = false;
 
+function hexToAnsi(hex: string): string {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return `\x1b[38;2;${(n >> 16) & 0xff};${(n >> 8) & 0xff};${n & 0xff}m`;
+}
+
 function printExitBanner(): void {
   if (bannerPrinted) return;
   bannerPrinted = true;
   process.stdout.write("\x1b[2J\x1b[H");
   if (exitSessionId) {
+    const t = getThemeTokens();
+    const brand = `\x1b[1m${hexToAnsi(t.brand)}`;
+    const accent = `\x1b[1m${hexToAnsi(t.info)}`;
+    const secondary = hexToAnsi(t.brandSecondary);
+    const rst = "\x1b[0m";
     const shortId = exitSessionId.slice(0, 8);
     process.stdout.write(
-      `\x1b[1;35m${icon("ghost")} SoulForge\x1b[0m session saved.\n` +
-        `  Resume: \x1b[1;36msoulforge --session ${shortId}\x1b[0m\n` +
-        `  by \x1b[1;35mProxy\x1b[38;2;255;0;64mSoul\x1b[0m.com\n\n`,
+      `${brand}${icon("ghost")} SoulForge${rst} session saved.\n` +
+        `  Resume: ${accent}soulforge --session ${shortId}${rst}\n` +
+        `  by ${brand}Proxy${secondary}Soul${rst}.com\n\n`,
     );
   }
 }
@@ -96,6 +107,7 @@ const RESTART_STEPS = [
 const RESTART_SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 function RestartSplash({ onComplete }: { onComplete: () => void }) {
+  const t = useTheme();
   const ghost = icon("ghost");
   const label = "Restarting";
 
@@ -152,29 +164,29 @@ function RestartSplash({ onComplete }: { onComplete: () => void }) {
 
   return (
     <box flexDirection="column" flexGrow={1} justifyContent="center" alignItems="center">
-      <text fg={BRAND_PURPLE} attributes={TextAttributes.BOLD}>
+      <text fg={t.brand} attributes={TextAttributes.BOLD}>
         {anim.ghostFrame}
       </text>
       <box height={1} />
       <text>
-        <span fg="#555">{visibleLabel}</span>
-        <span fg={BRAND_RED}>{cursor}</span>
+        <span fg={t.textMuted}>{visibleLabel}</span>
+        <span fg={t.brandSecondary}>{cursor}</span>
       </text>
       <box height={1} />
-      <text fg="#333">{"─".repeat(30)}</text>
+      <text fg={t.textFaint}>{"─".repeat(30)}</text>
       <box height={1} />
       {RESTART_STEPS.map((step, i) => {
         if (i > anim.phase) return null;
         const done = i < anim.phase;
         return (
           <box key={step} gap={1} flexDirection="row">
-            <text fg={done ? "#4a7" : BRAND_PURPLE}>{done ? "✓" : spin}</text>
-            <text fg={done ? "#555" : "#aaa"}>{step}</text>
+            <text fg={done ? t.success : t.brand}>{done ? "✓" : spin}</text>
+            <text fg={done ? t.textMuted : t.textPrimary}>{step}</text>
           </box>
         );
       })}
       <box height={1} />
-      <text fg={BRAND_PURPLE} attributes={TextAttributes.BOLD}>
+      <text fg={t.brand} attributes={TextAttributes.BOLD}>
         {anim.wordmark}
       </text>
     </box>

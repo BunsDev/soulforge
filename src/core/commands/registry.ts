@@ -510,6 +510,13 @@ const COMMAND_DEFS: CommandDef[] = [
     tags: ["config", "preferences", "hub"],
   },
   {
+    cmd: "/theme",
+    ic: "palette",
+    desc: "Switch color theme (live preview)",
+    category: "Settings",
+    tags: ["color", "dark", "light", "catppuccin", "dracula", "nord", "gruvbox", "solarized"],
+  },
+  {
     cmd: "/setup",
     ic: "ghost",
     desc: "Check & install prerequisites",
