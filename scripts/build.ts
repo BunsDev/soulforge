@@ -153,9 +153,8 @@ if (isCompile) {
     entrypoints: ["src/boot.tsx"],
     outdir: "dist",
     target: "bun",
-    external: ["react-devtools-core"],
     naming: "[dir]/index.[ext]",
-    plugins: [reactCompilerPlugin],
+    plugins: [reactCompilerPlugin, devtoolsStubPlugin],
   });
 
   if (!result.success) {
