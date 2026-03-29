@@ -2,6 +2,11 @@
 
 All notable changes to SoulForge are documented here.
 
+## [1.0.3] — 2026-03-29
+
+### Features
+
+- add X-Source header to LLM Gateway requests
 ## [1.0.2] — 2026-03-29
 
 ### Miscellaneous
