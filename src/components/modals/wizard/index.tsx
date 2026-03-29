@@ -114,23 +114,26 @@ export const FirstRunWizard = memo(function FirstRunWizard({
         <ProgressBar iw={iw} stepIdx={stepIdx} />
         <Hr iw={iw} />
 
-        {step === "welcome" && <WelcomeStep iw={iw} />}
-        {step === "setup" && (
-          <SetupStep
-            iw={iw}
-            hasModel={hasModel}
-            activeModel={activeModel}
-            onSelectModel={onSelectModel}
-            active={setupActive}
-            setActive={setSetupActive}
-          />
-        )}
-        {step === "features" && <FeaturesStep iw={iw} />}
-        {step === "shortcuts" && <ShortcutsStep iw={iw} />}
-        {step === "theme" && <ThemeStep iw={iw} active={setupActive} setActive={setSetupActive} />}
-        {step === "ready" && <ReadyStep iw={iw} />}
+        <box flexDirection="column" flexGrow={1} overflow="hidden">
+          {step === "welcome" && <WelcomeStep iw={iw} />}
+          {step === "setup" && (
+            <SetupStep
+              iw={iw}
+              hasModel={hasModel}
+              activeModel={activeModel}
+              onSelectModel={onSelectModel}
+              active={setupActive}
+              setActive={setSetupActive}
+            />
+          )}
+          {step === "features" && <FeaturesStep iw={iw} />}
+          {step === "shortcuts" && <ShortcutsStep iw={iw} />}
+          {step === "theme" && (
+            <ThemeStep iw={iw} active={setupActive} setActive={setSetupActive} />
+          )}
+          {step === "ready" && <ReadyStep iw={iw} />}
+        </box>
 
-        <box flexGrow={1} backgroundColor={bg} />
         <Hr iw={iw} />
         <FooterNav iw={iw} stepIdx={stepIdx} step={step} />
       </box>
