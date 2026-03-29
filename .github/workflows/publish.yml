@@ -40,8 +40,13 @@ jobs:
 
       - name: Install target platform native deps
         run: |
+          PKG="@opentui/core-${{ matrix.platform }}-${{ matrix.arch }}"
           OTUI_VER=$(bun -e "console.log(require('@opentui/core/package.json').version)")
-          bun add --optional "@opentui/core-${{ matrix.platform }}-${{ matrix.arch }}@${OTUI_VER}"
+          TARGET_DIR="node_modules/@opentui/core-${{ matrix.platform }}-${{ matrix.arch }}"
+          if [ ! -d "$TARGET_DIR" ]; then
+            mkdir -p "$TARGET_DIR"
+            npm pack "${PKG}@${OTUI_VER}" 2>/dev/null | tail -1 | xargs tar xzf --strip-components=1 -C "$TARGET_DIR"
+          fi
 
       - name: Build bundle
         run: bash scripts/bundle.sh ${{ matrix.arch }} ${{ matrix.platform }}
@@ -50,7 +55,11 @@ jobs:
         run: |
           VERSION=$(bun -e "console.log(require('./package.json').version)")
           BUNDLE="soulforge-${VERSION}-${{ matrix.platform }}-${{ matrix.arch }}"
-          gh release upload "${{ github.event.release.tag_name }}" "dist/bundle/${BUNDLE}.tar.gz" --clobber
+          for i in 1 2 3; do
+            gh release upload "${{ github.event.release.tag_name }}" "dist/bundle/${BUNDLE}.tar.gz" --clobber && break
+            echo "Upload attempt $i failed, retrying in 10s..."
+            sleep 10
+          done
         env:
           GH_TOKEN: ${{ github.token }}
 
