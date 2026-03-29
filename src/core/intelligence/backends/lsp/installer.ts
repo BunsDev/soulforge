@@ -373,7 +373,9 @@ export async function installPackage(
             execSync("command -v bun", { stdio: "ignore" });
             return "bun";
           } catch {
-            return process.execPath;
+            const sfBin = join(homedir(), ".soulforge", "bin", "bun");
+            if (existsSync(sfBin)) return sfBin;
+            return "bun";
           }
         })();
         await runCommand(bunBin, ["add", "--cwd", SOULFORGE_LSP_DIR, fullName, ...extras], log, {

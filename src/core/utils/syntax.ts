@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -23,21 +23,94 @@ if (IS_BUNDLED) {
   if (!existsSync(coreAssetsDir)) coreAssetsDir = bundledAssets;
 }
 
-const tsHighlights = [resolve(coreAssetsDir, "typescript/highlights.scm")];
-const tsWasm = resolve(coreAssetsDir, "typescript/tree-sitter-typescript.wasm");
-const jsHighlights = [resolve(coreAssetsDir, "javascript/highlights.scm")];
-const jsWasm = resolve(coreAssetsDir, "javascript/tree-sitter-javascript.wasm");
+// Build parser registrations from whatever languages exist in the assets directory.
+// This covers JS, TS, markdown, markdown_inline, zig, and any future additions
+// without hardcoding each one — critical for the bundled binary where OpenTUI's
+// default `import ... with { type: "file" }` paths resolve to broken relative paths.
+const MARKDOWN_INJECTION_MAP = {
+  nodeTypes: { inline: "markdown_inline", pipe_table_cell: "markdown_inline" },
+  infoStringMap: {
+    javascript: "javascript",
+    js: "javascript",
+    jsx: "javascriptreact",
+    javascriptreact: "javascriptreact",
+    typescript: "typescript",
+    ts: "typescript",
+    tsx: "typescriptreact",
+    typescriptreact: "typescriptreact",
+    markdown: "markdown",
+    md: "markdown",
+  },
+};
 
-const aliases: FiletypeParserOptions[] = [
-  { filetype: "ts", queries: { highlights: tsHighlights }, wasm: tsWasm },
-  { filetype: "tsx", queries: { highlights: tsHighlights }, wasm: tsWasm },
-  { filetype: "js", queries: { highlights: jsHighlights }, wasm: jsWasm },
-  { filetype: "jsx", queries: { highlights: jsHighlights }, wasm: jsWasm },
-  { filetype: "typescriptreact", queries: { highlights: tsHighlights }, wasm: tsWasm },
-  { filetype: "javascriptreact", queries: { highlights: jsHighlights }, wasm: jsWasm },
-];
+const TS_ALIASES: Record<string, string[]> = {
+  typescript: ["typescriptreact"],
+  javascript: ["javascriptreact"],
+};
 
-addDefaultParsers(aliases);
+const EXTRA_FILETYPES: Record<string, FiletypeParserOptions[]> = {
+  typescript: [
+    { filetype: "ts", queries: { highlights: [] }, wasm: "" },
+    { filetype: "tsx", queries: { highlights: [] }, wasm: "" },
+  ],
+  javascript: [
+    { filetype: "js", queries: { highlights: [] }, wasm: "" },
+    { filetype: "jsx", queries: { highlights: [] }, wasm: "" },
+  ],
+};
+
+function discoverParsers(): FiletypeParserOptions[] {
+  const parsers: FiletypeParserOptions[] = [];
+  let dirs: string[];
+  try {
+    dirs = readdirSync(coreAssetsDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name);
+  } catch {
+    return parsers;
+  }
+
+  for (const dir of dirs) {
+    const langDir = resolve(coreAssetsDir, dir);
+    const wasmFiles = readdirSync(langDir).filter((f) => f.endsWith(".wasm"));
+    const wasmFile = wasmFiles[0];
+    if (!wasmFile) continue;
+
+    const highlights = resolve(langDir, "highlights.scm");
+    const injections = resolve(langDir, "injections.scm");
+    const hasHighlights = existsSync(highlights);
+    const hasInjections = existsSync(injections);
+    if (!hasHighlights) continue;
+
+    const parser: FiletypeParserOptions = {
+      filetype: dir,
+      queries: {
+        highlights: [highlights],
+        ...(hasInjections ? { injections: [injections] } : {}),
+      },
+      wasm: resolve(langDir, wasmFile),
+      ...(TS_ALIASES[dir] ? { aliases: TS_ALIASES[dir] } : {}),
+      ...(dir === "markdown" ? { injectionMapping: MARKDOWN_INJECTION_MAP } : {}),
+    };
+    parsers.push(parser);
+
+    // Add short aliases (ts, tsx, js, jsx) that point to the same wasm/highlights
+    const extras = EXTRA_FILETYPES[dir];
+    if (extras) {
+      for (const extra of extras) {
+        parsers.push({
+          ...extra,
+          queries: { highlights: [highlights] },
+          wasm: resolve(langDir, wasmFile),
+        });
+      }
+    }
+  }
+
+  return parsers;
+}
+
+addDefaultParsers(discoverParsers());
 
 const theme: ThemeTokenStyle[] = [
   { scope: ["default"], style: { foreground: "#aaa" } },
