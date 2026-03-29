@@ -41,7 +41,25 @@ function TerminalRow({ entry, isSelected }: { entry: TerminalEntry; isSelected: 
   );
 }
 
-export function TerminalList() {
+export function TerminalsPanel() {
+  const t = useTheme();
+
+  return (
+    <box
+      flexDirection="column"
+      flexGrow={1}
+      flexShrink={1}
+      minHeight={0}
+      borderStyle="rounded"
+      border={true}
+      borderColor={t.textFaint}
+    >
+      <TerminalList />
+    </box>
+  );
+}
+
+function TerminalList() {
   const t = useTheme();
   const terminals = useTerminalStore((s) => s.terminals);
   const selectedId = useTerminalStore((s) => s.selectedId);
@@ -51,8 +69,8 @@ export function TerminalList() {
 
   return (
     <box flexDirection="column" flexGrow={1} flexShrink={1} minHeight={0}>
-      <box height={1} flexShrink={0} paddingX={1} marginTop={-1}>
-        <text truncate bg={t.bgApp}>
+      <box height={1} flexShrink={0} paddingX={1}>
+        <text truncate>
           <span fg={t.brandAlt}>{icon("terminal")}</span>
           <span fg={t.textSecondary}> Terminals </span>
           {activeCount > 0 && <span fg={t.success}>{String(activeCount)}</span>}

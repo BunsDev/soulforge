@@ -33,10 +33,11 @@ import { PlanReviewPrompt } from "../plan/PlanReviewPrompt.js";
 import { TaskProgress, useTaskList } from "../plan/TaskProgress.js";
 import { QuestionPrompt } from "../QuestionPrompt.js";
 import { AnimatedBorder } from "./AnimatedBorder.js";
-import { ChangedFilesBar, SidePanel } from "./ChangedFiles.js";
+import { ChangedFilesBar, ChangesPanel } from "./ChangedFiles.js";
 import { LandingPage } from "./LandingPage.js";
 import { LoadingStatus } from "./LoadingStatus.js";
 import { SystemBanner } from "./SystemBanner.js";
+import { TerminalsPanel } from "./TerminalList.js";
 
 interface TabInstanceProps {
   tabId: string;
@@ -315,6 +316,7 @@ export const TabInstance = memo(function TabInstance({
   const {
     codeExpandedMap,
     changesExpanded,
+    terminalsExpanded,
     chatStyle,
     editorSplit,
     showReasoning,
@@ -323,6 +325,7 @@ export const TabInstance = memo(function TabInstance({
     useShallow((s) => ({
       codeExpandedMap: s.codeExpanded,
       changesExpanded: s.changesExpanded,
+      terminalsExpanded: s.terminalsExpanded,
       chatStyle: s.chatStyle,
       editorSplit: s.editorSplit,
       showReasoning: s.showReasoning,
@@ -513,7 +516,12 @@ export const TabInstance = memo(function TabInstance({
             </scrollbox>
           </AnimatedBorder>
         )}
-        {changesExpanded && <SidePanel messages={chat.messages} cwd={cwd} />}
+        {(changesExpanded || terminalsExpanded) && (
+          <box flexDirection="column" width="20%">
+            {changesExpanded && <ChangesPanel messages={chat.messages} cwd={cwd} />}
+            {terminalsExpanded && <TerminalsPanel />}
+          </box>
+        )}
       </box>
 
       {chat.pendingPlanReview ? (

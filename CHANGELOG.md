@@ -11,28 +11,28 @@ Initial public release.
 - **Embedded Neovim** — full LazyVim distribution with 30+ plugins, LSP via Mason, Catppuccin theme, msgpack-RPC bridge
 - **Multi-agent dispatch** — up to 8 parallel agents (3 concurrent slots) with shared file cache, edit ownership, and dependency ordering
 - **Graph-powered repo map** — SQLite-backed codebase graph with PageRank, cochange analysis, blast radius, clone detection, and FTS5 search
-- **4-tier code intelligence** — LSP → ts-morph → tree-sitter → regex fallback chain across 33 languages
+- **4-tier code intelligence** — LSP → ts-morph → tree-sitter → regex fallback chain across 33+ languages
 - **V2 incremental compaction** — deterministic state extraction from tool calls with cheap LLM gap-fill
 - **Per-step tool result pruning** — rolling window keeps last 4 results full, older results become one-line summaries enriched with repo map symbols
 
-### Tools (39 total)
+### Tools (34 total)
 
 - **Compound tools** — `rename_symbol` (compiler-guaranteed), `move_symbol` (with cross-file import updates), `refactor` (extract function/variable)
 - **Soul tools** — `soul_grep` (count-mode with repo map intercept), `soul_find` (fuzzy search with PageRank + signatures), `soul_analyze` (file profiles, unused exports, identifier frequency), `soul_impact` (dependents, cochanges, blast radius)
-- **Project tool** — auto-detects lint/test/build/typecheck across 17 ecosystems, pre-commit gate, monorepo workspace discovery
+- **Project tool** — auto-detects lint/test/build/typecheck across 23 ecosystems, pre-commit gate, monorepo workspace discovery
 - **Web tools** — `web_search` and `fetch_page` with SSRF protection and approval gates
 - **Memory system** — SQLite with FTS5, title-only memories, pull-based recall
 - **Line-anchored editing** — `edit_file` with `lineStart` hint, auto re-read on content drift, rich error output
 
 ### Providers
 
-- 10 built-in providers: Anthropic, OpenAI, Google, xAI, Ollama, OpenRouter, LLM Gateway, Vercel AI Gateway, Proxy, and custom OpenAI-compatible
+- 9 built-in providers: Anthropic, OpenAI, Google, xAI, Ollama, OpenRouter, LLM Gateway, Vercel AI Gateway, Proxy — plus custom OpenAI-compatible
 - Task router — assign models per task type (plan, code, explore, search, trivial, cleanup, compact)
 - Per-family prompt system with separate base prompts for Claude, OpenAI, Gemini, and generic fallback
 
 ### Interface
 
-- 76 slash commands, 10 keyboard shortcuts
+- 86 slash commands, 17 keyboard shortcuts
 - 6 forge modes: default, auto, architect, socratic, challenge, plan
 - Multi-tab chat with cross-tab file coordination and advisory claims
 - User steering — type while the agent works, messages inject at the next step
@@ -42,7 +42,7 @@ Initial public release.
 
 ### Distribution
 
-- Prebuilt standalone binaries for macOS (ARM64, x64) and Linux (x64, ARM64)
+- **macOS and Linux only** — native support for macOS (ARM64, x64) and Linux (x64, ARM64). Windows users can run via WSL.
 - Self-contained bundle with Neovim, ripgrep, fd, lazygit, tree-sitter grammars, Nerd Fonts
 - npm via GitHub Packages (`@proxysoul/soulforge`)
 - Homebrew (`brew install proxysoul/tap/soulforge`)

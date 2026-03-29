@@ -35,6 +35,38 @@ const devtoolsStubPlugin: BunPlugin = {
   },
 };
 
+// ── Native addon loader for ghostty-opentui ──
+// The .node native addon can't be embedded in compiled binaries.
+// Replace the CJS loader with one that loads from ~/.soulforge/ at runtime.
+const nativeAddonPlugin: BunPlugin = {
+  name: "native-addon-loader",
+  setup(build) {
+    build.onLoad({ filter: /ghostty-opentui.*native-lib\.cjs$/ }, () => ({
+      contents: `
+const { platform, arch } = require("os");
+const { join } = require("path");
+const { homedir } = require("os");
+function loadNativeModule() {
+  const p = platform();
+  const a = arch();
+  const name = "ghostty-opentui.node";
+  const paths = [
+    join(homedir(), ".soulforge", "native", p + "-" + a, name),
+    join(homedir(), ".soulforge", "bin", name),
+  ];
+  for (const path of paths) {
+    try { return require(path); } catch {}
+  }
+  return null;
+}
+const native = loadNativeModule();
+module.exports = { native };
+`,
+      loader: "js",
+    }));
+  },
+};
+
 // ── React Compiler Plugin ────────────────────────────────────────────
 const reactCompilerPlugin: BunPlugin = {
   name: "react-compiler",
@@ -78,7 +110,7 @@ if (isCompile) {
     target: "bun",
     external: ["react-devtools-core"],
     naming: "soulforge.[ext]",
-    plugins: [reactCompilerPlugin],
+    plugins: [reactCompilerPlugin, nativeAddonPlugin],
   });
 
   if (!phase1.success) {

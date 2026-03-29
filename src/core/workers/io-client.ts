@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ModelMessage } from "ai";
 import { useWorkerStore } from "../../stores/workers.js";
@@ -5,6 +6,8 @@ import type { ChatMessage } from "../../types/index.js";
 import type { WorkingState } from "../compaction/types.js";
 import type { SessionMeta } from "../sessions/types.js";
 import { WorkerClient } from "./rpc.js";
+
+const IS_BUNDLED = import.meta.url.includes("$bunfs");
 
 interface CompressResult {
   text: string;
@@ -36,7 +39,9 @@ export function disposeIOClient(): void {
 
 export class IOClient extends WorkerClient {
   constructor() {
-    const workerPath = join(import.meta.dir, "io.worker.ts");
+    const workerPath = IS_BUNDLED
+      ? join(homedir(), ".soulforge", "workers", "io.worker.js")
+      : join(import.meta.dir, "io.worker.ts");
     super(workerPath, undefined, { smol: true });
     useWorkerStore.getState().markStarted("io");
     this.onStatusChange = (status) => {

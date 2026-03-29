@@ -2,7 +2,7 @@
 
 ## User Reference
 
-- **[Command Reference](commands-reference.md)** — All 73 slash commands organized by category
+- **[Command Reference](commands-reference.md)** — All 86 slash commands organized by category
 - **[Headless Mode](headless.md)** — Non-interactive CLI for CI/CD, scripting, and automation
 - **[Custom Providers](headless.md#custom-providers)** — Add any OpenAI-compatible API via config
 - **[Project Tool](project-tool.md)** — Toolchain detection, pre-commit checks, monorepo discovery

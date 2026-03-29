@@ -1,7 +1,10 @@
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { useWorkerStore } from "../../stores/workers.js";
 import type { RepoMapOptions, SymbolForSummary } from "../intelligence/repo-map.js";
 import { WorkerClient } from "./rpc.js";
+
+const IS_BUNDLED = import.meta.url.includes("$bunfs");
 
 type SummaryGenerator = (
   batch: SymbolForSummary[],
@@ -42,7 +45,9 @@ export class IntelligenceClient extends WorkerClient {
   private static readonly SCAN_TIMEOUT = 300_000; // 5 min for full repo scan
 
   constructor(cwd: string) {
-    const workerPath = join(import.meta.dir, "intelligence.worker.ts");
+    const workerPath = IS_BUNDLED
+      ? join(homedir(), ".soulforge", "workers", "intelligence.worker.js")
+      : join(import.meta.dir, "intelligence.worker.ts");
     super(workerPath, { cwd });
     this._cwd = cwd;
 

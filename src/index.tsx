@@ -296,9 +296,12 @@ export async function start(opts: StartOptions): Promise<void> {
   r.keyInput.setMaxListeners(30);
 
   // Register ghostty-terminal for floating terminal rendering
-  const { extend } = await import("@opentui/react");
-  const { GhosttyTerminalRenderable } = await import("ghostty-opentui/terminal-buffer");
-  extend({ "ghostty-terminal": GhosttyTerminalRenderable });
+  // Native .node addon can't be embedded in compiled binaries — graceful fallback
+  try {
+    const { extend } = await import("@opentui/react");
+    const { GhosttyTerminalRenderable } = await import("ghostty-opentui/terminal-buffer");
+    extend({ "ghostty-terminal": GhosttyTerminalRenderable });
+  } catch {}
 
   opts.createRoot(r).render(<AppRoot opts={opts} />);
 }

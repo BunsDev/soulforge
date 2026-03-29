@@ -132,6 +132,29 @@ rm -rf "${DEPS_DIR}/proxy-tmp"
 
 chmod +x "${DEPS_DIR}/nvim/bin/nvim" "${DEPS_DIR}/rg" "${DEPS_DIR}/fd" "${DEPS_DIR}/lazygit" "${DEPS_DIR}/cli-proxy-api"
 
+# Native addons — can't be embedded in compiled binaries
+echo "    Bundling native addons..."
+NATIVE_DIR="${DEPS_DIR}/native/${PLATFORM}-${ARCH}"
+mkdir -p "${NATIVE_DIR}"
+if [[ "$PLATFORM" == "darwin" ]]; then
+  NATIVE_PLATFORM="darwin"
+else
+  NATIVE_PLATFORM="linux"
+fi
+GHOSTTY_NODE="node_modules/ghostty-opentui/dist/${NATIVE_PLATFORM}-${ARCH}/ghostty-opentui.node"
+if [[ -f "$GHOSTTY_NODE" ]]; then
+  cp "$GHOSTTY_NODE" "${NATIVE_DIR}/ghostty-opentui.node"
+  echo "    ✓ ghostty-opentui.node"
+else
+  echo "    ⚠ ghostty-opentui.node not found for ${PLATFORM}-${ARCH} (floating terminal disabled)"
+fi
+
+# Worker scripts — pre-bundled for compiled binary
+echo "    Bundling worker scripts..."
+mkdir -p "${DEPS_DIR}/workers"
+bun build src/core/workers/intelligence.worker.ts --outfile "${DEPS_DIR}/workers/intelligence.worker.js" --target=bun
+bun build src/core/workers/io.worker.ts --outfile "${DEPS_DIR}/workers/io.worker.js" --target=bun
+
 # Tree-sitter WASM runtime + grammars + OpenTUI syntax assets
 echo "    Bundling tree-sitter assets..."
 mkdir -p "${DEPS_DIR}/wasm"
@@ -309,8 +332,12 @@ cp -r "${SCRIPT_DIR}/deps/nvim" "$NVIM_DIR"
 ln -sf "${NVIM_DIR}/bin/nvim" "${BIN_DIR}/nvim") &
 spin "Summoning the editor spirit" $!
 
-(mkdir -p "${SOULFORGE_DIR}/wasm"
+(mkdir -p "${SOULFORGE_DIR}/wasm" "${SOULFORGE_DIR}/workers"
 cp "${SCRIPT_DIR}/deps/wasm/"*.wasm "${SOULFORGE_DIR}/wasm/"
+cp "${SCRIPT_DIR}/deps/workers/"*.js "${SOULFORGE_DIR}/workers/"
+if [[ -d "${SCRIPT_DIR}/deps/native" ]]; then
+  cp -r "${SCRIPT_DIR}/deps/native" "${SOULFORGE_DIR}/native"
+fi
 rm -rf "${SOULFORGE_DIR}/opentui-assets"
 cp -r "${SCRIPT_DIR}/deps/opentui-assets" "${SOULFORGE_DIR}/opentui-assets"
 cp "${SCRIPT_DIR}/deps/init.lua" "${SOULFORGE_DIR}/init.lua") &
@@ -424,7 +451,7 @@ if [[ -d "$SOULFORGE_DIR" ]]; then
   (rm -rf "${SOULFORGE_DIR}/installs") &
   spin "Banishing the spirits" $!
 
-  (rm -rf "${SOULFORGE_DIR}/fonts" "${SOULFORGE_DIR}/wasm" "${SOULFORGE_DIR}/opentui-assets" "${SOULFORGE_DIR}/init.lua") &
+  (rm -rf "${SOULFORGE_DIR}/fonts" "${SOULFORGE_DIR}/wasm" "${SOULFORGE_DIR}/workers" "${SOULFORGE_DIR}/opentui-assets" "${SOULFORGE_DIR}/init.lua") &
   spin "Dissolving the runes" $!
 
   (rm -rf "${SOULFORGE_DIR}/sessions" "${SOULFORGE_DIR}/memories") &

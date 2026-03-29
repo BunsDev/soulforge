@@ -3,7 +3,6 @@ import { useMemo } from "react";
 import { icon } from "../../core/icons.js";
 import { useTheme } from "../../core/theme/index.js";
 import type { ChatMessage } from "../../types/index.js";
-import { TerminalList } from "./TerminalList.js";
 
 interface FileEntry {
   path: string;
@@ -241,29 +240,18 @@ function ChangesSection({ messages, cwd }: PanelProps) {
   );
 }
 
-export function SidePanel({ messages, cwd }: PanelProps) {
+export function ChangesPanel({ messages, cwd }: PanelProps) {
   const t = useTheme();
 
   return (
     <box
       flexDirection="column"
-      width="20%"
+      flexShrink={0}
       borderStyle="rounded"
       border={true}
       borderColor={t.textFaint}
     >
       <ChangesSection messages={messages} cwd={cwd} />
-      <box
-        height={0}
-        flexShrink={0}
-        border={["top"]}
-        borderColor={t.textFaint}
-        borderStyle="rounded"
-      />
-      <TerminalList />
     </box>
   );
 }
-
-/** @deprecated Use SidePanel instead */
-export const ChangesPanel = SidePanel;

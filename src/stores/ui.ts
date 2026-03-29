@@ -70,6 +70,7 @@ interface UIState {
 
   codeExpanded: Record<string, boolean>;
   changesExpanded: boolean;
+  terminalsExpanded: boolean;
   chatStyle: ChatStyle;
   showReasoning: boolean;
   reasoningExpanded: Record<string, boolean>;
@@ -91,6 +92,8 @@ interface UIState {
   setCodeExpanded: (tabId: string, v: boolean) => void;
   toggleChangesExpanded: () => void;
   setChangesExpanded: (v: boolean) => void;
+  toggleTerminalsExpanded: () => void;
+  setTerminalsExpanded: (v: boolean) => void;
   setChatStyle: (style: ChatStyle) => void;
   setShowReasoning: (v: boolean) => void;
   toggleShowReasoning: () => void;
@@ -110,6 +113,7 @@ export const useUIStore = create<UIState>()(
 
     codeExpanded: {},
     changesExpanded: false,
+    terminalsExpanded: false,
     chatStyle: "accent",
     showReasoning: true,
     reasoningExpanded: {},
@@ -159,6 +163,8 @@ export const useUIStore = create<UIState>()(
       set((s) => ({ codeExpanded: { ...s.codeExpanded, [tabId]: v } })),
     toggleChangesExpanded: () => set((s) => ({ changesExpanded: !s.changesExpanded })),
     setChangesExpanded: (v) => set({ changesExpanded: v }),
+    toggleTerminalsExpanded: () => set((s) => ({ terminalsExpanded: !s.terminalsExpanded })),
+    setTerminalsExpanded: (v) => set({ terminalsExpanded: v }),
     setChatStyle: (style) => set({ chatStyle: style }),
     setShowReasoning: (v) => set({ showReasoning: v }),
     toggleShowReasoning: () => set((s) => ({ showReasoning: !s.showReasoning })),
@@ -195,6 +201,7 @@ export function resetUIStore(): void {
     statusDashboardTab: "Context",
     codeExpanded: {},
     changesExpanded: false,
+    terminalsExpanded: false,
     chatStyle: "accent",
     showReasoning: true,
     reasoningExpanded: {},

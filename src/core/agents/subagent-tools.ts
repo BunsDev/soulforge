@@ -188,11 +188,10 @@ export function createAgent(
   // Trivial tier uses a cheaper model (different cache namespace), so skip.
   const useMiniForge = models.forgeInstructions != null && tier !== "trivial";
 
-  let subagentProviderOptions = useMiniForge
-    ? models.providerOptions
-    : stripContextManagement(models.providerOptions);
+  // Always strip context management — subagent models (e.g. Haiku) may not support it
+  let subagentProviderOptions = stripContextManagement(models.providerOptions);
 
-  if (useExplore && !useMiniForge && subagentProviderOptions) {
+  if (useExplore && subagentProviderOptions) {
     const patched: Record<string, unknown> = {};
     for (const [provider, val] of Object.entries(subagentProviderOptions)) {
       if (val && typeof val === "object" && "effort" in val) {
@@ -358,6 +357,7 @@ export function buildSubagentTools(models: SubagentModels) {
   };
 
   let turnDispatchCount = 0;
+  let lastDispatchHadCode = false;
   const turnDispatchSummaries: string[] = [];
 
   return {
@@ -680,7 +680,11 @@ export function buildSubagentTools(models: SubagentModels) {
 
           if (!args.force) {
             // Gate: per-turn dispatch limit
-            if (turnDispatchCount > 0) {
+            // Allow explore→code transitions (investigate then fix), but reject
+            // same-category repeats (explore→explore or code→code)
+            const thisHasCode = args.tasks.some((t) => t.role === "code");
+            const isRoleTransition = turnDispatchCount === 1 && !lastDispatchHadCode && thisHasCode;
+            if (turnDispatchCount > 0 && !isRoleTransition) {
               const prev = turnDispatchSummaries
                 .map((s, i) => `  ${String(i + 1)}. ${s}`)
                 .join("\n");
@@ -1108,6 +1112,7 @@ export function buildSubagentTools(models: SubagentModels) {
 
             const edited = [...editedMap.keys()];
             turnDispatchCount++;
+            lastDispatchHadCode = task.role === "code";
             turnDispatchSummaries.push(
               `${args.objective ?? "Single agent"}: ${edited.length > 0 ? `edited ${edited.join(", ")}` : "read-only"}`,
             );
@@ -1336,6 +1341,7 @@ export function buildSubagentTools(models: SubagentModels) {
 
           const editedPaths = [...allEdited.keys()];
           turnDispatchCount++;
+          lastDispatchHadCode = args.tasks.some((t) => t.role === "code");
           turnDispatchSummaries.push(
             `${args.objective ?? "Dispatch"}: ${String(successful.length)}/${String(tasks.length)} agents` +
               (editedPaths.length > 0 ? `, edited ${editedPaths.join(", ")}` : ""),

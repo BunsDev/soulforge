@@ -135,7 +135,7 @@ function handleTerminals(input: string, ctx: CommandContext): void {
   const arg = parts.slice(1).join(" ");
 
   if (!sub || sub === "list") {
-    useUIStore.getState().setChangesExpanded(true);
+    useUIStore.getState().toggleTerminalsExpanded();
     return;
   }
 
@@ -146,7 +146,7 @@ function handleTerminals(input: string, ctx: CommandContext): void {
       sysMsg(ctx, result.error ?? "Failed to spawn terminal.");
       return;
     }
-    useUIStore.getState().setChangesExpanded(true);
+    useUIStore.getState().setTerminalsExpanded(true);
     useUIStore.getState().openModal("floatingTerminal");
     return;
   }

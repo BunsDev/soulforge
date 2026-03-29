@@ -105,7 +105,7 @@ project({ action: "run", script: "dev" })
    - `CMakeLists.txt` → cmake
    - `mix.exs` → mix
    - `Gemfile` → bundle
-   - ... 20+ ecosystems
+   - ... 23 ecosystems total
 
 2. Map `action` to the correct command for that toolchain:
    - `test` → `bun test`, `cargo test`, `pytest`, `go test ./...`, `xcodebuild test -scheme...`

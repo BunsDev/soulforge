@@ -2,6 +2,10 @@
 
 AI-Powered Terminal IDE by proxySoul.
 
+## Platform
+
+macOS (ARM64, x64) and Linux (x64, ARM64). No native Windows support — use WSL.
+
 ## Stack
 
 - **Runtime**: Bun (not Node.js)

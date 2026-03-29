@@ -333,6 +333,7 @@ export async function runPrompt(opts: HeadlessRunOptions, merged: AppConfig): Pr
     const fullId = env.sessionManager.findByPrefix(opts.sessionId);
     if (!fullId) {
       stderrError(`Session "${opts.sessionId}" not found`);
+      env.contextManager.dispose();
       process.exit(EXIT_ERROR);
     }
     const data = env.sessionManager.loadSessionMessages(fullId);
@@ -516,28 +517,53 @@ export async function runPrompt(opts: HeadlessRunOptions, merged: AppConfig): Pr
  * Read a prompt from stdin. Single newline submits.
  * Trailing backslash (\) continues to the next line (multiline support).
  */
+let stdinBuf = "";
+let stdinEnded = false;
+
 function readPromptFromStdin(): Promise<string | null> {
   return new Promise((resolve) => {
+    // Check buffered data from previous reads first
+    while (stdinBuf.includes("\n")) {
+      const idx = stdinBuf.indexOf("\n");
+      const line = stdinBuf.slice(0, idx);
+      stdinBuf = stdinBuf.slice(idx + 1);
+
+      if (line.endsWith("\\")) {
+        stdinBuf = `${line.slice(0, -1)}\n${stdinBuf}`;
+        continue;
+      }
+
+      const prompt = line.trim();
+      if (prompt.length > 0) {
+        resolve(prompt);
+        return;
+      }
+    }
+
+    // If stdin already closed, drain remaining buffer
+    if (stdinEnded) {
+      const prompt = stdinBuf.trim();
+      stdinBuf = "";
+      resolve(prompt.length > 0 ? prompt : null);
+      return;
+    }
+
     if (process.stdin.isPaused()) process.stdin.resume();
 
-    let buf = "";
-
     const onData = (chunk: Buffer) => {
-      buf += chunk.toString("utf-8");
+      stdinBuf += chunk.toString("utf-8");
 
-      while (buf.includes("\n")) {
-        const idx = buf.indexOf("\n");
-        const line = buf.slice(0, idx);
-        buf = buf.slice(idx + 1);
+      while (stdinBuf.includes("\n")) {
+        const idx = stdinBuf.indexOf("\n");
+        const line = stdinBuf.slice(0, idx);
+        stdinBuf = stdinBuf.slice(idx + 1);
 
-        // Backslash continuation — append and wait for next line
         if (line.endsWith("\\")) {
-          buf = `${line.slice(0, -1)}\n${buf}`;
+          stdinBuf = `${line.slice(0, -1)}\n${stdinBuf}`;
           continue;
         }
 
-        // Complete prompt
-        const prompt = (line.endsWith("\\") ? line.slice(0, -1) : line).trim();
+        const prompt = line.trim();
         cleanup();
         process.stdin.pause();
         resolve(prompt.length > 0 ? prompt : null);
@@ -546,8 +572,10 @@ function readPromptFromStdin(): Promise<string | null> {
     };
 
     const onEnd = () => {
+      stdinEnded = true;
       cleanup();
-      const prompt = buf.trim();
+      const prompt = stdinBuf.trim();
+      stdinBuf = "";
       resolve(prompt.length > 0 ? prompt : null);
     };
 
@@ -635,7 +663,7 @@ export async function runChat(opts: HeadlessChatOptions, merged: AppConfig): Pro
   const totalTokens = { input: 0, output: 0, cacheRead: 0 };
   let turns = 0;
   let aborted = false;
-  const turnAbort = new AbortController();
+  let turnAbort = new AbortController();
 
   async function cleanupAndExit(code: number): Promise<void> {
     let savedId: string | undefined;
@@ -691,19 +719,18 @@ export async function runChat(opts: HeadlessChatOptions, merged: AppConfig): Pro
 
     env.contextManager.updateConversationContext(prompt, totalTokens.input);
 
-    const turn = await streamTurn(
-      env.agent,
-      history,
-      prompt,
-      aborted ? AbortSignal.abort() : AbortSignal.timeout(opts.timeout ?? 600_000),
-      {
-        json: opts.json,
-        events: isEvents,
-        quiet: isQuiet,
-        maxSteps: opts.maxSteps,
-        showProgress,
-      },
-    );
+    turnAbort = new AbortController();
+    if (opts.timeout) {
+      setTimeout(() => turnAbort.abort(), opts.timeout);
+    }
+
+    const turn = await streamTurn(env.agent, history, prompt, turnAbort.signal, {
+      json: opts.json,
+      events: isEvents,
+      quiet: isQuiet,
+      maxSteps: opts.maxSteps,
+      showProgress,
+    });
 
     // Even partial output is valuable — save it
     if (turn.output) {

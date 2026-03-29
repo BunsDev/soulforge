@@ -1,6 +1,6 @@
 # Command Reference
 
-76 slash commands available. Type `/` in chat or press `Ctrl+K` to open the command palette.
+86 slash commands available. Type `/` in chat or press `Ctrl+K` to open the command palette.
 
 Sub-commands (like `/proxy login`) work when typed directly but are grouped under their parent in the palette.
 
