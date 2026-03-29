@@ -42,7 +42,7 @@ if [[ "$PLATFORM" == "darwin" ]]; then
   fi
 elif [[ "$PLATFORM" == "linux" ]]; then
   if [[ "$ARCH" == "arm64" ]]; then
-    NVIM_ASSET="nvim-linux-aarch64.tar.gz"
+    NVIM_ASSET="nvim-linux-arm64.tar.gz"
     RG_TRIPLET="aarch64-unknown-linux-gnu"
     FD_TRIPLET="aarch64-unknown-linux-gnu"
     LAZYGIT_SUFFIX="Linux_arm64"
