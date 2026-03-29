@@ -2,14 +2,14 @@
 
 <p align="center">
   <strong>Graph-Powered Code Intelligence</strong><br/>
-  Multi-agent coding with codebase-aware AI — embedded Neovim, 22 themes, terminal-native
+  Multi-agent coding with codebase-aware AI — embedded Neovim, 21 themes, terminal-native
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-BSL%201.1-blue.svg" alt="License" /></a>
   <a href="#"><img src="https://img.shields.io/badge/version-1.0.0-brightgreen.svg" alt="Version" /></a>
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-strict-blue.svg" alt="TypeScript" /></a>
-  <a href="#testing"><img src="https://img.shields.io/badge/tests-2292%20passing-brightgreen.svg" alt="Tests" /></a>
+  <a href="#testing"><img src="https://img.shields.io/badge/tests-2296%20passing-brightgreen.svg" alt="Tests" /></a>
   <a href="https://bun.sh"><img src="https://img.shields.io/badge/runtime-Bun-f472b6.svg" alt="Bun" /></a>
 </p>
 
@@ -169,7 +169,7 @@ Installable skill system for domain-specific capabilities. Destructive action ap
 
 ## Architecture
 
-The Forge Agent is the orchestrator. It holds 34 tools including the `dispatch` tool, which creates an AgentBus and launches parallel subagents. Subagents share file/tool caches through the bus and coordinate edits via ownership tracking.
+The Forge Agent is the orchestrator. It holds 33 tools including the `dispatch` tool, which creates an AgentBus and launches parallel subagents. Subagents share file/tool caches through the bus and coordinate edits via ownership tracking.
 
 ```mermaid
 graph TB
@@ -177,7 +177,7 @@ graph TB
     Chat --> Forge[Forge Agent]
 
     subgraph Forge Tools
-        Tools[34 Direct Tools]
+        Tools[33 Tools]
         Dispatch[dispatch tool]
     end
 
@@ -186,11 +186,11 @@ graph TB
 
     Dispatch --> |creates| Bus[AgentBus<br/>file cache · tool cache<br/>findings · edit ownership]
 
-    Bus --> |spawns with bus| E1[Explore Agent]
-    Bus --> |spawns with bus| E2[Explore Agent]
-    Bus --> |spawns with bus| C[Code Agent]
+    Bus --> |spawns| I[Investigate Agent<br/>broad analysis]
+    Bus --> |spawns| E[Explore Agent<br/>targeted extraction]
+    Bus --> |spawns| C[Code Agent<br/>edits]
 
-    E1 & E2 & C --> |read/write cache| Bus
+    I & E & C --> |read/write cache| Bus
 
     Tools --> Intel[Intelligence Router]
     Tools --> Nvim[Neovim<br/>msgpack-RPC]
@@ -240,20 +240,20 @@ sequenceDiagram
     participant F as Forge Agent
     participant D as dispatch tool
     participant B as AgentBus
-    participant E1 as Explore 1
-    participant E2 as Explore 2
+    participant I as Investigate
+    participant E as Explore
     participant C as Code Agent
 
     U->>F: "Audit auth and refactor middleware"
     F->>D: dispatch(3 tasks)
     D->>B: new AgentBus()
     par Concurrent (3 slots, staggered)
-        D->>E1: launch (t=0ms)
-        D->>E2: launch (t=150ms)
-        D->>C: launch (dependsOn: E1, E2)
+        D->>I: launch investigate (t=0ms)
+        D->>E: launch explore (t=150ms)
+        D->>C: launch code (dependsOn: I, E)
     end
-    E1->>B: cache file reads + findings
-    E2->>B: cache file reads + findings
+    I->>B: soul_grep counts + soul_analyze + findings
+    E->>B: targeted reads + findings
     Note over B: Code agent reads<br/>hit cache instantly
     B-->>C: dependencies resolved
     C->>C: Edit with full context
@@ -411,7 +411,7 @@ soulforge --version                          # Version info
 
 ### Slash Commands
 
-85 commands available — press `/` or `Ctrl+K` to browse. Key ones by category:
+86 commands available — press `/` or `Ctrl+K` to browse. Key ones by category:
 
 **Models & Providers**
 `/model` `/router` `/provider` `/model-scope`
@@ -457,17 +457,18 @@ soulforge --version                          # Version info
 
 ## Tool Suite
 
-SoulForge ships 34 tools organized by capability:
+SoulForge ships 33 tools organized by capability:
 
 ### Code Intelligence
 
 | Tool | What it does |
 |------|-------------|
-| `read_code` | Extract function/class/type by name (LSP-powered) |
+| `read_file` | Read files with optional `target` param for symbol extraction (LSP-powered) |
 | `navigate` | Definition, references, call hierarchy, implementations |
 | `analyze` | File diagnostics, unused symbols, complexity |
 | `rename_symbol` | Compiler-guaranteed rename across all files |
 | `move_symbol` | Move to another file + update all importers |
+| `rename_file` | Rename/move a file with import path updates |
 | `refactor` | Extract function/variable, organize imports |
 
 ### Codebase Analysis (zero LLM cost)
@@ -502,6 +503,10 @@ SoulForge ships 34 tools organized by capability:
 **Editor:** `editor` (Neovim integration — read, edit, navigate, diagnostics, format)
 
 **Planning:** `plan`, `update_plan_step`, `task_list`, `ask_user`
+
+**Discovery:** `discover_pattern`, `test_scaffold`, `skills`
+
+**Tool Management:** `request_tools`, `release_tools` (agent-managed mode — disabled by default)
 
 </details>
 
@@ -723,7 +728,7 @@ See [GETTING_STARTED.md](GETTING_STARTED.md) for the full reference.
 ## Testing
 
 ```bash
-bun test              # 2292 tests across 49 files
+bun test              # 2296 tests across 49 files
 bun run typecheck     # tsc --noEmit
 bun run lint          # biome check (lint + format)
 bun run lint:fix      # auto-fix
@@ -735,7 +740,7 @@ bun run lint:fix      # auto-fix
 
 | Document | Description |
 |----------|-------------|
-| **[Command Reference](docs/commands-reference.md)** | All 85 commands by category |
+| **[Command Reference](docs/commands-reference.md)** | All 86 commands by category |
 | **[Headless Mode](docs/headless.md)** | Non-interactive CLI for CI/CD, scripting, automation |
 | **[Architecture](docs/architecture.md)** | System overview, data flow, component lifecycle |
 | **[Repo Map](docs/repo-map.md)** | PageRank, cochange, blast radius, clone detection |
@@ -766,7 +771,7 @@ sf --headless              CLI mode — CI/CD, scripts, automation  ✓ shipped
 SoulForge TUI              Full experience (what you're looking at now)
 ```
 
-- **`@soulforge/intelligence`** — graph intelligence, 34 tools, and agent orchestration as an importable package. Build your own AI tools on top of SoulForge's brain.
+- **`@soulforge/intelligence`** — graph intelligence, 33 tools, and agent orchestration as an importable package. Build your own AI tools on top of SoulForge's brain.
 - **`@soulforge/mcp`** — expose soul_grep, soul_find, soul_analyze, soul_impact, navigate, read_code as MCP tools. Any AI tool that supports MCP gets SoulForge's graph intelligence.
 - **`sf --headless`** — non-interactive mode. Pipe in a prompt, get back results. For CI/CD, automation, and benchmarks. [Documentation →](docs/headless.md)
 
@@ -775,7 +780,7 @@ SoulForge TUI              Full experience (what you're looking at now)
 - **Repo Map visualization** — interactive dependency graph, PageRank heatmap, blast radius explorer
 - **GitHub CLI integration** — native `gh_pr`, `gh_issue`, `gh_status` tools with structured output
 - **Dispatch worktrees** — git worktree per code agent for conflict-free parallel edits
-- **[ACP support](https://agentclientprotocol.com/)** — Agent Client Protocol integration. Run SoulForge as a coding agent inside Zed, JetBrains, Neovim (agentic.nvim), or any ACP-compatible editor. Headless mode already covers 80% of the protocol surface — `sf --acp` would expose graph intelligence, multi-agent dispatch, and all 34 tools via JSON-RPC 2.0 over stdio
+- **[ACP support](https://agentclientprotocol.com/)** — Agent Client Protocol integration. Run SoulForge as a coding agent inside Zed, JetBrains, Neovim (agentic.nvim), or any ACP-compatible editor. Headless mode already covers 80% of the protocol surface — `sf --acp` would expose graph intelligence, multi-agent dispatch, and all 33 tools via JSON-RPC 2.0 over stdio
 
 **Planned:**
 - **Monorepo graph support** — cross-package dependency tracking for pnpm/npm/yarn workspaces, Cargo workspaces, Go workspaces (`go.work`), Nx/Turborepo, and Bazel/Buck. Currently the repo map treats each workspace root as an isolated unit — cross-package imports resolve as external dependencies instead of internal edges. This means PageRank, blast radius, and unused export detection don't span package boundaries.

@@ -34,7 +34,7 @@ User Input
                     ▼                ▼                ▼
              ┌───────────┐   ┌───────────┐   ┌───────────┐
              │   Tools   │   │Intelligence│   │  Neovim   │
-             │ 34 tools │   │  Router    │   │ (msgpack) │
+             │ 33 tools │   │  Router    │   │ (msgpack) │
              └───────────┘   └─────┬─────┘   └───────────┘
                                    │
                         ┌──────────┼──────────┐
@@ -523,7 +523,7 @@ src/
     ├── sessions/               # Session persistence + rebuild
     ├── setup/                  # Prerequisite checks
     ├── workers/                # Intelligence + IO workers (off main thread)
-    └── tools/                  # All 34 tools
+    └── tools/                  # All 33 tools
         ├── rename-symbol.ts
         ├── move-symbol.ts
         ├── project.ts

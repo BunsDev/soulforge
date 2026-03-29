@@ -1,6 +1,6 @@
 # Themes
 
-SoulForge ships with 22 builtin themes and supports custom themes with hot reload.
+SoulForge ships with 21 builtin themes and supports custom themes with hot reload.
 
 ## Quick Start
 
