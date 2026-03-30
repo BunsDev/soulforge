@@ -3,6 +3,7 @@ import { extname, resolve } from "node:path";
 import { isBinaryFile } from "isbinaryfile";
 import type { ToolResult } from "../../types";
 import { readBufferContent } from "../editor/instance";
+import { getIntelligenceClient } from "../intelligence/index.js";
 import type { SymbolKind } from "../intelligence/types.js";
 import { isForbidden } from "../security/forbidden.js";
 import { getIOClient, type ReadFileResult } from "../workers/io-client.js";
@@ -193,9 +194,19 @@ async function readSymbolFromFile(filePath: string, args: ReadFileArgs): Promise
     };
   }
 
+  const client = getIntelligenceClient();
+  let language: import("../intelligence/types.js").Language;
+  if (client) {
+    language = await client.routerDetectLanguage(filePath);
+  } else {
+    const { getIntelligenceRouter } = await import("../intelligence/index.js");
+    const router = getIntelligenceRouter(process.cwd());
+    language = router.detectLanguage(filePath);
+  }
+
+  // readScope/readSymbol have no client proxy — use router directly
   const { getIntelligenceRouter } = await import("../intelligence/index.js");
   const router = getIntelligenceRouter(process.cwd());
-  const language = router.detectLanguage(filePath);
 
   if (args.target === "scope") {
     const scopeStart = args.startLine;

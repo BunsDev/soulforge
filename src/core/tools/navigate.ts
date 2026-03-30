@@ -1,9 +1,10 @@
 import { stat as statAsync } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { ToolResult } from "../../types/index.js";
-import { getIntelligenceRouter } from "../intelligence/index.js";
+import { getIntelligenceClient, getIntelligenceRouter } from "../intelligence/index.js";
 import type { CallHierarchyItem, SourceLocation, SymbolInfo } from "../intelligence/types.js";
 import { isForbidden } from "../security/forbidden.js";
+import type { IntelligenceClient, TrackedResult } from "../workers/intelligence-client.js";
 
 type NavigateAction =
   | "definition"
@@ -97,8 +98,19 @@ function buildDefinitionPattern(symbol: string): string {
   return `(?:${alts})${escaped}\\b`;
 }
 
+/** Fallback: use main-thread router when worker client is unavailable */
+async function fallbackTracked<T>(
+  file: string | undefined,
+  operation: string & keyof import("../intelligence/types.js").IntelligenceBackend,
+  fn: (b: import("../intelligence/types.js").IntelligenceBackend) => Promise<T | null>,
+): Promise<TrackedResult<T>> {
+  const router = getIntelligenceRouter(process.cwd());
+  const language = router.detectLanguage(file);
+  return router.executeWithFallbackTracked(language, operation, fn);
+}
+
 async function autoResolveFile(
-  router: ReturnType<typeof getIntelligenceRouter>,
+  client: IntelligenceClient | null,
   symbol: string,
   repoMap?: RepoMapLike,
 ): Promise<ResolveResult> {
@@ -114,10 +126,17 @@ async function autoResolveFile(
   }
 
   // Tier 2: Workspace symbols via LSP/tree-sitter (~10-50ms)
-  const language = router.detectLanguage();
-  const results = await router.executeWithFallback(language, "findWorkspaceSymbols", (b) =>
-    b.findWorkspaceSymbols ? b.findWorkspaceSymbols(symbol) : Promise.resolve(null),
-  );
+  let results: SymbolInfo[] | null = null;
+  if (client) {
+    const tracked = await client.routerFindWorkspaceSymbols(symbol);
+    results = tracked?.value ?? null;
+  } else {
+    const router = getIntelligenceRouter(process.cwd());
+    const language = router.detectLanguage();
+    results = await router.executeWithFallback(language, "findWorkspaceSymbols", (b) =>
+      b.findWorkspaceSymbols ? b.findWorkspaceSymbols(symbol) : Promise.resolve(null),
+    );
+  }
 
   if (results && results.length > 0) {
     const exact = results.filter((s) => s.name === symbol);
@@ -169,7 +188,7 @@ export const navigateTool = {
     "Auto-resolves file from symbol name — no file path needed.",
   execute: async (args: NavigateArgs, repoMap?: RepoMapLike): Promise<ToolResult> => {
     try {
-      const router = getIntelligenceRouter(process.cwd());
+      const client = getIntelligenceClient();
       let file = args.file ? resolve(args.file) : undefined;
       const symbol = args.symbol;
 
@@ -185,7 +204,7 @@ export const navigateTool = {
       }
 
       if (!file && FILE_REQUIRED_ACTIONS.has(args.action) && symbol) {
-        const resolved = await autoResolveFile(router, symbol, repoMap);
+        const resolved = await autoResolveFile(client, symbol, repoMap);
         if (resolved && "resolved" in resolved) {
           file = resolved.resolved;
           const resolvedBlocked = isForbidden(file);
@@ -221,7 +240,6 @@ export const navigateTool = {
       // After the guard above, file is guaranteed non-null for FILE_REQUIRED_ACTIONS.
       // Bind to a const so TS narrows it for all case blocks below.
       const resolvedFile = file as string;
-      const language = router.detectLanguage(file);
 
       switch (args.action) {
         case "definition": {
@@ -233,17 +251,16 @@ export const navigateTool = {
             };
           }
 
-          const tracked = await router.executeWithFallbackTracked(
-            language,
-            "findDefinition",
-            (b) =>
-              b.findDefinition ? b.findDefinition(resolvedFile, symbol) : Promise.resolve(null),
-          );
+          const tracked = client
+            ? await client.routerFindDefinition(resolvedFile, symbol)
+            : await fallbackTracked(resolvedFile, "findDefinition", (b) =>
+                b.findDefinition ? b.findDefinition(resolvedFile, symbol) : Promise.resolve(null),
+              );
 
           if (!tracked) {
             return {
               success: false,
-              output: `No definition backend available for ${language} — try grep instead`,
+              output: `No definition backend available — try grep instead`,
               error: "unsupported",
             };
           }
@@ -271,17 +288,16 @@ export const navigateTool = {
             };
           }
 
-          const tracked = await router.executeWithFallbackTracked(
-            language,
-            "findReferences",
-            (b) =>
-              b.findReferences ? b.findReferences(resolvedFile, symbol) : Promise.resolve(null),
-          );
+          const tracked = client
+            ? await client.routerFindReferences(resolvedFile, symbol)
+            : await fallbackTracked(resolvedFile, "findReferences", (b) =>
+                b.findReferences ? b.findReferences(resolvedFile, symbol) : Promise.resolve(null),
+              );
 
           if (!tracked) {
             return {
               success: false,
-              output: `No references backend available for ${language} — try grep instead`,
+              output: `No references backend available — try grep instead`,
               error: "unsupported",
             };
           }
@@ -308,9 +324,11 @@ export const navigateTool = {
         }
 
         case "symbols": {
-          const tracked = await router.executeWithFallbackTracked(language, "findSymbols", (b) =>
-            b.findSymbols ? b.findSymbols(resolvedFile, args.scope) : Promise.resolve(null),
-          );
+          const tracked = client
+            ? await client.routerFindSymbols(resolvedFile, args.scope)
+            : await fallbackTracked(resolvedFile, "findSymbols", (b) =>
+                b.findSymbols ? b.findSymbols(resolvedFile, args.scope) : Promise.resolve(null),
+              );
 
           if (!tracked || tracked.value.length === 0) {
             return { success: true, output: "No symbols found" };
@@ -324,9 +342,11 @@ export const navigateTool = {
         }
 
         case "imports": {
-          const tracked = await router.executeWithFallbackTracked(language, "findImports", (b) =>
-            b.findImports ? b.findImports(resolvedFile) : Promise.resolve(null),
-          );
+          const tracked = client
+            ? await client.routerFindImports(resolvedFile)
+            : await fallbackTracked(resolvedFile, "findImports", (b) =>
+                b.findImports ? b.findImports(resolvedFile) : Promise.resolve(null),
+              );
 
           if (!tracked || tracked.value.length === 0) {
             return { success: true, output: "No imports found" };
@@ -344,9 +364,11 @@ export const navigateTool = {
         }
 
         case "exports": {
-          const tracked = await router.executeWithFallbackTracked(language, "findExports", (b) =>
-            b.findExports ? b.findExports(resolvedFile) : Promise.resolve(null),
-          );
+          const tracked = client
+            ? await client.routerFindExports(resolvedFile)
+            : await fallbackTracked(resolvedFile, "findExports", (b) =>
+                b.findExports ? b.findExports(resolvedFile) : Promise.resolve(null),
+              );
 
           if (!tracked || tracked.value.length === 0) {
             return { success: true, output: "No exports found" };
@@ -373,11 +395,11 @@ export const navigateTool = {
             };
           }
 
-          const tracked = await router.executeWithFallbackTracked(
-            language,
-            "findWorkspaceSymbols",
-            (b) => (b.findWorkspaceSymbols ? b.findWorkspaceSymbols(query) : Promise.resolve(null)),
-          );
+          const tracked = client
+            ? await client.routerFindWorkspaceSymbols(query)
+            : await fallbackTracked(undefined, "findWorkspaceSymbols", (b) =>
+                b.findWorkspaceSymbols ? b.findWorkspaceSymbols(query) : Promise.resolve(null),
+              );
 
           if (!tracked || tracked.value.length === 0) {
             return { success: true, output: `No workspace symbols matching '${query}'` };
@@ -407,17 +429,18 @@ export const navigateTool = {
             };
           }
 
-          const tracked = await router.executeWithFallbackTracked(
-            language,
-            "getCallHierarchy",
-            (b) =>
-              b.getCallHierarchy ? b.getCallHierarchy(resolvedFile, symbol) : Promise.resolve(null),
-          );
+          const tracked = client
+            ? await client.routerGetCallHierarchy(resolvedFile, symbol)
+            : await fallbackTracked(resolvedFile, "getCallHierarchy", (b) =>
+                b.getCallHierarchy
+                  ? b.getCallHierarchy(resolvedFile, symbol)
+                  : Promise.resolve(null),
+              );
 
           if (!tracked) {
             return {
               success: false,
-              output: `No call hierarchy backend available for ${language}`,
+              output: "No call hierarchy backend available",
               error: "unsupported",
             };
           }
@@ -454,19 +477,18 @@ export const navigateTool = {
             };
           }
 
-          const tracked = await router.executeWithFallbackTracked(
-            language,
-            "findImplementation",
-            (b) =>
-              b.findImplementation
-                ? b.findImplementation(resolvedFile, symbol)
-                : Promise.resolve(null),
-          );
+          const tracked = client
+            ? await client.routerFindImplementation(resolvedFile, symbol)
+            : await fallbackTracked(resolvedFile, "findImplementation", (b) =>
+                b.findImplementation
+                  ? b.findImplementation(resolvedFile, symbol)
+                  : Promise.resolve(null),
+              );
 
           if (!tracked) {
             return {
               success: false,
-              output: `No implementation backend available for ${language} — try grep instead`,
+              output: `No implementation backend available — try grep instead`,
               error: "unsupported",
             };
           }
@@ -501,17 +523,18 @@ export const navigateTool = {
             };
           }
 
-          const tracked = await router.executeWithFallbackTracked(
-            language,
-            "getTypeHierarchy",
-            (b) =>
-              b.getTypeHierarchy ? b.getTypeHierarchy(resolvedFile, symbol) : Promise.resolve(null),
-          );
+          const tracked = client
+            ? await client.routerGetTypeHierarchy(resolvedFile, symbol)
+            : await fallbackTracked(resolvedFile, "getTypeHierarchy", (b) =>
+                b.getTypeHierarchy
+                  ? b.getTypeHierarchy(resolvedFile, symbol)
+                  : Promise.resolve(null),
+              );
 
           if (!tracked) {
             return {
               success: false,
-              output: `No type hierarchy backend available for ${language}`,
+              output: "No type hierarchy backend available",
               error: "unsupported",
             };
           }
@@ -552,11 +575,11 @@ export const navigateTool = {
           }
 
           // Try workspace symbols first (LSP), then fall back to symbol index
-          const tracked = await router.executeWithFallbackTracked(
-            language,
-            "findWorkspaceSymbols",
-            (b) => (b.findWorkspaceSymbols ? b.findWorkspaceSymbols(query) : Promise.resolve(null)),
-          );
+          const tracked = client
+            ? await client.routerFindWorkspaceSymbols(query)
+            : await fallbackTracked(undefined, "findWorkspaceSymbols", (b) =>
+                b.findWorkspaceSymbols ? b.findWorkspaceSymbols(query) : Promise.resolve(null),
+              );
 
           if (!tracked || tracked.value.length === 0) {
             return { success: true, output: `No symbols matching '${query}'` };

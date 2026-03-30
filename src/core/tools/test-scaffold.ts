@@ -1,7 +1,7 @@
 import { access, mkdir, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import type { ToolResult } from "../../types/index.js";
-import { getIntelligenceRouter } from "../intelligence/index.js";
+import { getIntelligenceClient, getIntelligenceRouter } from "../intelligence/index.js";
 import { isForbidden } from "../security/forbidden.js";
 import { emitFileEdited } from "./file-events.js";
 
@@ -51,14 +51,21 @@ export const testScaffoldTool = {
   description: "Generate a test skeleton from a source file's exports.",
   execute: async (args: TestScaffoldArgs): Promise<ToolResult> => {
     try {
+      const client = getIntelligenceClient();
       const router = getIntelligenceRouter(process.cwd());
       const file = resolve(args.file);
       const language = router.detectLanguage(file);
       const framework = args.framework ?? (await detectTestFramework(process.cwd()));
 
-      const outline = await router.executeWithFallback(language, "getFileOutline", (b) =>
-        b.getFileOutline ? b.getFileOutline(file) : Promise.resolve(null),
-      );
+      let outline: import("../intelligence/types.js").FileOutline | null;
+      if (client) {
+        const tracked = await client.routerGetFileOutline(file);
+        outline = tracked?.value ?? null;
+      } else {
+        outline = await router.executeWithFallback(language, "getFileOutline", (b) =>
+          b.getFileOutline ? b.getFileOutline(file) : Promise.resolve(null),
+        );
+      }
 
       if (!outline) {
         return {
@@ -79,9 +86,15 @@ export const testScaffoldTool = {
 
       const exportDetails = await Promise.all(
         exports.map(async (exp) => {
-          const typeInfo = await router.executeWithFallback(language, "getTypeInfo", (b) =>
-            b.getTypeInfo ? b.getTypeInfo(file, exp.name) : Promise.resolve(null),
-          );
+          let typeInfo: import("../intelligence/types.js").TypeInfo | null;
+          if (client) {
+            const tracked = await client.routerGetTypeInfo(file, exp.name);
+            typeInfo = tracked?.value ?? null;
+          } else {
+            typeInfo = await router.executeWithFallback(language, "getTypeInfo", (b) =>
+              b.getTypeInfo ? b.getTypeInfo(file, exp.name) : Promise.resolve(null),
+            );
+          }
           return { name: exp.name, kind: exp.kind, type: typeInfo?.type };
         }),
       );

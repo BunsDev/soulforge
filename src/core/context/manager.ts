@@ -5,6 +5,7 @@ import { useRepoMapStore } from "../../stores/repomap.js";
 import type { EditorIntegration, ForgeMode, TaskRouter } from "../../types/index.js";
 import { toErrorMessage } from "../../utils/errors.js";
 import { setNeovimFileWrittenHandler } from "../editor/neovim.js";
+import { setIntelligenceClient } from "../intelligence/instance.js";
 import type { SymbolForSummary } from "../intelligence/repo-map.js";
 import { resolveModel } from "../llm/provider.js";
 import { EPHEMERAL_CACHE } from "../llm/provider-options.js";
@@ -93,6 +94,7 @@ export class ContextManager {
     } else {
       this.memoryManager = new MemoryManager(cwd);
       this.repoMap = new IntelligenceClient(cwd);
+      setIntelligenceClient(this.repoMap);
       this.wireFileEventHandlers();
       if (this.repoMapEnabled) {
         this.wireRepoMapCallbacks();
@@ -120,6 +122,7 @@ export class ContextManager {
 
     onStep?.("Mapping the codebase…");
     const repoMap = new IntelligenceClient(cwd);
+    setIntelligenceClient(repoMap);
     await tick();
 
     onStep?.("Wiring up the forge…");

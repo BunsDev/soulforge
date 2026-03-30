@@ -1,6 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { getIntelligenceRouter } from "../intelligence/index.js";
+import { getIntelligenceClient, getIntelligenceRouter } from "../intelligence/index.js";
 import type { FormatEdit, RefactorResult } from "../intelligence/types.js";
 import { pushEdit } from "./edit-stack.js";
 import { emitFileEdited } from "./file-events.js";
@@ -53,9 +53,16 @@ async function autoFixFile(filePath: string, tabId?: string): Promise<string[]> 
         applied.push("format");
       }
     } else {
-      const formatResult = await router.executeWithFallback(language, "formatDocument", (b) =>
-        b.formatDocument ? b.formatDocument(absPath) : Promise.resolve(null),
-      );
+      let formatResult: import("../intelligence/types.js").FormatEdit | null = null;
+      const client = getIntelligenceClient();
+      if (client) {
+        const tracked = await client.routerFormatDocument(absPath);
+        formatResult = tracked?.value ?? null;
+      } else {
+        formatResult = await router.executeWithFallback(language, "formatDocument", (b) =>
+          b.formatDocument ? b.formatDocument(absPath) : Promise.resolve(null),
+        );
+      }
       if (formatResult) {
         await applyFormatEdits(formatResult, tabId);
         applied.push("format");

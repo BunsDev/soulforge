@@ -1,5 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
+import { getIntelligenceClient } from "./index.js";
 import type { CodeIntelligenceRouter } from "./router.js";
 import type { CodeAction, Diagnostic, Language } from "./types.js";
 
@@ -39,9 +40,16 @@ export async function sameFileDiagnostics(
     crossFileErrors: [],
   };
 
-  const afterDiags = await router.executeWithFallback(language, "getDiagnostics", (b) =>
-    b.getDiagnostics ? b.getDiagnostics(filePath) : Promise.resolve(null),
-  );
+  let afterDiags: Diagnostic[] | null;
+  const client = getIntelligenceClient();
+  if (client) {
+    const tracked = await client.routerGetDiagnostics(filePath);
+    afterDiags = tracked?.value ?? null;
+  } else {
+    afterDiags = await router.executeWithFallback(language, "getDiagnostics", (b) =>
+      b.getDiagnostics ? b.getDiagnostics(filePath) : Promise.resolve(null),
+    );
+  }
 
   if (!afterDiags) return result;
 
@@ -103,9 +111,16 @@ export async function postEditDiagnostics(
   };
 
   // Get after-edit diagnostics
-  const afterDiags = await router.executeWithFallback(language, "getDiagnostics", (b) =>
-    b.getDiagnostics ? b.getDiagnostics(filePath) : Promise.resolve(null),
-  );
+  let afterDiags: Diagnostic[] | null;
+  const client = getIntelligenceClient();
+  if (client) {
+    const tracked = await client.routerGetDiagnostics(filePath);
+    afterDiags = tracked?.value ?? null;
+  } else {
+    afterDiags = await router.executeWithFallback(language, "getDiagnostics", (b) =>
+      b.getDiagnostics ? b.getDiagnostics(filePath) : Promise.resolve(null),
+    );
+  }
 
   if (!afterDiags) return result;
 
@@ -157,9 +172,15 @@ export async function postEditDiagnostics(
   const crossFileResults = await Promise.all(
     importers.slice(0, 5).map(async (importer) => {
       const importerLang = router.detectLanguage(importer);
-      const importerDiags = await router.executeWithFallback(importerLang, "getDiagnostics", (b) =>
-        b.getDiagnostics ? b.getDiagnostics(importer) : Promise.resolve(null),
-      );
+      let importerDiags: Diagnostic[] | null;
+      if (client) {
+        const tracked = await client.routerGetDiagnostics(importer);
+        importerDiags = tracked?.value ?? null;
+      } else {
+        importerDiags = await router.executeWithFallback(importerLang, "getDiagnostics", (b) =>
+          b.getDiagnostics ? b.getDiagnostics(importer) : Promise.resolve(null),
+        );
+      }
       if (!importerDiags) return [];
       const importerErrors = importerDiags.filter((d) => d.severity === "error");
       return Promise.all(
@@ -191,11 +212,18 @@ async function getFixesForDiagnostic(
   language: Language,
   diag: Diagnostic,
 ): Promise<string[]> {
-  const codeActions = await router.executeWithFallback(language, "getCodeActions", (b) => {
-    if (!b.getCodeActions) return Promise.resolve(null);
-    const codes = diag.code !== undefined ? [diag.code] : undefined;
-    return b.getCodeActions(file, diag.line, diag.line, codes);
-  });
+  const client = getIntelligenceClient();
+  let codeActions: CodeAction[] | null;
+  if (client) {
+    const tracked = await client.routerGetCodeActions(file, diag.line, diag.line);
+    codeActions = tracked?.value ?? null;
+  } else {
+    codeActions = await router.executeWithFallback(language, "getCodeActions", (b) => {
+      if (!b.getCodeActions) return Promise.resolve(null);
+      const codes = diag.code !== undefined ? [diag.code] : undefined;
+      return b.getCodeActions(file, diag.line, diag.line, codes);
+    });
+  }
   if (!codeActions) return [];
   return codeActions
     .filter((a: CodeAction) => a.kind === "quickfix" || a.isPreferred)

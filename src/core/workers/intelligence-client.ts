@@ -2,7 +2,26 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { useWorkerStore } from "../../stores/workers.js";
 import type { RepoMapOptions, SymbolForSummary } from "../intelligence/repo-map.js";
+import type { HealthCheckResult } from "../intelligence/router.js";
+import type {
+  CallHierarchyResult,
+  CodeAction,
+  Diagnostic,
+  ExportInfo,
+  FileOutline,
+  FormatEdit,
+  ImportInfo,
+  Language,
+  RefactorResult,
+  SourceLocation,
+  SymbolInfo,
+  TypeHierarchyResult,
+  TypeInfo,
+  UnusedItem,
+} from "../intelligence/types.js";
 import { WorkerClient } from "./rpc.js";
+
+export type TrackedResult<T> = { value: T; backend: string } | null;
 
 const IS_BUNDLED = import.meta.url.includes("$bunfs");
 
@@ -526,5 +545,154 @@ export class IntelligenceClient extends WorkerClient {
 
   async isShikiLanguage(lang: string): Promise<boolean> {
     return this.call("isShikiLanguage", lang);
+  }
+
+  // ── Intelligence Router Operations ────────────────────────────────
+  // These proxy to the CodeIntelligenceRouter running in the worker thread.
+  // All parsing, LSP, and symbol resolution happens off the main/UI thread.
+
+  async routerDetectLanguage(file?: string): Promise<Language> {
+    return this.call("routerDetectLanguage", file);
+  }
+
+  async routerFindSymbols(file: string, query?: string): Promise<TrackedResult<SymbolInfo[]>> {
+    return this.call("routerFindSymbols", file, query);
+  }
+
+  async routerFindDefinition(
+    file: string,
+    symbol: string,
+  ): Promise<TrackedResult<SourceLocation[]>> {
+    return this.call("routerFindDefinition", file, symbol);
+  }
+
+  async routerFindReferences(
+    file: string,
+    symbol: string,
+  ): Promise<TrackedResult<SourceLocation[]>> {
+    return this.call("routerFindReferences", file, symbol);
+  }
+
+  async routerGetDiagnostics(file: string): Promise<TrackedResult<Diagnostic[]>> {
+    return this.call("routerGetDiagnostics", file);
+  }
+
+  async routerGetFileOutline(file: string): Promise<TrackedResult<FileOutline>> {
+    return this.call("routerGetFileOutline", file);
+  }
+
+  async routerFindImports(file: string): Promise<TrackedResult<ImportInfo[]>> {
+    return this.call("routerFindImports", file);
+  }
+
+  async routerFindExports(file: string): Promise<TrackedResult<ExportInfo[]>> {
+    return this.call("routerFindExports", file);
+  }
+
+  async routerGetTypeInfo(
+    file: string,
+    symbol: string,
+    line?: number,
+    column?: number,
+  ): Promise<TrackedResult<TypeInfo>> {
+    return this.call("routerGetTypeInfo", file, symbol, line, column);
+  }
+
+  async routerFindUnused(file: string): Promise<TrackedResult<UnusedItem[]>> {
+    return this.call("routerFindUnused", file);
+  }
+
+  async routerRename(
+    file: string,
+    symbol: string,
+    newName: string,
+  ): Promise<TrackedResult<RefactorResult>> {
+    return this.call("routerRename", file, symbol, newName);
+  }
+
+  async routerGetCodeActions(
+    file: string,
+    startLine: number,
+    endLine: number,
+  ): Promise<TrackedResult<CodeAction[]>> {
+    return this.call("routerGetCodeActions", file, startLine, endLine);
+  }
+
+  async routerFormatDocument(file: string): Promise<TrackedResult<FormatEdit>> {
+    return this.call("routerFormatDocument", file);
+  }
+
+  async routerFormatRange(
+    file: string,
+    startLine: number,
+    endLine: number,
+  ): Promise<TrackedResult<FormatEdit>> {
+    return this.call("routerFormatRange", file, startLine, endLine);
+  }
+
+  async routerFindWorkspaceSymbols(query: string): Promise<TrackedResult<SymbolInfo[]>> {
+    return this.call("routerFindWorkspaceSymbols", query);
+  }
+
+  async routerGetCallHierarchy(
+    file: string,
+    symbol: string,
+  ): Promise<TrackedResult<CallHierarchyResult>> {
+    return this.call("routerGetCallHierarchy", file, symbol);
+  }
+
+  async routerGetTypeHierarchy(
+    file: string,
+    symbol: string,
+  ): Promise<TrackedResult<TypeHierarchyResult>> {
+    return this.call("routerGetTypeHierarchy", file, symbol);
+  }
+
+  async routerFindImplementation(
+    file: string,
+    symbol: string,
+  ): Promise<TrackedResult<SourceLocation[]>> {
+    return this.call("routerFindImplementation", file, symbol);
+  }
+
+  // ── Router Management ─────────────────────────────────────────────
+
+  async routerGetStatus(): Promise<{
+    initialized: string[];
+    lspServers: Array<{ language: string; command: string }>;
+  }> {
+    return this.call("routerGetStatus");
+  }
+
+  async routerGetDetailedLspServers(): Promise<
+    Array<{
+      language: string;
+      command: string;
+      args: string[];
+      pid: number | null;
+      cwd: string;
+      openFiles: number;
+      diagnosticCount: number;
+      diagnostics: Array<{ file: string; message: string; severity: number }>;
+      ready: boolean;
+    }>
+  > {
+    return this.call("routerGetDetailedLspServers");
+  }
+
+  async routerRestartLspServers(filter?: string): Promise<string[]> {
+    return this.call("routerRestartLspServers", filter);
+  }
+
+  async routerGetChildPids(): Promise<number[]> {
+    return this.call("routerGetChildPids");
+  }
+
+  async routerWarmup(): Promise<void> {
+    return this.call("routerWarmup");
+  }
+
+  async routerRunHealthCheck(): Promise<HealthCheckResult> {
+    return this.call("routerRunHealthCheck");
   }
 }

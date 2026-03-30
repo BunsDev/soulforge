@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { ContextManager } from "../core/context/manager.js";
+import { setSyncEditorOnEdit } from "../core/editor/instance.js";
 import { applyTheme } from "../core/theme/index.js";
 import { useUIStore } from "../stores/ui.js";
 import type { AppConfig } from "../types/index.js";
@@ -41,6 +42,7 @@ export function useConfigSync({
   useEffect(() => {
     if (effectiveConfig.editorIntegration) {
       contextManager.setEditorIntegration(effectiveConfig.editorIntegration);
+      setSyncEditorOnEdit(effectiveConfig.editorIntegration.syncEditorOnEdit !== false);
     }
   }, [effectiveConfig.editorIntegration, contextManager]);
 

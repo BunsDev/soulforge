@@ -3,6 +3,15 @@ import type { NvimInstance } from "./neovim.js";
 
 let instance: NvimInstance | null = null;
 let editorRequestCallback: ((file?: string) => void) | null = null;
+let syncOnEdit = true;
+
+/** Control whether reloadBuffer navigates the editor after agent edits. */
+export function setSyncEditorOnEdit(enabled: boolean): void {
+  syncOnEdit = enabled;
+}
+export function getSyncEditorOnEdit(): boolean {
+  return syncOnEdit;
+}
 
 export function setNvimInstance(nvim: NvimInstance | null): void {
   instance = nvim;
@@ -34,15 +43,26 @@ export async function requestEditor(file?: string): Promise<NvimInstance | null>
 const NVIM_TIMEOUT = 3000;
 const NVIM_READ_TIMEOUT = NVIM_TIMEOUT;
 
-/** Reload a file in the nvim buffer with a timeout. Silently swallows failures. */
+/** Reload a file in the nvim buffer with a timeout. Silently swallows failures.
+ *  When syncOnEdit is off, only refreshes the buffer if it's already the active file
+ *  (so edits to the file you're reading still show up, but it won't jump away). */
 export async function reloadBuffer(filePath: string, line?: number): Promise<boolean> {
   const nvim = instance;
   if (!nvim) return false;
   try {
-    const lua = line
-      ? "local p, l = ...; vim.cmd({cmd='edit', args={vim.fn.fnameescape(p)}, bang=true, mods={silent=true}}); vim.api.nvim_win_set_cursor(0, {l, 0})"
-      : "vim.cmd({cmd='edit', args={vim.fn.fnameescape(...)}, bang=true, mods={silent=true}})";
-    const args = line ? [filePath, line] : [filePath];
+    let lua: string;
+    let args: (string | number)[];
+    if (syncOnEdit) {
+      // Always navigate to the edited file
+      lua = line
+        ? "local p, l = ...; vim.cmd({cmd='edit', args={vim.fn.fnameescape(p)}, bang=true, mods={silent=true}}); vim.api.nvim_win_set_cursor(0, {l, 0})"
+        : "vim.cmd({cmd='edit', args={vim.fn.fnameescape(...)}, bang=true, mods={silent=true}})";
+      args = line ? [filePath, line] : [filePath];
+    } else {
+      // Only refresh if this file is already the active buffer
+      lua = `local p = ...; local cur = vim.api.nvim_buf_get_name(0); if cur == p then vim.cmd({cmd='edit', bang=true, mods={silent=true}}) end`;
+      args = [filePath];
+    }
     await Promise.race([
       nvim.api.executeLua(lua, args),
       new Promise<null>((r) => setTimeout(() => r(null), NVIM_TIMEOUT)),

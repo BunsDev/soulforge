@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { ToolResult } from "../../types/index.js";
-import { getIntelligenceRouter } from "../intelligence/index.js";
+import { getIntelligenceClient, getIntelligenceRouter } from "../intelligence/index.js";
 import { isForbidden } from "../security/forbidden.js";
 
 async function lineCount(file: string): Promise<number | null> {
@@ -22,13 +22,20 @@ export const discoverPatternTool = {
   description: "Find implementation patterns for a concept in the codebase.",
   execute: async (args: DiscoverPatternArgs): Promise<ToolResult> => {
     try {
+      const client = getIntelligenceClient();
       const router = getIntelligenceRouter(process.cwd());
       const file = args.file ? resolve(args.file) : undefined;
       const language = router.detectLanguage(file);
 
-      const symbols = await router.executeWithFallback(language, "findWorkspaceSymbols", (b) =>
-        b.findWorkspaceSymbols ? b.findWorkspaceSymbols(args.query) : Promise.resolve(null),
-      );
+      let symbols: import("../intelligence/types.js").SymbolInfo[] | null;
+      if (client) {
+        const tracked = await client.routerFindWorkspaceSymbols(args.query);
+        symbols = tracked?.value ?? null;
+      } else {
+        symbols = await router.executeWithFallback(language, "findWorkspaceSymbols", (b) =>
+          b.findWorkspaceSymbols ? b.findWorkspaceSymbols(args.query) : Promise.resolve(null),
+        );
+      }
 
       if (!symbols || symbols.length === 0) {
         return {
@@ -54,6 +61,7 @@ export const discoverPatternTool = {
         parts.push(`\n## Interfaces & Types (${String(interfaces.length)})`);
         const blocks = await Promise.all(
           interfaces.slice(0, 3).map(async (iface) => {
+            // No routerReadSymbol on client — use router directly
             const block = await router.executeWithFallback(language, "readSymbol", (b) =>
               b.readSymbol
                 ? b.readSymbol(iface.location.file, iface.name, iface.kind)
@@ -110,9 +118,15 @@ export const discoverPatternTool = {
       parts.push(`\n## Related files (${String(uniqueFiles.length)})`);
       const fileExports = await Promise.all(
         uniqueFiles.map(async (f) => {
-          const exports = await router.executeWithFallback(language, "findExports", (b) =>
-            b.findExports ? b.findExports(f) : Promise.resolve(null),
-          );
+          let exports: import("../intelligence/types.js").ExportInfo[] | null;
+          if (client) {
+            const tracked = await client.routerFindExports(f);
+            exports = tracked?.value ?? null;
+          } else {
+            exports = await router.executeWithFallback(language, "findExports", (b) =>
+              b.findExports ? b.findExports(f) : Promise.resolve(null),
+            );
+          }
           const lines = await lineCount(f);
           return { file: f, exports, lines };
         }),

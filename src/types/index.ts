@@ -318,4 +318,6 @@ export interface EditorIntegration {
   format: boolean;
   /** Whether the AI agent can use the editor tool. "on"=always, "off"=never, "when-open"=only when editor panel is open. Default: "on" */
   agentAccess?: AgentEditorAccess;
+  /** Whether to sync (navigate) the editor to files after agent edits. Default: true */
+  syncEditorOnEdit?: boolean;
 }

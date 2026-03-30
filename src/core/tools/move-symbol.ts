@@ -1,7 +1,7 @@
 import { access, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 import type { ToolResult } from "../../types/index.js";
-import { getIntelligenceRouter } from "../intelligence/index.js";
+import { getIntelligenceClient, getIntelligenceRouter } from "../intelligence/index.js";
 import type { Language } from "../intelligence/types.js";
 import { isForbidden } from "../security/forbidden.js";
 import { pushEdit } from "./edit-stack.js";
@@ -583,6 +583,7 @@ export const moveSymbolTool = {
       const sourceContent = await readFile(from, "utf-8");
       const sourceLines = sourceContent.split("\n");
       const router = getIntelligenceRouter(process.cwd());
+      const client = getIntelligenceClient();
       const language = router.detectLanguage(from);
       const handler = getLangHandler(language);
 
@@ -600,9 +601,15 @@ export const moveSymbolTool = {
         defEnd = (block.location.endLine ?? block.location.line) - 1;
       } else {
         // Try LSP DocumentSymbol for accurate range (handles JSX, arrow functions, etc.)
-        const symbols = await router.executeWithFallback(language, "findSymbols", (b) =>
-          b.findSymbols ? b.findSymbols(from) : Promise.resolve(null),
-        );
+        let symbols: import("../intelligence/types.js").SymbolInfo[] | null;
+        if (client) {
+          const tracked = await client.routerFindSymbols(from);
+          symbols = tracked?.value ?? null;
+        } else {
+          symbols = await router.executeWithFallback(language, "findSymbols", (b) =>
+            b.findSymbols ? b.findSymbols(from) : Promise.resolve(null),
+          );
+        }
         const match = symbols?.find((s) => s.name === args.symbol);
         if (match?.location.endLine) {
           defStart = match.location.line - 1;
@@ -653,9 +660,15 @@ export const moveSymbolTool = {
         }
 
         // References to other symbols defined in the same source file
-        const allSymbols = await router.executeWithFallback(language, "findSymbols", (b) =>
-          b.findSymbols ? b.findSymbols(from) : Promise.resolve(null),
-        );
+        let allSymbols: import("../intelligence/types.js").SymbolInfo[] | null;
+        if (client) {
+          const tracked = await client.routerFindSymbols(from);
+          allSymbols = tracked?.value ?? null;
+        } else {
+          allSymbols = await router.executeWithFallback(language, "findSymbols", (b) =>
+            b.findSymbols ? b.findSymbols(from) : Promise.resolve(null),
+          );
+        }
         const TOP_LEVEL_KINDS = new Set([
           "function",
           "class",

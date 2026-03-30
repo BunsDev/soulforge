@@ -67,11 +67,11 @@ export const renameFileTool = {
     } catch {}
 
     const router = getIntelligenceRouter(cwd);
-    const language = router.detectLanguage(from);
     const output: string[] = [];
 
     // 1. Ask LSP for import edits BEFORE moving the file
     let lspEdits: Array<{ file: string; oldContent: string; newContent: string }> = [];
+    const language = router.detectLanguage(from);
     const renameResult = await router.executeWithFallback(
       language,
       "getFileRenameEdits",

@@ -37,6 +37,11 @@ const ITEMS: ToggleItem[] = [
   { key: "lspStatus", label: "LSP Status", desc: "check attached LSP servers" },
   { key: "format", label: "LSP Format", desc: "format buffer via LSP" },
   { key: "editorContext", label: "Editor Context", desc: "file/cursor/selection in prompt" },
+  {
+    key: "syncEditorOnEdit",
+    label: "Sync on Edit",
+    desc: "jump to edited files (off = only refresh current)",
+  },
 ];
 
 const ALL_ON: EditorIntegration = {
@@ -50,6 +55,7 @@ const ALL_ON: EditorIntegration = {
   rename: true,
   lspStatus: true,
   format: true,
+  syncEditorOnEdit: true,
 };
 
 const ALL_OFF: EditorIntegration = {
@@ -63,6 +69,7 @@ const ALL_OFF: EditorIntegration = {
   rename: false,
   lspStatus: false,
   format: false,
+  syncEditorOnEdit: false,
 };
 
 interface Props {

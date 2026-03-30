@@ -2,11 +2,13 @@ export { FileCache } from "./cache.js";
 export {
   disposeIntelligenceRouter,
   getIntelligenceChildPids,
+  getIntelligenceClient,
   getIntelligenceRouter,
   getIntelligenceStatus,
   getNvimLspClients,
   restartLspServers,
   runIntelligenceHealthCheck,
+  setIntelligenceClient,
   warmupIntelligence,
 } from "./instance.js";
 export type { RepoMapOptions } from "./repo-map.js";

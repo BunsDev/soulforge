@@ -2,6 +2,7 @@ import type { WorkerHandlerContext } from "./rpc.js";
 import { createWorkerHandler } from "./rpc.js";
 
 let repoMap: import("../intelligence/repo-map.js").RepoMap | null = null;
+let router: import("../intelligence/router.js").CodeIntelligenceRouter | null = null;
 let highlighter: import("shiki").Highlighter | null = null;
 let ctx: WorkerHandlerContext;
 
@@ -84,6 +85,11 @@ async function ensureHighlighter() {
 function requireRepoMap() {
   if (!repoMap) throw new Error("RepoMap not initialized — send init first");
   return repoMap;
+}
+
+function requireRouter() {
+  if (!router) throw new Error("Router not initialized — send init first");
+  return router;
 }
 
 const handlers: Record<string, (...args: unknown[]) => unknown> = {
@@ -193,6 +199,205 @@ const handlers: Record<string, (...args: unknown[]) => unknown> = {
   // ── Ready State ──
   getIsReady: () => requireRepoMap().isReady,
 
+  // ── Intelligence Router Operations ──
+  // These run the full backend fallback chain (LSP → ts-morph → tree-sitter → regex)
+  // entirely in this worker thread, keeping the main/UI thread free.
+
+  routerDetectLanguage: (file: unknown) =>
+    requireRouter().detectLanguage(file as string | undefined),
+
+  routerFindSymbols: async (file: unknown, query: unknown) => {
+    const r = requireRouter();
+    const lang = r.detectLanguage(file as string);
+    return r.executeWithFallbackTracked(
+      lang,
+      "findSymbols",
+      (b) => b.findSymbols?.(file as string, query as string | undefined) ?? Promise.resolve(null),
+    );
+  },
+
+  routerFindDefinition: async (file: unknown, symbol: unknown) => {
+    const r = requireRouter();
+    const lang = r.detectLanguage(file as string);
+    return r.executeWithFallbackTracked(
+      lang,
+      "findDefinition",
+      (b) => b.findDefinition?.(file as string, symbol as string) ?? Promise.resolve(null),
+    );
+  },
+
+  routerFindReferences: async (file: unknown, symbol: unknown) => {
+    const r = requireRouter();
+    const lang = r.detectLanguage(file as string);
+    return r.executeWithFallbackTracked(
+      lang,
+      "findReferences",
+      (b) => b.findReferences?.(file as string, symbol as string) ?? Promise.resolve(null),
+    );
+  },
+
+  routerGetDiagnostics: async (file: unknown) => {
+    const r = requireRouter();
+    const lang = r.detectLanguage(file as string);
+    return r.executeWithFallbackTracked(
+      lang,
+      "getDiagnostics",
+      (b) => b.getDiagnostics?.(file as string) ?? Promise.resolve(null),
+    );
+  },
+
+  routerGetFileOutline: async (file: unknown) => {
+    const r = requireRouter();
+    const lang = r.detectLanguage(file as string);
+    return r.executeWithFallbackTracked(
+      lang,
+      "getFileOutline",
+      (b) => b.getFileOutline?.(file as string) ?? Promise.resolve(null),
+    );
+  },
+
+  routerFindImports: async (file: unknown) => {
+    const r = requireRouter();
+    const lang = r.detectLanguage(file as string);
+    return r.executeWithFallbackTracked(
+      lang,
+      "findImports",
+      (b) => b.findImports?.(file as string) ?? Promise.resolve(null),
+    );
+  },
+
+  routerFindExports: async (file: unknown) => {
+    const r = requireRouter();
+    const lang = r.detectLanguage(file as string);
+    return r.executeWithFallbackTracked(
+      lang,
+      "findExports",
+      (b) => b.findExports?.(file as string) ?? Promise.resolve(null),
+    );
+  },
+
+  routerGetTypeInfo: async (file: unknown, symbol: unknown, line: unknown, column: unknown) => {
+    const r = requireRouter();
+    const lang = r.detectLanguage(file as string);
+    return r.executeWithFallbackTracked(
+      lang,
+      "getTypeInfo",
+      (b) =>
+        b.getTypeInfo?.(
+          file as string,
+          symbol as string,
+          line as number | undefined,
+          column as number | undefined,
+        ) ?? Promise.resolve(null),
+    );
+  },
+
+  routerFindUnused: async (file: unknown) => {
+    const r = requireRouter();
+    const lang = r.detectLanguage(file as string);
+    return r.executeWithFallbackTracked(
+      lang,
+      "findUnused",
+      (b) => b.findUnused?.(file as string) ?? Promise.resolve(null),
+    );
+  },
+
+  routerRename: async (file: unknown, symbol: unknown, newName: unknown) => {
+    const r = requireRouter();
+    const lang = r.detectLanguage(file as string);
+    return r.executeWithFallbackTracked(
+      lang,
+      "rename",
+      (b) =>
+        b.rename?.(file as string, symbol as string, newName as string) ?? Promise.resolve(null),
+    );
+  },
+
+  routerGetCodeActions: async (file: unknown, startLine: unknown, endLine: unknown) => {
+    const r = requireRouter();
+    const lang = r.detectLanguage(file as string);
+    return r.executeWithFallbackTracked(
+      lang,
+      "getCodeActions",
+      (b) =>
+        b.getCodeActions?.(file as string, startLine as number, endLine as number) ??
+        Promise.resolve(null),
+    );
+  },
+
+  routerFormatDocument: async (file: unknown) => {
+    const r = requireRouter();
+    const lang = r.detectLanguage(file as string);
+    return r.executeWithFallbackTracked(
+      lang,
+      "formatDocument",
+      (b) => b.formatDocument?.(file as string) ?? Promise.resolve(null),
+    );
+  },
+
+  routerFormatRange: async (file: unknown, startLine: unknown, endLine: unknown) => {
+    const r = requireRouter();
+    const lang = r.detectLanguage(file as string);
+    return r.executeWithFallbackTracked(
+      lang,
+      "formatRange",
+      (b) =>
+        b.formatRange?.(file as string, startLine as number, endLine as number) ??
+        Promise.resolve(null),
+    );
+  },
+
+  routerFindWorkspaceSymbols: async (query: unknown) => {
+    const r = requireRouter();
+    const lang = r.detectLanguage();
+    return r.executeWithFallbackTracked(
+      lang,
+      "findWorkspaceSymbols",
+      (b) => b.findWorkspaceSymbols?.(query as string) ?? Promise.resolve(null),
+    );
+  },
+
+  routerGetCallHierarchy: async (file: unknown, symbol: unknown) => {
+    const r = requireRouter();
+    const lang = r.detectLanguage(file as string);
+    return r.executeWithFallbackTracked(
+      lang,
+      "getCallHierarchy",
+      (b) => b.getCallHierarchy?.(file as string, symbol as string) ?? Promise.resolve(null),
+    );
+  },
+
+  routerGetTypeHierarchy: async (file: unknown, symbol: unknown) => {
+    const r = requireRouter();
+    const lang = r.detectLanguage(file as string);
+    return r.executeWithFallbackTracked(
+      lang,
+      "getTypeHierarchy",
+      (b) => b.getTypeHierarchy?.(file as string, symbol as string) ?? Promise.resolve(null),
+    );
+  },
+
+  routerFindImplementation: async (file: unknown, symbol: unknown) => {
+    const r = requireRouter();
+    const lang = r.detectLanguage(file as string);
+    return r.executeWithFallbackTracked(
+      lang,
+      "findImplementation",
+      (b) => b.findImplementation?.(file as string, symbol as string) ?? Promise.resolve(null),
+    );
+  },
+
+  // Router management
+  routerGetStatus: () => requireRouter().getStatus(),
+  routerGetDetailedLspServers: () => requireRouter().getDetailedLspServers(),
+  routerRestartLspServers: (filter: unknown) =>
+    requireRouter().restartLspServers(filter as string | undefined),
+  routerGetChildPids: () => requireRouter().getChildPids(),
+  routerGetAvailableBackends: (language: unknown) =>
+    requireRouter().getAvailableBackends(language as import("../intelligence/types.js").Language),
+  routerWarmup: () => requireRouter().warmup(),
+  routerRunHealthCheck: () => requireRouter().runHealthCheck(),
+
   // ── Shiki Highlighting ──
   codeToAnsi: async (code: unknown, lang: unknown) => {
     const hl = await ensureHighlighter();
@@ -256,11 +461,14 @@ const handlers: Record<string, (...args: unknown[]) => unknown> = {
 ctx = createWorkerHandler(
   handlers,
   async (config) => {
-    const { initForbidden } = await import("../security/forbidden.js");
-    initForbidden(config.cwd as string);
+    const cwd = config.cwd as string;
 
+    const { initForbidden } = await import("../security/forbidden.js");
+    initForbidden(cwd);
+
+    // Initialize RepoMap (SQLite index)
     const { RepoMap } = await import("../intelligence/repo-map.js");
-    repoMap = new RepoMap(config.cwd as string);
+    repoMap = new RepoMap(cwd);
     if (typeof config.maxFiles === "number" && config.maxFiles > 0) {
       repoMap.maxFiles = config.maxFiles;
     }
@@ -282,8 +490,32 @@ ctx = createWorkerHandler(
     repoMap.onStaleSymbols = (count) => {
       ctx.emit("stale-symbols", { count });
     };
+
+    // Initialize CodeIntelligenceRouter with all backends
+    // This runs the full backend chain in the worker thread,
+    // keeping the main/UI thread free from parsing and LSP work.
+    const { CodeIntelligenceRouter } = await import("../intelligence/router.js");
+    const { LspBackend } = await import("../intelligence/backends/lsp/index.js");
+    const { TsMorphBackend } = await import("../intelligence/backends/ts-morph.js");
+    const { TreeSitterBackend } = await import("../intelligence/backends/tree-sitter.js");
+    const { RegexBackend } = await import("../intelligence/backends/regex.js");
+
+    router = new CodeIntelligenceRouter(cwd);
+    router.registerBackend(new LspBackend());
+    router.registerBackend(new TsMorphBackend());
+    router.registerBackend(new TreeSitterBackend());
+    const regex = new RegexBackend();
+    regex.setCache(router.fileCache);
+    router.registerBackend(regex);
+
+    // Fire-and-forget warmup — spawns LSP servers in background
+    router.warmup().catch(() => {});
   },
   async () => {
+    if (router) {
+      router.dispose();
+      router = null;
+    }
     if (repoMap) {
       await repoMap.close();
       repoMap = null;

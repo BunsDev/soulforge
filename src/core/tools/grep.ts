@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import type { ToolResult } from "../../types";
+import { getIntelligenceClient } from "../intelligence/index.js";
 import type { FileOutline, SymbolInfo } from "../intelligence/types.js";
 import { isForbidden } from "../security/forbidden.js";
 import { getVendoredPath } from "../setup/install.js";
@@ -125,9 +126,6 @@ export const grepTool = {
 export async function enrichWithSymbolContext(output: string): Promise<string> {
   if (output === "No matches found.") return output;
 
-  const { getIntelligenceRouter } = await import("../intelligence/index.js");
-  const router = getIntelligenceRouter(process.cwd());
-
   const hitsByFile = new Map<string, number[]>();
   for (const line of output.split("\n")) {
     const m = line.match(/^(.+?):(\d+):/);
@@ -140,15 +138,24 @@ export async function enrichWithSymbolContext(output: string): Promise<string> {
 
   if (hitsByFile.size === 0 || hitsByFile.size > 10) return output;
 
+  const client = getIntelligenceClient();
   const outlines = new Map<string, FileOutline>();
   await Promise.all(
     [...hitsByFile.keys()].map(async (file) => {
       try {
         const abs = resolve(file);
-        const lang = router.detectLanguage(abs);
-        const ol = await router.executeWithFallback(lang, "getFileOutline", (b) =>
-          b.getFileOutline ? b.getFileOutline(abs) : Promise.resolve(null),
-        );
+        let ol: FileOutline | null = null;
+        if (client) {
+          const tracked = await client.routerGetFileOutline(abs);
+          ol = tracked?.value ?? null;
+        } else {
+          const { getIntelligenceRouter } = await import("../intelligence/index.js");
+          const router = getIntelligenceRouter(process.cwd());
+          const lang = router.detectLanguage(abs);
+          ol = await router.executeWithFallback(lang, "getFileOutline", (b) =>
+            b.getFileOutline ? b.getFileOutline(abs) : Promise.resolve(null),
+          );
+        }
         if (ol) outlines.set(file, ol);
       } catch {}
     }),

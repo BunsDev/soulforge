@@ -1,3 +1,4 @@
+import type { IntelligenceClient } from "../workers/intelligence-client.js";
 import { LspBackend } from "./backends/lsp/index.js";
 import { RegexBackend } from "./backends/regex.js";
 import { TreeSitterBackend } from "./backends/tree-sitter.js";
@@ -6,10 +7,29 @@ import { CodeIntelligenceRouter } from "./router.js";
 import type { CodeIntelligenceConfig } from "./types.js";
 
 let router: CodeIntelligenceRouter | null = null;
+let _client: IntelligenceClient | null = null;
 
 /**
- * Get or create the singleton intelligence router.
- * Registers all available backends on first call.
+ * Set the intelligence client (worker proxy).
+ * Called once during app startup after the worker is ready.
+ * Tools should prefer getIntelligenceClient() over getIntelligenceRouter().
+ */
+export function setIntelligenceClient(client: IntelligenceClient): void {
+  _client = client;
+}
+
+/**
+ * Get the intelligence client (worker proxy).
+ * Returns null if the worker isn't ready yet — callers should fall back to router.
+ */
+export function getIntelligenceClient(): IntelligenceClient | null {
+  return _client;
+}
+
+/**
+ * Get or create the singleton intelligence router (main-thread).
+ * @deprecated Prefer getIntelligenceClient() — routes operations to worker thread.
+ * Still needed for: nvim LSP clients, and as fallback when worker is down.
  */
 export function getIntelligenceRouter(
   cwd: string,

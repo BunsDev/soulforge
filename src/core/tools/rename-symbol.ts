@@ -1,7 +1,7 @@
 import { readFile, stat as statAsync, writeFile } from "node:fs/promises";
 import { extname, resolve } from "node:path";
 import type { ToolResult } from "../../types/index.js";
-import { getIntelligenceRouter } from "../intelligence/index.js";
+import { getIntelligenceClient, getIntelligenceRouter } from "../intelligence/index.js";
 import type { FileEdit } from "../intelligence/types.js";
 import { isForbidden } from "../security/forbidden.js";
 import { pushEdit } from "./edit-stack.js";
@@ -351,10 +351,17 @@ async function locateSymbol(
   }
 
   // Try LSP workspace symbol search (works for main project)
-  const language = router.detectLanguage();
-  const results = await router.executeWithFallback(language, "findWorkspaceSymbols", (b) =>
-    b.findWorkspaceSymbols ? b.findWorkspaceSymbols(symbol) : Promise.resolve(null),
-  );
+  const client = getIntelligenceClient();
+  let results: import("../intelligence/types.js").SymbolInfo[] | null;
+  if (client) {
+    const tracked = await client.routerFindWorkspaceSymbols(symbol);
+    results = tracked?.value ?? null;
+  } else {
+    const language = router.detectLanguage();
+    results = await router.executeWithFallback(language, "findWorkspaceSymbols", (b) =>
+      b.findWorkspaceSymbols ? b.findWorkspaceSymbols(symbol) : Promise.resolve(null),
+    );
+  }
 
   if (results && results.length > 0) {
     const exact = results.find((s) => s.name === symbol);
@@ -465,6 +472,7 @@ export const renameSymbolTool = {
   execute: async (args: RenameSymbolArgs): Promise<ToolResult> => {
     try {
       const router = getIntelligenceRouter(process.cwd());
+      const client = getIntelligenceClient();
 
       const located = await locateSymbol(router, args.symbol, args.file);
       if (!located) {
@@ -475,19 +483,27 @@ export const renameSymbolTool = {
         };
       }
 
-      const language = router.detectLanguage(located.file);
-
       // Try LSP rename with retry — LSP may need a moment to load the file
-      let tracked = await router.executeWithFallbackTracked(language, "rename", (b) =>
-        b.rename ? b.rename(located.file, args.symbol, args.newName) : Promise.resolve(null),
-      );
-
-      if (!tracked) {
-        // Retry once after giving LSP time to load the project
-        await new Promise((r) => setTimeout(r, 2000));
+      let tracked: import("../workers/intelligence-client.js").TrackedResult<
+        import("../intelligence/types.js").RefactorResult
+      >;
+      if (client) {
+        tracked = await client.routerRename(located.file, args.symbol, args.newName);
+        if (!tracked) {
+          await new Promise((r) => setTimeout(r, 2000));
+          tracked = await client.routerRename(located.file, args.symbol, args.newName);
+        }
+      } else {
+        const language = router.detectLanguage(located.file);
         tracked = await router.executeWithFallbackTracked(language, "rename", (b) =>
           b.rename ? b.rename(located.file, args.symbol, args.newName) : Promise.resolve(null),
         );
+        if (!tracked) {
+          await new Promise((r) => setTimeout(r, 2000));
+          tracked = await router.executeWithFallbackTracked(language, "rename", (b) =>
+            b.rename ? b.rename(located.file, args.symbol, args.newName) : Promise.resolve(null),
+          );
+        }
       }
 
       if (tracked) {

@@ -42,6 +42,7 @@ const DEFAULT_CONFIG: AppConfig = {
     rename: true,
     lspStatus: true,
     format: true,
+    syncEditorOnEdit: true,
   },
   codeExecution: false,
   webSearch: true,

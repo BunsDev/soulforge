@@ -1,11 +1,26 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { ToolResult } from "../../types/index.js";
-import { type CodeIntelligenceRouter, getIntelligenceRouter } from "../intelligence/index.js";
+import {
+  type CodeIntelligenceRouter,
+  getIntelligenceClient,
+  getIntelligenceRouter,
+} from "../intelligence/index.js";
 import type { FileEdit, FormatEdit, Language, RefactorResult } from "../intelligence/types.js";
 import { isForbidden } from "../security/forbidden.js";
+import type { TrackedResult } from "../workers/intelligence-client.js";
 import { pushEdit } from "./edit-stack.js";
 import { emitFileEdited } from "./file-events.js";
+
+async function fallbackTracked<T>(
+  file: string | undefined,
+  operation: string & keyof import("../intelligence/types.js").IntelligenceBackend,
+  fn: (b: import("../intelligence/types.js").IntelligenceBackend) => Promise<T | null>,
+): Promise<TrackedResult<T>> {
+  const router = getIntelligenceRouter(process.cwd());
+  const language = router.detectLanguage(file);
+  return router.executeWithFallbackTracked(language, operation, fn);
+}
 
 async function resolveSymbolRange(
   router: CodeIntelligenceRouter,
@@ -167,13 +182,10 @@ export const refactorTool = {
             };
           }
 
-          const tracked = await router.executeWithFallbackTracked(
-            language,
-            "extractFunction",
-            (b) =>
-              b.extractFunction
-                ? b.extractFunction(file, startLine, endLine, newName)
-                : Promise.resolve(null),
+          const tracked = await fallbackTracked(file, "extractFunction", (b) =>
+            b.extractFunction
+              ? b.extractFunction(file, startLine, endLine, newName)
+              : Promise.resolve(null),
           );
 
           if (!tracked) {
@@ -233,13 +245,10 @@ export const refactorTool = {
             };
           }
 
-          const tracked = await router.executeWithFallbackTracked(
-            language,
-            "extractVariable",
-            (b) =>
-              b.extractVariable
-                ? b.extractVariable(file, startLine, endLine, newName)
-                : Promise.resolve(null),
+          const tracked = await fallbackTracked(file, "extractVariable", (b) =>
+            b.extractVariable
+              ? b.extractVariable(file, startLine, endLine, newName)
+              : Promise.resolve(null),
           );
 
           if (!tracked) {
@@ -279,11 +288,12 @@ export const refactorTool = {
             };
           }
 
-          const tracked = await router.executeWithFallbackTracked(
-            language,
-            "formatDocument",
-            (b) => (b.formatDocument ? b.formatDocument(file) : Promise.resolve(null)),
-          );
+          const client = getIntelligenceClient();
+          const tracked = client
+            ? await client.routerFormatDocument(file)
+            : await fallbackTracked(file, "formatDocument", (b) =>
+                b.formatDocument ? b.formatDocument(file) : Promise.resolve(null),
+              );
 
           if (!tracked) {
             return {
@@ -319,9 +329,12 @@ export const refactorTool = {
             };
           }
 
-          const tracked = await router.executeWithFallbackTracked(language, "formatRange", (b) =>
-            b.formatRange ? b.formatRange(file, startLine, endLine) : Promise.resolve(null),
-          );
+          const client = getIntelligenceClient();
+          const tracked = client
+            ? await client.routerFormatRange(file, startLine, endLine)
+            : await fallbackTracked(file, "formatRange", (b) =>
+                b.formatRange ? b.formatRange(file, startLine, endLine) : Promise.resolve(null),
+              );
 
           if (!tracked) {
             return {
@@ -348,10 +361,8 @@ export const refactorTool = {
             };
           }
 
-          const tracked = await router.executeWithFallbackTracked(
-            language,
-            "organizeImports",
-            (b) => (b.organizeImports ? b.organizeImports(file) : Promise.resolve(null)),
+          const tracked = await fallbackTracked(file, "organizeImports", (b) =>
+            b.organizeImports ? b.organizeImports(file) : Promise.resolve(null),
           );
 
           if (!tracked) {

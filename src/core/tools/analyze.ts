@@ -2,8 +2,20 @@ import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { ToolResult } from "../../types/index.js";
-import { getIntelligenceRouter } from "../intelligence/index.js";
+import { getIntelligenceClient, getIntelligenceRouter } from "../intelligence/index.js";
 import { isForbidden } from "../security/forbidden.js";
+import type { TrackedResult } from "../workers/intelligence-client.js";
+
+/** Fallback: use main-thread router when worker client is unavailable */
+async function fallbackTracked<T>(
+  file: string | undefined,
+  operation: string & keyof import("../intelligence/types.js").IntelligenceBackend,
+  fn: (b: import("../intelligence/types.js").IntelligenceBackend) => Promise<T | null>,
+): Promise<TrackedResult<T>> {
+  const router = getIntelligenceRouter(process.cwd());
+  const language = router.detectLanguage(file);
+  return router.executeWithFallbackTracked(language, operation, fn);
+}
 
 type AnalyzeAction =
   | "diagnostics"
@@ -30,7 +42,7 @@ export const analyzeTool = {
     "Query code structure — returns type signatures, symbol outlines, diagnostics, quick-fix suggestions.",
   execute: async (args: AnalyzeArgs): Promise<ToolResult> => {
     try {
-      const router = getIntelligenceRouter(process.cwd());
+      const client = getIntelligenceClient();
       const file = args.file ? resolve(args.file) : undefined;
       if (file) {
         const blocked = isForbidden(file);
@@ -42,7 +54,6 @@ export const analyzeTool = {
           };
         }
       }
-      const language = router.detectLanguage(file);
 
       switch (args.action) {
         case "diagnostics": {
@@ -54,16 +65,16 @@ export const analyzeTool = {
             };
           }
 
-          const tracked = await router.executeWithFallbackTracked(
-            language,
-            "getDiagnostics",
-            (b) => (b.getDiagnostics ? b.getDiagnostics(file) : Promise.resolve(null)),
-          );
+          const tracked = client
+            ? await client.routerGetDiagnostics(file)
+            : await fallbackTracked(file, "getDiagnostics", (b) =>
+                b.getDiagnostics ? b.getDiagnostics(file) : Promise.resolve(null),
+              );
 
           if (!tracked) {
             return {
               success: false,
-              output: `No diagnostics backend available for ${language}`,
+              output: "No diagnostics backend available",
               error: "unsupported",
             };
           }
@@ -116,11 +127,13 @@ export const analyzeTool = {
             };
           }
 
-          const tracked = await router.executeWithFallbackTracked(language, "getTypeInfo", (b) =>
-            b.getTypeInfo
-              ? b.getTypeInfo(file, symbol, args.line, args.column)
-              : Promise.resolve(null),
-          );
+          const tracked = client
+            ? await client.routerGetTypeInfo(file, symbol, args.line, args.column)
+            : await fallbackTracked(file, "getTypeInfo", (b) =>
+                b.getTypeInfo
+                  ? b.getTypeInfo(file, symbol, args.line, args.column)
+                  : Promise.resolve(null),
+              );
 
           if (!tracked) {
             return {
@@ -147,11 +160,11 @@ export const analyzeTool = {
             };
           }
 
-          const tracked = await router.executeWithFallbackTracked(
-            language,
-            "getFileOutline",
-            (b) => (b.getFileOutline ? b.getFileOutline(file) : Promise.resolve(null)),
-          );
+          const tracked = client
+            ? await client.routerGetFileOutline(file)
+            : await fallbackTracked(file, "getFileOutline", (b) =>
+                b.getFileOutline ? b.getFileOutline(file) : Promise.resolve(null),
+              );
 
           if (!tracked) {
             return { success: false, output: "Could not generate outline", error: "failed" };
@@ -198,12 +211,13 @@ export const analyzeTool = {
           const startLine = args.startLine ?? 1;
           const endLine = args.endLine ?? startLine;
 
-          const tracked = await router.executeWithFallbackTracked(
-            language,
-            "getCodeActions",
-            (b) =>
-              b.getCodeActions ? b.getCodeActions(file, startLine, endLine) : Promise.resolve(null),
-          );
+          const tracked = client
+            ? await client.routerGetCodeActions(file, startLine, endLine)
+            : await fallbackTracked(file, "getCodeActions", (b) =>
+                b.getCodeActions
+                  ? b.getCodeActions(file, startLine, endLine)
+                  : Promise.resolve(null),
+              );
 
           if (!tracked || tracked.value.length === 0) {
             return { success: true, output: "No code actions available" };
@@ -231,9 +245,11 @@ export const analyzeTool = {
             };
           }
 
-          const tracked = await router.executeWithFallbackTracked(language, "findUnused", (b) =>
-            b.findUnused ? b.findUnused(file) : Promise.resolve(null),
-          );
+          const tracked = client
+            ? await client.routerFindUnused(file)
+            : await fallbackTracked(file, "findUnused", (b) =>
+                b.findUnused ? b.findUnused(file) : Promise.resolve(null),
+              );
 
           if (!tracked || tracked.value.length === 0) {
             return {
@@ -301,11 +317,18 @@ export const analyzeTool = {
           }
 
           // Get outlines of both versions using simple parsing
-          const oldOutline = await router.executeWithFallback(language, "getFileOutline", (b) => {
-            if (!b.getFileOutline) return Promise.resolve(null);
-            // Write old content to a temp analysis — use the file outline on current
-            return b.getFileOutline(file);
-          });
+          let oldOutline: import("../intelligence/types.js").FileOutline | null = null;
+          if (client) {
+            const tracked = await client.routerGetFileOutline(file);
+            oldOutline = tracked?.value ?? null;
+          } else {
+            const router = getIntelligenceRouter(process.cwd());
+            const language = router.detectLanguage(file);
+            oldOutline = await router.executeWithFallback(language, "getFileOutline", (b) => {
+              if (!b.getFileOutline) return Promise.resolve(null);
+              return b.getFileOutline(file);
+            });
+          }
 
           // Parse symbols from both versions via simple heuristic
           const oldSymbols = extractSymbolNames(oldContent);
