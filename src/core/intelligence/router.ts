@@ -545,6 +545,11 @@ export class CodeIntelligenceRouter {
         label: `readSymbol(${probeSymbolName})`,
         fn: (b, f) => b.readSymbol?.(f, probeSymbolName) ?? Promise.resolve(null),
       },
+      {
+        op: "findImplementation",
+        label: `findImplementation(${probeSymbolName})`,
+        fn: (b, f) => b.findImplementation?.(f, probeSymbolName) ?? Promise.resolve(null),
+      },
     ];
 
     const probeOp = async (

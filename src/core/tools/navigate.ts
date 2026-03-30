@@ -485,17 +485,10 @@ export const navigateTool = {
                   : Promise.resolve(null),
               );
 
-          if (!tracked) {
+          if (!tracked || tracked.value.length === 0) {
             return {
               success: false,
-              output: `No implementation backend available — try grep instead`,
-              error: "unsupported",
-            };
-          }
-          if (tracked.value.length === 0) {
-            return {
-              success: false,
-              output: `No implementations found for '${symbol}'`,
+              output: `No implementations found for '${symbol}' — for interfaces/abstract classes, ensure the editor is open. For concrete symbols, use definition instead.`,
               error: "not found",
             };
           }

@@ -23,7 +23,6 @@ type EditorAction =
   | "definition"
   | "actions"
   | "rename"
-  | "lsp_status"
   | "format"
   | "select"
   | "goto_cursor"
@@ -104,8 +103,6 @@ export const editorTool = {
           };
         }
         return editorRenameTool.execute({ newName: args.newName, line: args.line, col: args.col });
-      case "lsp_status":
-        return editorLspStatusTool.execute();
       case "format":
         return editorFormatTool.execute({ startLine: args.startLine, endLine: args.endLine });
       case "select":
@@ -691,54 +688,6 @@ const editorRenameTool = {
         success: true,
         output: `Renamed to "${newName}" — ${String(result)} edit(s) applied`,
       };
-    }),
-};
-
-const editorLspStatusTool = {
-  name: "editor_lsp_status",
-  description:
-    "Get the status of LSP servers attached to the current buffer, including their names, root directories, and capabilities.",
-  execute: async (): Promise<ToolResult> =>
-    withNvim(undefined, async (nvim) => {
-      const lua = `
-        local clients = vim.lsp.get_clients({ bufnr = 0 })
-        if #clients == 0 then return '${NO_LSP}' end
-        local result = {}
-        for _, c in ipairs(clients) do
-          local caps = {}
-          local sc = c.server_capabilities or {}
-          if sc.completionProvider then table.insert(caps, 'completion') end
-          if sc.hoverProvider then table.insert(caps, 'hover') end
-          if sc.definitionProvider then table.insert(caps, 'definition') end
-          if sc.referencesProvider then table.insert(caps, 'references') end
-          if sc.renameProvider then table.insert(caps, 'rename') end
-          if sc.documentFormattingProvider then table.insert(caps, 'formatting') end
-          if sc.documentSymbolProvider then table.insert(caps, 'symbols') end
-          if sc.codeActionProvider then table.insert(caps, 'codeActions') end
-          if sc.diagnosticProvider then table.insert(caps, 'diagnostics') end
-          table.insert(result, {
-            name = c.name,
-            id = c.id,
-            root_dir = c.config and c.config.root_dir or '',
-            capabilities = caps,
-          })
-        end
-        return vim.json.encode(result)
-      `;
-      const result = await nvim.api.executeLua(lua, []);
-      if (result === NO_LSP) {
-        return { success: true, output: "No LSP servers attached to current buffer" };
-      }
-      const parsed: unknown[] = safeJsonParse(result, []);
-      if (parsed.length === 0) {
-        return { success: true, output: "No LSP servers attached" };
-      }
-      const lines = parsed.map((s: unknown) => {
-        const srv = s as { name: string; id: number; root_dir: string; capabilities: string[] };
-        const caps = srv.capabilities.length > 0 ? srv.capabilities.join(", ") : "none";
-        return `${srv.name} (id ${String(srv.id)})${srv.root_dir ? ` root: ${srv.root_dir}` : ""}\n  capabilities: ${caps}`;
-      });
-      return { success: true, output: lines.join("\n\n") };
     }),
 };
 

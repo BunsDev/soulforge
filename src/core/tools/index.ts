@@ -834,7 +834,7 @@ export function buildTools(
             "definition",
             "actions",
             "rename",
-            "lsp_status",
+
             "format",
             "select",
             "goto_cursor",
@@ -847,8 +847,8 @@ export function buildTools(
           ])
           .describe(
             "read=buffer content, edit=replace lines, navigate=open file/jump, " +
-              "diagnostics/symbols/hover/references/definition=LSP, actions=code actions, " +
-              "rename=LSP rename, format=LSP format, buffers=list open, terminal_output=read terminal",
+              "diagnostics/symbols/hover/references/definition=buffer-level (use navigate tool for LSP), " +
+              "actions=code actions, rename=buffer rename, format=format, buffers=list open, terminal_output=read terminal",
           ),
         startLine: z
           .number()
