@@ -222,6 +222,22 @@ if (isCompile) {
   // Copy runtime resources that can't be bundled inline
   copyFileSync("src/core/editor/init.lua", "dist/init.lua");
   cpSync("node_modules/@opentui/core/assets", "dist/opentui-assets", { recursive: true });
+  copyFileSync("node_modules/web-tree-sitter/tree-sitter.wasm", "dist/tree-sitter.wasm");
+
+  // Pre-bundle OpenTUI's parser worker with web-tree-sitter inlined.
+  // The worker runs in a separate thread and can't resolve node_modules from the bundle.
+  // tree-sitter.wasm is resolved via import.meta.url in the worker (same dist/ dir).
+  const parserWorker = await Bun.build({
+    entrypoints: ["node_modules/@opentui/core/parser.worker.js"],
+    outdir: "dist",
+    target: "bun",
+    naming: "parser.worker.[ext]",
+  });
+  if (!parserWorker.success) {
+    console.error("Parser worker build failed:");
+    for (const log of parserWorker.logs) console.error(log);
+    process.exit(1);
+  }
 
   const elapsed = (performance.now() - start).toFixed(0);
   const count = result.outputs.length + workerResult.outputs.length;

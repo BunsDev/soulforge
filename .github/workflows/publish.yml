@@ -168,21 +168,15 @@ jobs:
             end
 
             def install
-              # Stage everything in libexec — install phase runs in a sandbox
-              # where HOME is a temp dir, so we can't write to ~/.soulforge/ here
               libexec.install Dir["*"]
 
-              # Rename native Mach-O addons (.node, .dylib, .so) so Homebrew's
-              # keg_relocate pass doesn't try to rewrite their dylib IDs/rpaths.
-              # The header padding in these files is too small for Homebrew's
-              # absolute paths, causing "Updated load commands do not fit" errors.
-              # Restored in post_install before running install.sh.
+              # Gzip ALL Mach-O files so Homebrew's keg_relocate can't detect them.
+              # It scans by magic bytes, not extension — renaming alone doesn't work.
+              system "gzip", libexec/"soulforge"
               Dir.glob(libexec/"deps/native/**/*.{node,dylib,so}").each do |f|
-                File.rename(f, "#{f}.brew-hide")
+                system "gzip", f
               end
 
-              # Wrapper scripts use $HOME (shell expansion at runtime, not Ruby
-              # interpolation at install time) so they resolve to the real home dir
               (bin/"soulforge").write <<~SH
                 #!/bin/bash
                 exec "\$HOME/.soulforge/bin/soulforge" "\$@"
@@ -196,11 +190,9 @@ jobs:
             end
 
             def post_install
-              # Restore native addons hidden from Homebrew's dylib relinking
-              Dir.glob(libexec/"deps/native/**/*.brew-hide").each do |f|
-                File.rename(f, f.sub(/\.brew-hide$/, ""))
-              end
-              # post_install runs outside the sandbox with the real HOME
+              system "gunzip", libexec/"soulforge.gz" if File.exist?(libexec/"soulforge.gz")
+              Dir.glob(libexec/"deps/native/**/*.gz").each { |f| system "gunzip", f }
+              system "chmod", "+x", libexec/"soulforge"
               system "#{libexec}/install.sh", "--quiet"
             end
 
