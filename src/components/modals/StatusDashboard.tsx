@@ -514,9 +514,12 @@ export function StatusDashboard({
     t,
   ]);
 
+  const [lspCount, setLspCount] = useState(0);
+  useEffect(() => {
+    getIntelligenceStatus().then((s) => setLspCount(s?.lspServers.length ?? 0));
+  }, []);
+
   const systemLines = useMemo(() => {
-    const lspStatus = getIntelligenceStatus();
-    const lspCount = lspStatus?.lspServers.length ?? 0;
     const rssMB = sb.rssMB;
     const memColor = rssMB < 2048 ? t.success : rssMB < 4096 ? t.amber : t.error;
 
@@ -750,7 +753,7 @@ export function StatusDashboard({
     );
 
     return lines;
-  }, [sb, rm, wk, currentMode, currentModeLabel, innerW, t]);
+  }, [sb, rm, wk, currentMode, currentModeLabel, innerW, t, lspCount]);
 
   const activeLines = tab === "Context" ? contextLines : systemLines;
   const clampedScroll = Math.min(scrollOffset, Math.max(0, activeLines.length - maxVisible));

@@ -25,7 +25,29 @@ import {
   type TypeHierarchyResult,
   type TypeInfo,
 } from "../../types.js";
-import * as nvimBridge from "./nvim-bridge.js";
+
+// Lazy-loaded to avoid pulling in the nvim module chain in worker threads
+// where getNvimInstance() always returns null.
+let _nvimBridge: typeof import("./nvim-bridge.js") | null = null;
+function getNvimBridge(): typeof import("./nvim-bridge.js") | null {
+  if (_nvimBridge === null) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      _nvimBridge = require("./nvim-bridge.js") as typeof import("./nvim-bridge.js");
+    } catch {
+      return null;
+    }
+  }
+  return _nvimBridge;
+}
+const nvimBridge = new Proxy({} as typeof import("./nvim-bridge.js"), {
+  get(_target, prop: string) {
+    const mod = getNvimBridge();
+    if (!mod) return prop === "isNvimAvailable" ? () => false : undefined;
+    return (mod as Record<string, unknown>)[prop];
+  },
+});
+
 import {
   type LspCallHierarchyItem,
   type LspDocumentSymbol,

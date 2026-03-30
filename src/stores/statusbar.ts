@@ -293,11 +293,11 @@ interface PidGroup {
   lsp: number[];
 }
 
-function collectPidGroups(): PidGroup {
+async function collectPidGroups(): Promise<PidGroup> {
   return {
     nvim: getNvimPid(),
     proxy: getProxyPid(),
-    lsp: getIntelligenceChildPids(),
+    lsp: await getIntelligenceChildPids(),
   };
 }
 
@@ -368,9 +368,9 @@ let memPollTimer: ReturnType<typeof setInterval> | null = null;
 export function startMemoryPoll(intervalMs = 2000) {
   if (memPollStarted) return;
   memPollStarted = true;
-  memPollTimer = setInterval(() => {
+  memPollTimer = setInterval(async () => {
     const mainMB = Math.round(process.memoryUsage().rss / 1024 / 1024);
-    const groups = collectPidGroups();
+    const groups = await collectPidGroups();
     const allPids: number[] = [];
     if (groups.nvim != null) allPids.push(groups.nvim);
     if (groups.proxy != null) allPids.push(groups.proxy);

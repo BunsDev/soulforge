@@ -1044,6 +1044,101 @@ const ONE_LIGHT: ThemeTokens = {
   accentSystem: "#696c77",
 };
 
+const PROXYSOUL_MAIN: ThemeTokens = {
+  ...DARK_THEME,
+  brand: "#7844f0",
+  brandSecondary: "#ff0059",
+  brandDim: "#211e33",
+  brandAlt: "#9b6af5",
+
+  error: "#ee0b2a",
+  success: "#0b8b00",
+  warning: "#de7c00",
+  info: "#00a2ce",
+  amber: "#e65f2a",
+
+  textPrimary: "#e7e7ee",
+  textSecondary: "#8e8ca1",
+  textMuted: "#5c5a6e",
+  textDim: "#3d3b50",
+  textFaint: "#2a2840",
+  textSubtle: "#1a1830",
+
+  bgApp: "#020204",
+  bgPopup: "#07060d",
+  bgPopupHighlight: "#120e22",
+  bgOverlay: "#020204",
+  bgPrimary: "#020204",
+  bgSecondary: "#07060d",
+  bgElevated: "#120e22",
+  bgInput: "#0a0818",
+  bgBanner: "#120e22",
+  bgBannerError: "#3a0a12",
+  bgUser: "#0a0818",
+
+  border: "#211e33",
+  borderFocused: "#ff0059",
+  borderActive: "#7844f0",
+  borderSlash: "#9b6af5",
+
+  diffAddedBg: "#061a08",
+  diffRemovedBg: "#1a0608",
+  diffAddedSign: "#0b8b00",
+  diffRemovedSign: "#ee0b2a",
+
+  accentUser: "#00a2ce",
+  accentAssistant: "#7844f0",
+  accentSystem: "#5c5a6e",
+};
+
+const PROXYSOUL_COFFEE: ThemeTokens = {
+  ...PROXYSOUL_MAIN,
+  brand: "#de7c00",
+  brandSecondary: "#e65f2a",
+  brandDim: "#2e2010",
+  brandAlt: "#c8944a",
+
+  warning: "#e65f2a",
+  amber: "#de7c00",
+
+  bgPopupHighlight: "#1a1510",
+  bgElevated: "#1a1510",
+  bgInput: "#0d0a06",
+  bgBanner: "#1a1510",
+  bgUser: "#0d0a06",
+
+  border: "#2e2010",
+  borderFocused: "#e65f2a",
+  borderActive: "#de7c00",
+  borderSlash: "#c8944a",
+
+  accentAssistant: "#de7c00",
+};
+
+const PROXYSOUL_WATER: ThemeTokens = {
+  ...PROXYSOUL_MAIN,
+  brand: "#00a2ce",
+  brandSecondary: "#009a8b",
+  brandDim: "#0e2030",
+  brandAlt: "#3bb8d8",
+
+  info: "#3bb8d8",
+
+  bgPopupHighlight: "#0e1a22",
+  bgElevated: "#0e1a22",
+  bgInput: "#060d14",
+  bgBanner: "#0e1a22",
+  bgUser: "#060d14",
+
+  border: "#0e2030",
+  borderFocused: "#009a8b",
+  borderActive: "#00a2ce",
+  borderSlash: "#3bb8d8",
+
+  accentUser: "#009a8b",
+  accentAssistant: "#00a2ce",
+};
+
 /** Theme metadata for the picker UI */
 export interface ThemeMeta {
   label: string;
@@ -1125,6 +1220,21 @@ export const THEME_META: Record<string, ThemeMeta> = {
     description: "Atom's iconic light theme",
     variant: "light",
   },
+  "proxysoul-main": {
+    label: "proxySoul",
+    description: "Deep purple with hot pink accents",
+    variant: "dark",
+  },
+  "proxysoul-coffee": {
+    label: "proxySoul Coffee",
+    description: "Warm amber & burnt orange",
+    variant: "dark",
+  },
+  "proxysoul-water": {
+    label: "proxySoul Water",
+    description: "Ocean blue & teal",
+    variant: "dark",
+  },
 };
 
 export const BUILTIN_THEMES: Record<string, ThemeTokens> = {
@@ -1149,6 +1259,9 @@ export const BUILTIN_THEMES: Record<string, ThemeTokens> = {
   nightfox: NIGHTFOX,
   "tokyonight-storm": TOKYONIGHT_STORM,
   "one-light": ONE_LIGHT,
+  "proxysoul-main": PROXYSOUL_MAIN,
+  "proxysoul-coffee": PROXYSOUL_COFFEE,
+  "proxysoul-water": PROXYSOUL_WATER,
 };
 
 /** Convert kebab-case token key to camelCase (e.g. "bg-primary" → "bgPrimary") */

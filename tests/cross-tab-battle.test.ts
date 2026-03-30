@@ -1091,13 +1091,14 @@ describe("edit-stack adversarial interleaving", () => {
     expect(readFileSync(file, "utf-8")).toBe("b-v2");
 
     // Undo tab-b again: should get b-v1
-    writeFileSync(file, "current-again", "utf-8");
+    // Restore file to "current" so stale detection passes (entry afterHash = hash("current"))
+    writeFileSync(file, "current", "utf-8");
     const r2 = await undoEditTool.execute({ path: file, steps: 1, tabId: "tab-b" });
     expect(r2.success).toBe(true);
     expect(readFileSync(file, "utf-8")).toBe("b-v1");
 
     // Undo tab-b again: no more entries — should fail
-    writeFileSync(file, "current-again2", "utf-8");
+    writeFileSync(file, "current", "utf-8");
     const r3 = await undoEditTool.execute({ path: file, steps: 1, tabId: "tab-b" });
     expect(r3.success).toBe(false);
     expect(r3.output).toContain("No edit history");
@@ -1131,7 +1132,8 @@ describe("edit-stack adversarial interleaving", () => {
     expect(readFileSync(file, "utf-8")).toBe("tab-a-content");
 
     // tab-a undo again: should match the unowned entry (tabId=undefined matches any tab)
-    writeFileSync(file, "current2", "utf-8");
+    // Restore file to "current" so stale detection passes (entry afterHash = hash("current"))
+    writeFileSync(file, "current", "utf-8");
     const r2 = await undoEditTool.execute({ path: file, steps: 1, tabId: "tab-a" });
     expect(r2.success).toBe(true);
     expect(readFileSync(file, "utf-8")).toBe("unowned-content");
@@ -1155,7 +1157,8 @@ describe("edit-stack adversarial interleaving", () => {
     expect(readFileSync(file, "utf-8")).toBe("a1");
 
     // tab-b entries should still be there
-    writeFileSync(file, "current2", "utf-8");
+    // Restore file to "current" so stale detection passes (entry afterHash = hash("current"))
+    writeFileSync(file, "current", "utf-8");
     const r2 = await undoEditTool.execute({ path: file, steps: 2, tabId: "tab-b" });
     expect(r2.success).toBe(true);
     expect(readFileSync(file, "utf-8")).toBe("b1");

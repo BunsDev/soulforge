@@ -85,10 +85,10 @@ export function TaskList({ tasks, nested }: TaskListProps) {
       width="100%"
     >
       <box gap={1} flexDirection="row" height={1}>
-        <text fg={theme.brandDim} attributes={TextAttributes.BOLD}>
+        <text fg={theme.brand} attributes={TextAttributes.BOLD}>
           {icon("plan")} Tasks
         </text>
-        <text fg={theme.textMuted}>
+        <text fg={theme.textSecondary}>
           {String(doneTasks.length)}/{String(tasks.length)}
         </text>
       </box>

@@ -409,16 +409,8 @@ export function buildTools(
           .optional()
           .transform(nullToUndef)
           .describe(
-            "Preferred: 1-indexed start line from your last read_file output. " +
-              "Line-based editing is the most reliable method — always provide lineStart and lineEnd for precise replacements.",
-          ),
-        lineEnd: z
-          .preprocess(coerceInt, z.number())
-          .nullable()
-          .optional()
-          .transform(nullToUndef)
-          .describe(
-            "Preferred: 1-indexed end line (inclusive). Provide with lineStart for reliable line-based replacements.",
+            "1-indexed start line from your last read_file output. " +
+              "The range is derived from oldString line count — lineStart anchors where to look.",
           ),
       }),
       execute: deferExecute(async (args) => {
@@ -495,14 +487,8 @@ export function buildTools(
                 .optional()
                 .transform(nullToUndef)
                 .describe(
-                  "Preferred: 1-indexed start line from read_file output for reliable line-based editing",
+                  "1-indexed start line from read_file output. Range derived from oldString line count.",
                 ),
-              lineEnd: z
-                .preprocess(coerceInt, z.number())
-                .nullable()
-                .optional()
-                .transform(nullToUndef)
-                .describe("Preferred: 1-indexed end line (inclusive) for line-based replacement"),
             }),
           )
           .describe("Array of edits to apply atomically"),
@@ -2001,16 +1987,8 @@ export function buildSubagentCodeTools(opts?: {
           .optional()
           .transform(nullToUndef)
           .describe(
-            "Preferred: 1-indexed start line from your last read_file output. " +
-              "Line-based editing is the most reliable method — always provide lineStart and lineEnd for precise replacements.",
-          ),
-        lineEnd: z
-          .preprocess(coerceInt, z.number())
-          .nullable()
-          .optional()
-          .transform(nullToUndef)
-          .describe(
-            "Preferred: 1-indexed end line (inclusive). Provide with lineStart for reliable line-based replacements.",
+            "1-indexed start line from your last read_file output. " +
+              "The range is derived from oldString line count — lineStart anchors where to look.",
           ),
       }),
       execute: deferExecute(async (args) => {
@@ -2043,14 +2021,8 @@ export function buildSubagentCodeTools(opts?: {
                 .optional()
                 .transform(nullToUndef)
                 .describe(
-                  "Preferred: 1-indexed start line from read_file output for reliable line-based editing",
+                  "1-indexed start line from read_file output. Range derived from oldString line count.",
                 ),
-              lineEnd: z
-                .preprocess(coerceInt, z.number())
-                .nullable()
-                .optional()
-                .transform(nullToUndef)
-                .describe("Preferred: 1-indexed end line (inclusive) for line-based replacement"),
             }),
           )
           .describe("Array of edits to apply atomically"),

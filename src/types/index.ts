@@ -241,6 +241,12 @@ export interface AppConfig {
     name: string;
     transparent?: boolean;
     accentColor?: string;
+    /** User message background opacity when transparent mode is on: 0=clear, 30=dim, 70=subtle, 100=solid */
+    userMessageOpacity?: number;
+    /** Diff background opacity when transparent mode is on: 0=clear, 30=dim, 70=subtle, 100=solid */
+    diffOpacity?: number;
+    /** Border visibility strength: default, strong, op */
+    borderStrength?: "default" | "strong" | "op";
   };
   nvimPath?: string;
   nvimConfig?: NvimConfigMode;
@@ -262,6 +268,8 @@ export interface AppConfig {
   verbose?: boolean;
   /** Diff display style: "default" | "sidebyside" | "compact". Default: "default" */
   diffStyle?: "default" | "sidebyside" | "compact";
+  /** Auto-compact diffs after streaming ends (Ctrl+O to expand). Default: false */
+  autoCompactDiffs?: boolean;
   /** Whether the terminal uses a Nerd Font. null = auto-detect from installed fonts. */
   nerdFont?: boolean | null;
   /** Chat layout style. Default: "accent" */

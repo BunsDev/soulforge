@@ -54,7 +54,12 @@ function rgb(hex: string): string {
 try {
   const raw = readFileSync(join(homedir(), ".soulforge", "config.json"), "utf-8");
   const cfg = JSON.parse(raw);
-  if (cfg.theme?.name) applyTheme(cfg.theme.name, cfg.theme?.transparent);
+  if (cfg.theme?.name)
+    applyTheme(cfg.theme.name, cfg.theme?.transparent, {
+      userMessageOpacity: cfg.theme?.userMessageOpacity,
+      diffOpacity: cfg.theme?.diffOpacity,
+      borderStrength: cfg.theme?.borderStrength,
+    });
 } catch {}
 watchThemes();
 
@@ -393,7 +398,10 @@ const [bootProviders, bootPrereqs] = await Promise.all([
 ]);
 
 status("Kicking the neurons awake…", "Waking the tree-sitter…");
-import("./core/intelligence/index.js")
+// Ensure setIntelligenceClient() has run before warmup to avoid spawning
+// duplicate LSP servers on both main thread and worker.
+contextManagerReady
+  .then(() => import("./core/intelligence/index.js"))
   .then(({ warmupIntelligence }) => warmupIntelligence(process.cwd(), config.codeIntelligence))
   .catch((err) => {
     logBackgroundError(

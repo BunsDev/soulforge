@@ -24,7 +24,7 @@ const PROVIDERS: ProviderEntry[] = [
     id: "llmgateway-api-key",
     label: "LLM Gateway",
     envVar: "LLM_GATEWAY_API_KEY",
-    url: "https://llmgateway.io/dashboard",
+    url: "https://llmgateway.io/dashboard?ref=6tjJR2H3X4E9RmVQiQwK",
   },
   {
     id: "anthropic-api-key",
@@ -253,7 +253,7 @@ export function SetupStep({ iw, hasModel, activeModel, onSelectModel, setActive 
           {"  "}
         </text>
         <text bg={popupBg}>
-          <a href="https://llmgateway.io/dashboard">
+          <a href="https://llmgateway.io/dashboard?ref=6tjJR2H3X4E9RmVQiQwK">
             <span fg={t.info} attributes={TextAttributes.UNDERLINE}>
               llmgateway.io
             </span>

@@ -1,6 +1,6 @@
 # Themes
 
-SoulForge ships with 21 builtin themes and supports custom themes with hot reload.
+SoulForge ships with 24 builtin themes and supports custom themes with hot reload.
 
 ## Quick Start
 
@@ -29,6 +29,9 @@ Press `/theme` or `Ctrl+K` → search "theme" to open the theme picker. Themes p
 | `everforest-dark` | Comfortable green |
 | `ayu-dark` | Ayu Dark |
 | `nightfox` | Nightfox |
+| `proxysoul-main` | proxySoul — deep purple with hot pink |
+| `proxysoul-coffee` | proxySoul Coffee — warm amber & burnt orange |
+| `proxysoul-water` | proxySoul Water — ocean blue & teal |
 
 ### Light
 
@@ -69,25 +72,24 @@ mkdir -p ~/.soulforge/themes
 
 ### Example: custom theme
 
-`~/.soulforge/themes/my-theme.json`:
+`~/.soulforge/themes/my-coffee.json`:
 
 ```json
 {
   "_extends": "dark",
-  "_label": "My Theme",
-  "_description": "A custom dark theme",
+  "_label": "My Coffee",
+  "_description": "Warm amber & burnt orange",
   "_variant": "dark",
-  "brand": "#ff6600",
-  "brand-secondary": "#ff0040",
-  "brand-dim": "#993d00",
-  "bg-primary": "#1a1a2e",
-  "bg-elevated": "#16213e",
-  "text-primary": "#e0e0e0",
-  "text-muted": "#888888",
-  "success": "#00ff88",
-  "error": "#ff4444",
-  "warning": "#ffaa00",
-  "info": "#4488ff"
+  "brand": "#de7c00",
+  "brand-secondary": "#e65f2a",
+  "brand-dim": "#2e2010",
+  "brand-alt": "#c8944a",
+  "bg-app": "#020204",
+  "bg-elevated": "#1a1510",
+  "border": "#2e2010",
+  "border-focused": "#e65f2a",
+  "border-active": "#de7c00",
+  "accent-assistant": "#de7c00"
 }
 ```
 

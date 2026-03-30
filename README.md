@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>Graph-Powered Code Intelligence</strong><br/>
-  Multi-agent coding with codebase-aware AI — embedded Neovim, 21 themes, terminal-native
+  Multi-agent coding with codebase-aware AI — embedded Neovim, 24 themes, terminal-native
 </p>
 
 <p align="center">
@@ -516,7 +516,7 @@ SoulForge ships 33 tools organized by capability:
 
 | Provider | Models | Setup |
 |----------|--------|-------|
-| [**LLM Gateway**](https://llmgateway.io) | Multi-model gateway (OpenAI, Claude, Gemini, DeepSeek) | `LLM_GATEWAY_API_KEY` |
+| [**LLM Gateway**](https://llmgateway.io/?ref=6tjJR2H3X4E9RmVQiQwK) | Multi-model gateway (OpenAI, Claude, Gemini, DeepSeek) | `LLM_GATEWAY_API_KEY` |
 | [**Anthropic**](https://console.anthropic.com/) | Claude 4.6 Opus/Sonnet, Haiku 4.5 | `ANTHROPIC_API_KEY` |
 | [**OpenAI**](https://platform.openai.com/) | GPT-4.5, o3, o4-mini | `OPENAI_API_KEY` |
 | [**Google**](https://aistudio.google.com/) | Gemini 2.5 Pro/Flash | `GOOGLE_GENERATIVE_AI_API_KEY` |

@@ -81,16 +81,33 @@ export function useConfigSync({
 
   const themeName = effectiveConfig.theme?.name;
   const themeTransparent = effectiveConfig.theme?.transparent;
+  const themeUserMsgOpacity = effectiveConfig.theme?.userMessageOpacity;
+  const themeDiffOpacity = effectiveConfig.theme?.diffOpacity;
+  const themeBorderStrength = effectiveConfig.theme?.borderStrength;
   const prevTheme = useRef(themeName);
   const prevTransparent = useRef(themeTransparent);
+  const prevUserMsgOpacity = useRef(themeUserMsgOpacity);
+  const prevDiffOpacity = useRef(themeDiffOpacity);
+  const prevBorderStrength = useRef(themeBorderStrength);
   useEffect(() => {
     if (
       themeName &&
-      (themeName !== prevTheme.current || themeTransparent !== prevTransparent.current)
+      (themeName !== prevTheme.current ||
+        themeTransparent !== prevTransparent.current ||
+        themeUserMsgOpacity !== prevUserMsgOpacity.current ||
+        themeDiffOpacity !== prevDiffOpacity.current ||
+        themeBorderStrength !== prevBorderStrength.current)
     ) {
       prevTheme.current = themeName;
       prevTransparent.current = themeTransparent;
-      applyTheme(themeName, themeTransparent);
+      prevUserMsgOpacity.current = themeUserMsgOpacity;
+      prevDiffOpacity.current = themeDiffOpacity;
+      prevBorderStrength.current = themeBorderStrength;
+      applyTheme(themeName, themeTransparent, {
+        userMessageOpacity: themeUserMsgOpacity,
+        diffOpacity: themeDiffOpacity,
+        borderStrength: themeBorderStrength,
+      });
     }
-  }, [themeName, themeTransparent]);
+  }, [themeName, themeTransparent, themeUserMsgOpacity, themeDiffOpacity, themeBorderStrength]);
 }

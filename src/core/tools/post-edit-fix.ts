@@ -16,23 +16,38 @@ import { emitFileEdited } from "./file-events.js";
  */
 async function autoFixFile(filePath: string, tabId?: string): Promise<string[]> {
   const absPath = resolve(filePath);
+  const client = getIntelligenceClient();
   const router = getIntelligenceRouter(process.cwd());
-  const language = router.detectLanguage(absPath);
+  const language = client
+    ? await client.routerDetectLanguage(absPath)
+    : router.detectLanguage(absPath);
   const applied: string[] = [];
 
   // 1. Organize imports
-  const organizeResult = await router.executeWithFallback(language, "organizeImports", (b) =>
-    b.organizeImports ? b.organizeImports(absPath) : Promise.resolve(null),
-  );
+  let organizeResult: import("../intelligence/types.js").RefactorResult | null = null;
+  if (client) {
+    const tracked = await client.routerOrganizeImports(absPath);
+    organizeResult = tracked?.value ?? null;
+  } else {
+    organizeResult = await router.executeWithFallback(language, "organizeImports", (b) =>
+      b.organizeImports ? b.organizeImports(absPath) : Promise.resolve(null),
+    );
+  }
   if (organizeResult) {
     await applyRefactorEdits(organizeResult, tabId);
     applied.push("organizeImports");
   }
 
   // 2. Fix all (unused vars, auto-fixable diagnostics)
-  const fixResult = await router.executeWithFallback(language, "fixAll", (b) =>
-    b.fixAll ? b.fixAll(absPath) : Promise.resolve(null),
-  );
+  let fixResult: import("../intelligence/types.js").RefactorResult | null = null;
+  if (client) {
+    const tracked = await client.routerFixAll(absPath);
+    fixResult = tracked?.value ?? null;
+  } else {
+    fixResult = await router.executeWithFallback(language, "fixAll", (b) =>
+      b.fixAll ? b.fixAll(absPath) : Promise.resolve(null),
+    );
+  }
   if (fixResult) {
     await applyRefactorEdits(fixResult, tabId);
     applied.push("fixAll");

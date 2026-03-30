@@ -107,7 +107,7 @@ export function StaticToolRow({
         </text>
       </box>
       {diff ? (
-        <box marginLeft={2} flexDirection="column">
+        <box marginTop={1} flexDirection="column">
           <DiffView
             filePath={diff.path}
             oldString={diff.oldString}

@@ -3,7 +3,7 @@ import type { NvimInstance } from "./neovim.js";
 
 let instance: NvimInstance | null = null;
 let editorRequestCallback: ((file?: string) => void) | null = null;
-let syncOnEdit = true;
+let syncOnEdit = false;
 
 /** Control whether reloadBuffer navigates the editor after agent edits. */
 export function setSyncEditorOnEdit(enabled: boolean): void {

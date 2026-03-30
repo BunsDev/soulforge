@@ -93,11 +93,79 @@ export function resolveTheme(name: string): ThemeTokens {
   return DARK_THEME;
 }
 
+/**
+ * Blend a hex color toward black by a given opacity (0–100).
+ * 0 = fully transparent, 100 = original color.
+ */
+function blendBgOpacity(hex: string, opacity: number): string {
+  if (opacity <= 0) return "transparent";
+  if (opacity >= 100) return hex;
+  const h = hex.replace("#", "");
+  const r = Math.round((Number.parseInt(h.slice(0, 2), 16) * opacity) / 100);
+  const g = Math.round((Number.parseInt(h.slice(2, 4), 16) * opacity) / 100);
+  const b = Math.round((Number.parseInt(h.slice(4, 6), 16) * opacity) / 100);
+  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+}
+
+/** Brighten a hex color toward white by a factor (1.0 = no change, 2.0 = double brightness, clamped to #fff). */
+function brighten(hex: string, factor: number): string {
+  const h = hex.replace("#", "");
+  const r = Math.min(255, Math.round(Number.parseInt(h.slice(0, 2), 16) * factor));
+  const g = Math.min(255, Math.round(Number.parseInt(h.slice(2, 4), 16) * factor));
+  const b = Math.min(255, Math.round(Number.parseInt(h.slice(4, 6), 16) * factor));
+  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+}
+
+const BORDER_STRENGTH_FACTOR: Record<BorderStrength, number> = {
+  default: 1.0,
+  strong: 1.8,
+  op: 2.8,
+};
+
+export type BorderStrength = "default" | "strong" | "op";
+
+export interface TransparencyOptions {
+  userMessageOpacity?: number;
+  diffOpacity?: number;
+  borderStrength?: BorderStrength;
+}
+
 /** Resolve theme and push to Zustand store */
-export function applyTheme(name: string, transparent?: boolean): void {
+export function applyTheme(
+  name: string,
+  transparent?: boolean,
+  opts?: number | TransparencyOptions,
+): void {
+  // Backward compat: bare number = userMessageOpacity
+  const tOpts: TransparencyOptions =
+    typeof opts === "number" ? { userMessageOpacity: opts } : (opts ?? {});
+
   let tokens = resolveTheme(name);
   if (transparent) {
     tokens = { ...tokens, bgApp: "transparent" };
+    const msgOp = tOpts.userMessageOpacity;
+    if (msgOp != null && msgOp < 100) {
+      tokens = { ...tokens, bgUser: blendBgOpacity(tokens.bgUser, msgOp) };
+    }
+    const diffOp = tOpts.diffOpacity;
+    if (diffOp != null && diffOp < 100) {
+      tokens = {
+        ...tokens,
+        diffAddedBg: blendBgOpacity(tokens.diffAddedBg, diffOp),
+        diffRemovedBg: blendBgOpacity(tokens.diffRemovedBg, diffOp),
+      };
+    }
+  }
+  // Border strength applies regardless of transparent mode
+  const bdrStr = tOpts.borderStrength;
+  if (bdrStr && bdrStr !== "default") {
+    const f = BORDER_STRENGTH_FACTOR[bdrStr];
+    tokens = {
+      ...tokens,
+      border: brighten(tokens.border, f),
+      textFaint: brighten(tokens.textFaint, f),
+      textSubtle: brighten(tokens.textSubtle, f),
+    };
   }
   useThemeStore.getState().setTheme(name, tokens);
 }
@@ -108,8 +176,9 @@ let watcher: FSWatcher | null = null;
 export function watchThemes(): void {
   if (watcher) return;
   const reload = () => {
-    const { name } = useThemeStore.getState();
-    applyTheme(name);
+    const { name, tokens } = useThemeStore.getState();
+    const isTransparent = tokens.bgApp === "transparent";
+    applyTheme(name, isTransparent);
   };
 
   if (existsSync(THEMES_FILE)) {

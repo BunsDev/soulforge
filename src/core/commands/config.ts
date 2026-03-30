@@ -1,6 +1,7 @@
 import type { ConfigScope } from "../../components/layout/shared.js";
+import { loadConfig } from "../../config/index.js";
 import { useUIStore } from "../../stores/ui.js";
-import type { AgentFeatures } from "../../types/index.js";
+import type { AgentFeatures, AppConfig } from "../../types/index.js";
 import { icon, setNerdFont } from "../icons.js";
 import { applyTheme, getThemeTokens, listThemes, useThemeStore } from "../theme/index.js";
 import type { CommandContext, CommandHandler } from "./types.js";
@@ -471,6 +472,7 @@ async function handleInstructions(_input: string, ctx: CommandContext): Promise<
 
 function handleDiffStyle(_input: string, ctx: CommandContext): void {
   const patch = (v: string) => ({ diffStyle: v as "default" | "sidebyside" | "compact" });
+  let autoCompact = ctx.autoCompactDiffs;
   ctx.openCommandPicker({
     title: "Diff Style",
     icon: icon("git"),
@@ -497,6 +499,18 @@ function handleDiffStyle(_input: string, ctx: CommandContext): void {
       },
     ],
     currentValue: ctx.diffStyle,
+    toggles: [
+      {
+        key: "tab",
+        label: `Auto-compact: ${autoCompact ? "on" : "off"}`,
+        value: autoCompact,
+        onToggle: () => {
+          autoCompact = !autoCompact;
+          ctx.saveToScope({ autoCompactDiffs: autoCompact }, ctx.detectScope("autoCompactDiffs"));
+          return `Auto-compact: ${autoCompact ? "on" : "off"}`;
+        },
+      },
+    ],
     onSelect: (value, scope) => {
       ctx.saveToScope(patch(value), scope ?? "project");
       sysMsg(ctx, `Diff style: ${value} (${scope ?? "project"})`);
@@ -638,23 +652,79 @@ function handleSettingsHub(_input: string, ctx: CommandContext): void {
   });
 }
 
+const OPACITY_LEVELS = [0, 30, 70, 100] as const;
+const OPACITY_OPTIONS = ["Clear", "Dim", "Subtle", "Solid"];
+
+function opacityToIndex(opacity: number): number {
+  const idx = OPACITY_LEVELS.indexOf(opacity as (typeof OPACITY_LEVELS)[number]);
+  return idx >= 0 ? idx : OPACITY_LEVELS.length - 1;
+}
+
+type BorderStrengthOption = "default" | "strong" | "op";
+const BORDER_STRENGTH_OPTIONS: BorderStrengthOption[] = ["default", "strong", "op"];
+const BORDER_STRENGTH_LABELS = ["Default", "Strong", "OP"];
+
+function themePatch(
+  name: string,
+  transparent: boolean,
+  userMsgOp: number,
+  diffOp: number,
+  borderStr: BorderStrengthOption,
+): Partial<AppConfig> {
+  return {
+    theme: {
+      name,
+      transparent,
+      userMessageOpacity: userMsgOp,
+      diffOpacity: diffOp,
+      borderStrength: borderStr,
+    },
+  };
+}
+
 const handleTheme: CommandHandler = (input: string, ctx: CommandContext) => {
   const arg = input.replace(/^\/theme\s*/, "").trim();
   const current = useThemeStore.getState().name;
   const isTransparent = useThemeStore.getState().tokens.bgApp === "transparent";
 
+  // Read saved settings from config
+  const cfg = loadConfig();
+  const savedMsgOpacity =
+    typeof cfg.theme?.userMessageOpacity === "number" ? cfg.theme.userMessageOpacity : 100;
+  const savedDiffOpacity = typeof cfg.theme?.diffOpacity === "number" ? cfg.theme.diffOpacity : 100;
+  const savedBorderStr: BorderStrengthOption = cfg.theme?.borderStrength ?? "default";
+
+  const applyAll = (
+    name: string,
+    tp: boolean,
+    msgOp: number,
+    diffOp: number,
+    bdrStr: BorderStrengthOption,
+  ) =>
+    applyTheme(name, tp, {
+      userMessageOpacity: msgOp,
+      diffOpacity: diffOp,
+      borderStrength: bdrStr,
+    });
+
   if (!arg || arg === "list") {
     const themes = listThemes();
     const originalTheme = current;
     const originalTransparent = isTransparent;
+    const originalMsgOp = savedMsgOpacity;
+    const originalDiffOp = savedDiffOpacity;
+    const originalBdrStr = savedBorderStr;
     let transparent = isTransparent;
+    let userMsgOpacity = savedMsgOpacity;
+    let diffOpacity = savedDiffOpacity;
+    let borderStr = savedBorderStr;
 
     ctx.openCommandPicker({
       title: "Theme",
       icon: icon("palette"),
       currentValue: current,
       searchable: true,
-      maxWidth: 40,
+      maxWidth: 60,
       options: themes.map((th) => ({
         value: th.id,
         label: `${th.variant === "light" ? "☀" : "☾"} ${th.label}`,
@@ -669,28 +739,94 @@ const handleTheme: CommandHandler = (input: string, ctx: CommandContext) => {
           onToggle: () => {
             transparent = !transparent;
             const name = useThemeStore.getState().name;
-            applyTheme(name, transparent);
-            ctx.saveToScope({ theme: { name, transparent } }, "global");
+            applyAll(name, transparent, userMsgOpacity, diffOpacity, borderStr);
+            ctx.saveToScope(
+              themePatch(name, transparent, userMsgOpacity, diffOpacity, borderStr),
+              "global",
+            );
+          },
+        },
+      ],
+      selectors: [
+        {
+          key: "m",
+          label: "Message BG",
+          options: OPACITY_OPTIONS,
+          value: opacityToIndex(savedMsgOpacity),
+          onChange: (idx) => {
+            userMsgOpacity = OPACITY_LEVELS[idx] ?? 100;
+            const name = useThemeStore.getState().name;
+            applyAll(name, transparent, userMsgOpacity, diffOpacity, borderStr);
+            ctx.saveToScope(
+              themePatch(name, transparent, userMsgOpacity, diffOpacity, borderStr),
+              "global",
+            );
+          },
+        },
+        {
+          key: "d",
+          label: "Diff BG",
+          options: OPACITY_OPTIONS,
+          value: opacityToIndex(savedDiffOpacity),
+          onChange: (idx) => {
+            diffOpacity = OPACITY_LEVELS[idx] ?? 100;
+            const name = useThemeStore.getState().name;
+            applyAll(name, transparent, userMsgOpacity, diffOpacity, borderStr);
+            ctx.saveToScope(
+              themePatch(name, transparent, userMsgOpacity, diffOpacity, borderStr),
+              "global",
+            );
+          },
+        },
+        {
+          key: "b",
+          label: "Borders",
+          options: BORDER_STRENGTH_LABELS,
+          value: BORDER_STRENGTH_OPTIONS.indexOf(savedBorderStr),
+          onChange: (idx) => {
+            borderStr = BORDER_STRENGTH_OPTIONS[idx] ?? "default";
+            const name = useThemeStore.getState().name;
+            applyAll(name, transparent, userMsgOpacity, diffOpacity, borderStr);
+            ctx.saveToScope(
+              themePatch(name, transparent, userMsgOpacity, diffOpacity, borderStr),
+              "global",
+            );
           },
         },
       ],
       onCursorChange: (value) => {
-        applyTheme(value, transparent);
+        applyAll(value, transparent, userMsgOpacity, diffOpacity, borderStr);
       },
       onCancel: () => {
-        applyTheme(originalTheme, originalTransparent);
+        applyAll(originalTheme, originalTransparent, originalMsgOp, originalDiffOp, originalBdrStr);
+        ctx.saveToScope(
+          themePatch(
+            originalTheme,
+            originalTransparent,
+            originalMsgOp,
+            originalDiffOp,
+            originalBdrStr,
+          ),
+          "global",
+        );
       },
       onSelect: (value) => {
-        applyTheme(value, transparent);
-        ctx.saveToScope({ theme: { name: value, transparent } }, "global");
+        applyAll(value, transparent, userMsgOpacity, diffOpacity, borderStr);
+        ctx.saveToScope(
+          themePatch(value, transparent, userMsgOpacity, diffOpacity, borderStr),
+          "global",
+        );
         sysMsg(ctx, `Theme → ${value}`);
       },
     });
     return;
   }
 
-  applyTheme(arg, isTransparent);
-  ctx.saveToScope({ theme: { name: arg, transparent: isTransparent } }, "global");
+  applyAll(arg, isTransparent, savedMsgOpacity, savedDiffOpacity, savedBorderStr);
+  ctx.saveToScope(
+    themePatch(arg, isTransparent, savedMsgOpacity, savedDiffOpacity, savedBorderStr),
+    "global",
+  );
   sysMsg(ctx, `Theme → ${arg}`);
 };
 

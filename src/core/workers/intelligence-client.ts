@@ -655,6 +655,60 @@ export class IntelligenceClient extends WorkerClient {
     return this.call("routerFindImplementation", file, symbol);
   }
 
+  async routerGetFileRenameEdits(
+    files: Array<{ oldPath: string; newPath: string }>,
+  ): Promise<TrackedResult<RefactorResult>> {
+    return this.callWithTimeout(35_000, "routerGetFileRenameEdits", files);
+  }
+
+  routerNotifyFilesRenamed(files: Array<{ oldPath: string; newPath: string }>): void {
+    this.fire("routerNotifyFilesRenamed", files);
+  }
+
+  routerInvalidateFileCache(file: string): void {
+    this.fire("routerInvalidateFileCache", file);
+  }
+
+  async routerExtractFunction(
+    file: string,
+    startLine: number,
+    endLine: number,
+    functionName: string,
+  ): Promise<TrackedResult<RefactorResult>> {
+    return this.callWithTimeout(
+      35_000,
+      "routerExtractFunction",
+      file,
+      startLine,
+      endLine,
+      functionName,
+    );
+  }
+
+  async routerExtractVariable(
+    file: string,
+    startLine: number,
+    endLine: number,
+    variableName: string,
+  ): Promise<TrackedResult<RefactorResult>> {
+    return this.callWithTimeout(
+      35_000,
+      "routerExtractVariable",
+      file,
+      startLine,
+      endLine,
+      variableName,
+    );
+  }
+
+  async routerOrganizeImports(file: string): Promise<TrackedResult<RefactorResult>> {
+    return this.callWithTimeout(35_000, "routerOrganizeImports", file);
+  }
+
+  async routerFixAll(file: string): Promise<TrackedResult<RefactorResult>> {
+    return this.callWithTimeout(35_000, "routerFixAll", file);
+  }
+
   // ── Router Management ─────────────────────────────────────────────
 
   async routerGetStatus(): Promise<{

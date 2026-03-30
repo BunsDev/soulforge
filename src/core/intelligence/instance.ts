@@ -39,19 +39,19 @@ export function getIntelligenceRouter(
 
   router = new CodeIntelligenceRouter(cwd, config);
 
-  // Tier 1: LSP for semantic intelligence (rename, diagnostics, references, etc.)
-  const lsp = new LspBackend();
-  router.registerBackend(lsp);
+  // When the worker client is available, it owns LSP + ts-morph backends.
+  // Main-thread router only registers lightweight fallback backends
+  // to avoid spawning duplicate LSP servers.
+  if (!_client) {
+    const lsp = new LspBackend();
+    router.registerBackend(lsp);
+    const tsMorph = new TsMorphBackend();
+    router.registerBackend(tsMorph);
+  }
 
-  // Tier 2: ts-morph for TypeScript/JavaScript (fallback when LSP unavailable)
-  const tsMorph = new TsMorphBackend();
-  router.registerBackend(tsMorph);
-
-  // Tier 3: tree-sitter for universal AST parsing
+  // tree-sitter + regex always available as lightweight fallback
   const treeSitter = new TreeSitterBackend();
   router.registerBackend(treeSitter);
-
-  // Tier 4: regex fallback (always works)
   const regex = new RegexBackend();
   regex.setCache(router.fileCache);
   router.registerBackend(regex);
@@ -66,6 +66,9 @@ export function getIntelligenceRouter(
  * Call this once at app startup — runs in the background.
  */
 export function warmupIntelligence(cwd: string, config: CodeIntelligenceConfig = {}): void {
+  // Worker handles its own warmup (spawns LSP servers in background).
+  // Skip main-thread warmup to avoid duplicate LSP server spawning.
+  if (_client) return;
   const r = getIntelligenceRouter(cwd, config);
   r.warmup().catch(() => {
     // Non-fatal — tools will lazy-init if warmup fails
@@ -73,37 +76,60 @@ export function warmupIntelligence(cwd: string, config: CodeIntelligenceConfig =
 }
 
 /** Get the status of the intelligence system (null if not yet initialized) */
-export function getIntelligenceStatus(): {
+export async function getIntelligenceStatus(): Promise<{
   initialized: string[];
   lspServers: Array<{ language: string; command: string }>;
-} | null {
+} | null> {
+  if (_client) {
+    try {
+      return await _client.routerGetStatus();
+    } catch {
+      /* fall through */
+    }
+  }
   if (!router) return null;
   return router.getStatus();
 }
 
 /** Get detailed LSP server info for the status popup */
-export function getDetailedLspServers(): Array<{
-  language: string;
-  command: string;
-  args: string[];
-  pid: number | null;
-  cwd: string;
-  openFiles: number;
-  diagnosticCount: number;
-  diagnostics: Array<{ file: string; message: string; severity: number }>;
-  ready: boolean;
-}> {
+export async function getDetailedLspServers(): Promise<
+  Array<{
+    language: string;
+    command: string;
+    args: string[];
+    pid: number | null;
+    cwd: string;
+    openFiles: number;
+    diagnosticCount: number;
+    diagnostics: Array<{ file: string; message: string; severity: number }>;
+    ready: boolean;
+  }>
+> {
+  if (_client) {
+    try {
+      return await _client.routerGetDetailedLspServers();
+    } catch {
+      /* fall through */
+    }
+  }
   if (!router) return [];
   return router.getDetailedLspServers();
 }
 
 /** Restart LSP servers. Pass filter to restart specific server/language, or omit for all. */
 export async function restartLspServers(filter?: string): Promise<string[]> {
+  if (_client) {
+    try {
+      return await _client.routerRestartLspServers(filter);
+    } catch {
+      /* fall through */
+    }
+  }
   if (!router) return [];
   return router.restartLspServers(filter);
 }
 
-/** Get neovim's active LSP clients */
+/** Get neovim's active LSP clients — always main-thread (needs nvim RPC) */
 export async function getNvimLspClients(): Promise<Array<{
   name: string;
   language: string;
@@ -114,7 +140,14 @@ export async function getNvimLspClients(): Promise<Array<{
 }
 
 /** Get PIDs of all child processes managed by the intelligence system */
-export function getIntelligenceChildPids(): number[] {
+export async function getIntelligenceChildPids(): Promise<number[]> {
+  if (_client) {
+    try {
+      return await _client.routerGetChildPids();
+    } catch {
+      /* fall through */
+    }
+  }
   if (!router) return [];
   return router.getChildPids();
 }
@@ -123,12 +156,23 @@ export function getIntelligenceChildPids(): number[] {
 export async function runIntelligenceHealthCheck(
   onProgress?: (partial: import("./router.js").HealthCheckResult) => void,
 ) {
+  if (_client) {
+    try {
+      return await _client.routerRunHealthCheck();
+    } catch {
+      /* fall through */
+    }
+  }
   if (!router) return null;
   return router.runHealthCheck(onProgress);
 }
 
-/** Dispose the singleton router and all backends */
+/** Dispose the singleton router and all backends, including the worker's router */
 export function disposeIntelligenceRouter(): void {
+  if (_client) {
+    _client.close().catch(() => {});
+    _client = null;
+  }
   if (router) {
     router.dispose();
     router = null;

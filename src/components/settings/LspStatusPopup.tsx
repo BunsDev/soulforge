@@ -88,8 +88,8 @@ export function LspStatusPopup({ visible, onClose }: Props) {
     setCursor(0);
     setDetailIdx(null);
     setDetailScroll(0);
-    const poll = () => {
-      const standalone: LspServerDetail[] = getDetailedLspServers().map((s) => ({
+    const poll = async () => {
+      const standalone: LspServerDetail[] = (await getDetailedLspServers()).map((s) => ({
         ...s,
         backend: "standalone",
       }));

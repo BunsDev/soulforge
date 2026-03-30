@@ -466,10 +466,12 @@ const ToolRow = memo(
     tc,
     seconds,
     diffStyle = "default",
+    connectorChar,
   }: {
     tc: LiveToolCall;
     seconds?: number;
     diffStyle?: "default" | "sidebyside" | "compact";
+    connectorChar?: string;
   }) {
     const t = useTheme();
     const isSubagent = SUBAGENT_NAMES.has(tc.toolName);
@@ -577,7 +579,7 @@ const ToolRow = memo(
     });
 
     // Status content: Spinner for running, static icon for done/error
-    const statusContent =
+    const statusIcon =
       tc.state === "running" ? (
         <Spinner />
       ) : tc.state === "error" ? (
@@ -593,6 +595,14 @@ const ToolRow = memo(
           return <span fg={t.success}>✓</span>;
         })()
       );
+    const statusContent = connectorChar ? (
+      <>
+        <span fg={t.textFaint}>{connectorChar}</span>
+        {statusIcon}
+      </>
+    ) : (
+      statusIcon
+    );
 
     return (
       <box flexDirection="column">
@@ -743,16 +753,13 @@ function renderToolCall(
   }
   if (connector) {
     return (
-      <box key={tc.id} flexDirection="row">
-        <box width={2} flexShrink={0}>
-          <text>
-            <span fg={t.textFaint}>{connector.isLast ? "└ " : "├ "}</span>
-          </text>
-        </box>
-        <box flexGrow={1} flexDirection="column">
-          <ToolRow tc={tc} seconds={seconds} diffStyle={diffStyle} />
-        </box>
-      </box>
+      <ToolRow
+        key={tc.id}
+        tc={tc}
+        seconds={seconds}
+        diffStyle={diffStyle}
+        connectorChar={connector.isLast ? "└ " : "├ "}
+      />
     );
   }
   return <ToolRow key={tc.id} tc={tc} seconds={seconds} diffStyle={diffStyle} />;

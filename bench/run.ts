@@ -373,7 +373,7 @@ async function main() {
   warmupIntelligence(cwd);
   // Give LSP server a few seconds to initialize
   await new Promise((r) => setTimeout(r, 5_000));
-  const status = getIntelligenceStatus();
+  const status = await getIntelligenceStatus();
   if (status && status.lspServers.length > 0) {
     console.log(
       `ready (${status.lspServers.map((s) => `${s.language}:${s.command}`).join(", ")})`,

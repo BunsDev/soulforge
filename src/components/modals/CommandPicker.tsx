@@ -22,7 +22,16 @@ export interface PickerToggle {
   key: string;
   label: string;
   value: boolean;
-  onToggle: () => void;
+  /** Return a new label string to update the toggle label dynamically */
+  onToggle: () => string | undefined;
+}
+
+export interface PickerSelector {
+  key: string;
+  label: string;
+  options: string[];
+  value: number;
+  onChange: (index: number) => void;
 }
 
 export interface CommandPickerConfig {
@@ -36,6 +45,7 @@ export interface CommandPickerConfig {
   keepOpen?: boolean;
   searchable?: boolean;
   toggles?: PickerToggle[];
+  selectors?: PickerSelector[];
   onSelect: (value: string, scope?: ConfigScope) => void;
   onScopeMove?: (value: string, fromScope: ConfigScope, toScope: ConfigScope) => void;
   onCursorChange?: (value: string) => void;
@@ -71,6 +81,9 @@ function fuzzyScore(query: string, target: string): { score: number; indices: nu
   return { score, indices };
 }
 
+/** Focus zone: -1 = options list, 0+ = index into combined toggles+selectors */
+const ZONE_LIST = -1;
+
 export function CommandPicker({ visible, config, onClose }: Props) {
   const t = useTheme();
   const { width: termCols, height: termRows } = useTerminalDimensions();
@@ -78,12 +91,29 @@ export function CommandPicker({ visible, config, onClose }: Props) {
   const maxW = config?.maxWidth ?? MAX_POPUP_WIDTH;
   const popupWidth = Math.min(maxW, Math.floor(termCols * 0.8));
   const innerW = popupWidth - 2;
-  const maxVisible = Math.max(4, Math.floor(containerRows * 0.8) - CHROME_ROWS);
+  const controlRows = (config?.toggles?.length ?? 0) + (config?.selectors?.length ?? 0);
+  const extraChrome = controlRows > 0 ? controlRows + 1 : 0; // +1 for separator
+  const maxVisible = Math.max(4, Math.floor(containerRows * 0.8) - CHROME_ROWS - extraChrome);
   const { cursor, setCursor, scrollOffset, setScrollOffset, adjustScroll } =
     usePopupScroll(maxVisible);
   const [scope, setScope] = useState<ConfigScope>("project");
   const [search, setSearch] = useState("");
   const [toggleState, setToggleState] = useState<Record<string, boolean>>({});
+  const [toggleLabels, setToggleLabels] = useState<Record<string, string>>({});
+  const [selectorState, setSelectorState] = useState<Record<string, number>>({});
+  const [focusZone, setFocusZone] = useState(ZONE_LIST);
+
+  // Build combined control list: toggles then selectors
+  const controls = useMemo(() => {
+    const list: Array<{ type: "toggle"; key: string } | { type: "selector"; key: string }> = [];
+    if (config?.toggles)
+      for (const tg of config.toggles) list.push({ type: "toggle", key: tg.key });
+    if (config?.selectors)
+      for (const sel of config.selectors) list.push({ type: "selector", key: sel.key });
+    return list;
+  }, [config?.toggles, config?.selectors]);
+
+  const hasControls = controls.length > 0;
 
   const filteredOptions = useMemo(() => {
     if (!config?.searchable || search.length === 0) return config?.options ?? [];
@@ -114,8 +144,18 @@ export function CommandPicker({ visible, config, onClose }: Props) {
       setSearch("");
       if (config.toggles) {
         const initial: Record<string, boolean> = {};
-        for (const tg of config.toggles) initial[tg.key] = tg.value;
+        const initialLabels: Record<string, string> = {};
+        for (const tg of config.toggles) {
+          initial[tg.key] = tg.value;
+          initialLabels[tg.key] = tg.label;
+        }
         setToggleState(initial);
+        setToggleLabels(initialLabels);
+      }
+      if (config.selectors) {
+        const initial: Record<string, number> = {};
+        for (const sel of config.selectors) initial[sel.key] = sel.value;
+        setSelectorState(initial);
       }
       let idx = filteredOptions.findIndex((o) => o.value === config.currentValue);
       if (idx < 0) idx = filteredOptions.findIndex((o) => !o.disabled);
@@ -123,6 +163,7 @@ export function CommandPicker({ visible, config, onClose }: Props) {
       setCursor(startIdx);
       setScrollOffset(Math.max(0, startIdx - Math.floor(maxVisible / 2)));
       if (config.scopeEnabled) setScope(config.initialScope ?? "project");
+      setFocusZone(ZONE_LIST);
     } else if (prevOptionsRef.current && prevOptionsRef.current !== filteredOptions) {
       setCursor((prev) => {
         const prevValue = prevOptionsRef.current?.[prev]?.value;
@@ -169,19 +210,36 @@ export function CommandPicker({ visible, config, onClose }: Props) {
       return;
     }
 
-    // Toggle handling (e.g. 't' for transparent)
+    // Shortcut keys for toggles/selectors still work from anywhere
     if (config.toggles) {
       for (const toggle of config.toggles) {
         if (evt.name === toggle.key) {
-          setToggleState((prev) => ({ ...prev, [toggle.key]: !prev[toggle.key] }));
-          toggle.onToggle();
+          const newLabel = toggle.onToggle();
+          if (typeof newLabel === "string") {
+            setToggleLabels((prev) => ({ ...prev, [toggle.key]: newLabel }));
+          } else {
+            setToggleState((prev) => ({ ...prev, [toggle.key]: !prev[toggle.key] }));
+          }
+          return;
+        }
+      }
+    }
+    if (config.selectors) {
+      for (const sel of config.selectors) {
+        if (evt.name === sel.key) {
+          setSelectorState((prev) => {
+            const cur = prev[sel.key] ?? sel.value;
+            const next = (cur + 1) % sel.options.length;
+            sel.onChange(next);
+            return { ...prev, [sel.key]: next };
+          });
           return;
         }
       }
     }
 
     // Search input handling
-    if (config.searchable) {
+    if (config.searchable && focusZone === ZONE_LIST) {
       if (evt.name === "backspace" || evt.name === "delete") {
         setSearch((prev) => prev.slice(0, -1));
         return;
@@ -199,35 +257,130 @@ export function CommandPicker({ visible, config, onClose }: Props) {
       }
     }
 
+    // Up/down navigation — moves between list items and control zones
     if (evt.name === "up" || evt.name === "k") {
-      setCursor((prev) => {
-        let next = prev > 0 ? prev - 1 : filteredOptions.length - 1;
-        const start = next;
-        while (filteredOptions[next]?.disabled) {
-          next = next > 0 ? next - 1 : filteredOptions.length - 1;
-          if (next === start) break;
-        }
-        adjustScroll(next);
-        return next;
-      });
+      if (focusZone > 0) {
+        // Move up within controls
+        setFocusZone(focusZone - 1);
+      } else if (focusZone === 0) {
+        // Move from first control back to list (last item)
+        setFocusZone(ZONE_LIST);
+        const lastIdx = filteredOptions.length - 1;
+        setCursor(lastIdx);
+        adjustScroll(lastIdx);
+      } else {
+        // In list — move up, or wrap to last control
+        setCursor((prev) => {
+          if (prev > 0) {
+            let next = prev - 1;
+            const start = next;
+            while (filteredOptions[next]?.disabled) {
+              next = next > 0 ? next - 1 : filteredOptions.length - 1;
+              if (next === start) break;
+            }
+            adjustScroll(next);
+            return next;
+          }
+          // At top of list — wrap to last control if available
+          if (hasControls) {
+            setFocusZone(controls.length - 1);
+          }
+          return prev;
+        });
+      }
       return;
     }
 
     if (evt.name === "down" || evt.name === "j") {
-      setCursor((prev) => {
-        let next = prev < filteredOptions.length - 1 ? prev + 1 : 0;
-        const start = next;
-        while (filteredOptions[next]?.disabled) {
-          next = next < filteredOptions.length - 1 ? next + 1 : 0;
-          if (next === start) break;
-        }
-        adjustScroll(next);
-        return next;
-      });
+      if (focusZone === ZONE_LIST) {
+        // In list — move down, or enter controls
+        setCursor((prev) => {
+          if (prev < filteredOptions.length - 1) {
+            let next = prev + 1;
+            const start = next;
+            while (filteredOptions[next]?.disabled) {
+              next = next < filteredOptions.length - 1 ? next + 1 : 0;
+              if (next === start) break;
+            }
+            adjustScroll(next);
+            return next;
+          }
+          // At bottom of list — enter first control
+          if (hasControls) {
+            setFocusZone(0);
+          }
+          return prev;
+        });
+      } else if (focusZone < controls.length - 1) {
+        // Move down within controls
+        setFocusZone(focusZone + 1);
+      } else {
+        // At last control — wrap to top of list
+        setFocusZone(ZONE_LIST);
+        setCursor(0);
+        adjustScroll(0);
+      }
       return;
     }
 
-    if (evt.name === "return") {
+    // Left/right in control zones changes values
+    if ((evt.name === "left" || evt.name === "right") && focusZone >= 0) {
+      const ctrl = controls[focusZone];
+      if (ctrl?.type === "toggle") {
+        const toggle = config.toggles?.find((tg) => tg.key === ctrl.key);
+        if (toggle) {
+          const newLabel = toggle.onToggle();
+          if (typeof newLabel === "string") {
+            setToggleLabels((prev) => ({ ...prev, [toggle.key]: newLabel }));
+          } else {
+            setToggleState((prev) => ({ ...prev, [toggle.key]: !prev[toggle.key] }));
+          }
+        }
+      } else if (ctrl?.type === "selector") {
+        const sel = config.selectors?.find((s) => s.key === ctrl.key);
+        if (sel) {
+          const dir = evt.name === "right" ? 1 : -1;
+          setSelectorState((prev) => {
+            const cur = prev[sel.key] ?? sel.value;
+            const next = (cur + dir + sel.options.length) % sel.options.length;
+            sel.onChange(next);
+            return { ...prev, [sel.key]: next };
+          });
+        }
+      }
+      return;
+    }
+
+    // Enter in control zone activates the control
+    if (evt.name === "return" && focusZone >= 0) {
+      const ctrl = controls[focusZone];
+      if (ctrl?.type === "toggle") {
+        const toggle = config.toggles?.find((tg) => tg.key === ctrl.key);
+        if (toggle) {
+          const newLabel = toggle.onToggle();
+          if (typeof newLabel === "string") {
+            setToggleLabels((prev) => ({ ...prev, [toggle.key]: newLabel }));
+          } else {
+            setToggleState((prev) => ({ ...prev, [toggle.key]: !prev[toggle.key] }));
+          }
+        }
+      } else if (ctrl?.type === "selector") {
+        // Enter on selector cycles forward
+        const sel = config.selectors?.find((s) => s.key === ctrl.key);
+        if (sel) {
+          setSelectorState((prev) => {
+            const cur = prev[sel.key] ?? sel.value;
+            const next = (cur + 1) % sel.options.length;
+            sel.onChange(next);
+            return { ...prev, [sel.key]: next };
+          });
+        }
+      }
+      return;
+    }
+
+    // Enter in list zone selects the option
+    if (evt.name === "return" && focusZone === ZONE_LIST) {
       const option = filteredOptions[cursor];
       if (option && !option.disabled) {
         const cb = config.onSelect;
@@ -239,7 +392,8 @@ export function CommandPicker({ visible, config, onClose }: Props) {
       return;
     }
 
-    if (config.scopeEnabled) {
+    // Left/right in list zone changes scope
+    if (config.scopeEnabled && focusZone === ZONE_LIST) {
       if (evt.name === "left" || evt.name === "right") {
         setScope((prev) => {
           const idx = CONFIG_SCOPES.indexOf(prev);
@@ -388,7 +542,7 @@ export function CommandPicker({ visible, config, onClose }: Props) {
         </box>
         {filteredOptions.length > maxVisible && (
           <PopupRow w={innerW}>
-            <text fg={t.textMuted} bg={POPUP_BG}>
+            <text fg={t.textSecondary} bg={POPUP_BG}>
               {scrollOffset > 0 ? "↑ " : "  "}
               {String(cursor + 1)}/{String(filteredOptions.length)}
               {scrollOffset + maxVisible < filteredOptions.length ? " ↓" : ""}
@@ -400,32 +554,80 @@ export function CommandPicker({ visible, config, onClose }: Props) {
           <text>{""}</text>
         </PopupRow>
 
-        {config.toggles && config.toggles.length > 0 && (
+        {hasControls && (
           <>
             <PopupRow w={innerW}>
               <text fg={t.textFaint} bg={POPUP_BG}>
                 {"─".repeat(innerW - 4)}
               </text>
             </PopupRow>
-            {config.toggles.map((toggle) => {
-              const on = toggleState[toggle.key] ?? toggle.value;
+            {controls.map((ctrl, ci) => {
+              const focused = focusZone === ci;
+              const bg = focused ? POPUP_HL : POPUP_BG;
+              if (ctrl.type === "toggle") {
+                const toggle = config.toggles?.find((tg) => tg.key === ctrl.key);
+                if (!toggle) return null;
+                const on = toggleState[toggle.key] ?? toggle.value;
+                return (
+                  <PopupRow key={ctrl.key} bg={bg} w={innerW}>
+                    <text bg={bg} fg={focused ? t.brandAlt : on ? t.success : t.textDim}>
+                      {focused ? "› " : "  "}
+                      {on ? "◉" : "◯"}{" "}
+                    </text>
+                    <text
+                      bg={bg}
+                      fg={focused ? t.textPrimary : on ? t.textPrimary : t.textMuted}
+                      attributes={focused ? TextAttributes.BOLD : undefined}
+                    >
+                      {toggleLabels[toggle.key] ?? toggle.label}
+                    </text>
+                    <text bg={bg} fg={t.textMuted}>
+                      {"  "}
+                      <span fg={on ? t.success : t.textDim} attributes={TextAttributes.BOLD}>
+                        {"<"}
+                        {toggle.key === "tab" ? "TAB" : toggle.key}
+                        {">"}
+                      </span>
+                    </text>
+                  </PopupRow>
+                );
+              }
+              // selector
+              const sel = config.selectors?.find((s) => s.key === ctrl.key);
+              if (!sel) return null;
+              const cur = selectorState[sel.key] ?? sel.value;
               return (
-                <PopupRow key={toggle.key} w={innerW}>
-                  <text bg={POPUP_BG} fg={on ? t.success : t.textDim}>
+                <PopupRow key={ctrl.key} bg={bg} w={innerW}>
+                  <text bg={bg} fg={focused ? t.brandAlt : t.textMuted}>
+                    {focused ? "› " : "  "}
+                    {sel.label}
                     {"  "}
-                    {on ? "◉" : "◯"}{" "}
                   </text>
-                  <text bg={POPUP_BG} fg={on ? t.textPrimary : t.textMuted}>
-                    {toggle.label}
-                  </text>
-                  <text bg={POPUP_BG} fg={t.textMuted}>
-                    {"  "}
-                    <span fg={on ? t.success : t.textDim} attributes={TextAttributes.BOLD}>
-                      {"<"}
-                      {toggle.key === "tab" ? "TAB" : toggle.key}
-                      {">"}
-                    </span>
-                  </text>
+                  {sel.options.map((opt, i) => (
+                    <text
+                      key={opt}
+                      bg={bg}
+                      fg={i === cur ? t.brandAlt : t.textDim}
+                      attributes={i === cur ? TextAttributes.BOLD : undefined}
+                    >
+                      {i === cur ? `[${opt}]` : ` ${opt} `}
+                    </text>
+                  ))}
+                  {!focused && (
+                    <text bg={bg} fg={t.textDim}>
+                      {"  "}
+                      <span fg={t.textFaint} attributes={TextAttributes.BOLD}>
+                        {"<"}
+                        {sel.key.toUpperCase()}
+                        {">"}
+                      </span>
+                    </text>
+                  )}
+                  {focused && (
+                    <text bg={bg} fg={t.textDim}>
+                      {"  ← →"}
+                    </text>
+                  )}
                 </PopupRow>
               );
             })}
@@ -453,10 +655,8 @@ export function CommandPicker({ visible, config, onClose }: Props) {
 
         <PopupRow w={innerW}>
           <text fg={t.textMuted} bg={POPUP_BG}>
-            {"↑↓"} navigate | {"⏎"} select{config.searchable ? " | type to filter" : ""}
-            {config.toggles
-              ? ` | ${config.toggles.map((tg) => `${tg.key === "tab" ? "⇥" : tg.key} ${tg.label.toLowerCase()}`).join(" | ")}`
-              : ""}
+            {"↑↓"} navigate{hasControls ? " | ← → adjust" : ""}
+            {" | ⏎ "}select{config.searchable ? " | type to filter" : ""}
             {config.scopeEnabled ? " | ← → scope" : ""} | esc
           </text>
         </PopupRow>

@@ -477,6 +477,7 @@ export const TabInstance = memo(function TabInstance({
                       msg={msg}
                       chatStyle={chatStyle}
                       diffStyle={effectiveConfig.diffStyle}
+                      autoCompactDiffs={effectiveConfig.autoCompactDiffs === true}
                       showReasoning={showReasoning}
                       reasoningExpanded={reasoningExpanded}
                       animate={false}

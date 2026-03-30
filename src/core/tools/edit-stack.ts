@@ -87,6 +87,31 @@ export function pushEdit(
   evictOldest();
 }
 
+/**
+ * Update the afterHash of the most recent edit entry for a file.
+ * Call after auto-formatting rewrites the file so undo doesn't flag it as stale.
+ */
+export function updateLastAfterHash(
+  absPath: string,
+  postFormatContent: string,
+  tabId?: string,
+): void {
+  const stack = stacks.get(absPath);
+  if (!stack || stack.length === 0) return;
+  if (tabId) {
+    for (let i = stack.length - 1; i >= 0; i--) {
+      const item = stack[i];
+      if (item && (!item.tabId || item.tabId === tabId)) {
+        item.afterHash = contentHash(postFormatContent);
+        return;
+      }
+    }
+  } else {
+    const last = stack[stack.length - 1];
+    if (last) last.afterHash = contentHash(postFormatContent);
+  }
+}
+
 interface PopResult {
   content: string;
   stale: boolean;
@@ -97,14 +122,21 @@ interface PopResult {
  * @param currentFileHash - hash of the file's current content on disk
  * @returns the previous content + stale flag, or null if no entry
  */
-function popEdit(absPath: string, currentFileHash: number, tabId?: string): PopResult | null {
+function popEdit(
+  absPath: string,
+  currentFileHash: number,
+  tabId?: string,
+  skipStale?: boolean,
+): PopResult | null {
   const stack = stacks.get(absPath);
   if (!stack || stack.length === 0) return null;
   if (tabId) {
     for (let i = stack.length - 1; i >= 0; i--) {
       const item = stack[i];
       if (item && (!item.tabId || item.tabId === tabId)) {
-        const stale = item.afterHash !== currentFileHash;
+        // Tab-scoped undo skips stale detection — the whole point is to
+        // undo YOUR edits regardless of what other tabs did to the file.
+        const stale = skipStale ? false : item.afterHash !== currentFileHash;
         stack.splice(i, 1);
         return { content: item.content, stale };
       }
@@ -113,7 +145,7 @@ function popEdit(absPath: string, currentFileHash: number, tabId?: string): PopR
   }
   const entry = stack.pop();
   if (!entry) return null;
-  return { content: entry.content, stale: entry.afterHash !== currentFileHash };
+  return { content: entry.content, stale: skipStale ? false : entry.afterHash !== currentFileHash };
 }
 
 function getEditCount(absPath: string, tabId?: string): number {
@@ -125,7 +157,8 @@ function getEditCount(absPath: string, tabId?: string): number {
 
 export const undoEditTool = {
   name: "undo_edit",
-  description: "Undo the last edit_file change to a file.",
+  description:
+    "Undo the last edit_file change to a file. Refuses if the file was modified since the edit — read the file and use edit_file to surgically revert instead.",
   execute: async (args: { path: string; steps?: number; tabId?: string }): Promise<ToolResult> => {
     try {
       const filePath = resolve(args.path);
@@ -151,16 +184,20 @@ export const undoEditTool = {
       let currentHash = contentHash(currentContent);
       let restored: string | null = null;
       let actualSteps = 0;
-      const warnings: string[] = [];
 
       for (let i = 0; i < steps; i++) {
-        const result = popEdit(filePath, currentHash, args.tabId);
+        // Only check staleness on the first pop against the actual file on disk.
+        // Subsequent pops in a multi-step undo are against content we just restored,
+        // so the hash chain is broken by design (we skip other tabs' intermediate entries).
+        const skipStale = i > 0;
+        const result = popEdit(filePath, currentHash, args.tabId, skipStale);
         if (!result) break;
         if (result.stale) {
-          // File was modified by another tab/agent since this snapshot.
-          warnings.push(
-            `Step ${String(i + 1)}: file was modified externally since this edit — undo may not be exact`,
-          );
+          return {
+            success: false,
+            output: `File was modified by another agent or externally since this edit (step ${String(i + 1)}). Read the file and use edit_file to surgically revert your specific changes — undo would overwrite other modifications.`,
+            error: "stale_undo",
+          };
         }
         restored = result.content;
         // Update hash for next iteration — the "current" content is now what we're about to restore
@@ -184,9 +221,6 @@ export const undoEditTool = {
       let output = `Undid ${String(actualSteps)} edit${actualSteps > 1 ? "s" : ""} to ${args.path} (restored ${String(lineCount)} lines)`;
       if (remaining > 0) {
         output += ` — ${String(remaining)} more undo${remaining > 1 ? "s" : ""} available`;
-      }
-      if (warnings.length > 0) {
-        output += `\n⚠ ${warnings.join("; ")}`;
       }
 
       return { success: true, output };

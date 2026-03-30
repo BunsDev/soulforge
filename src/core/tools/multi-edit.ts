@@ -1,4 +1,4 @@
-import { stat as statAsync, writeFile } from "node:fs/promises";
+import { readFile, stat as statAsync, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { ToolResult } from "../../types/index.js";
 import { analyzeFile } from "../analysis/complexity.js";
@@ -6,14 +6,13 @@ import { markToolWrite, readBufferContent, reloadBuffer } from "../editor/instan
 import { isForbidden } from "../security/forbidden.js";
 import { autoFormatAfterEdit } from "./auto-format.js";
 import { buildRichEditError, fuzzyWhitespaceMatch } from "./edit-file.js";
-import { pushEdit } from "./edit-stack.js";
+import { pushEdit, updateLastAfterHash } from "./edit-stack.js";
 import { emitFileEdited } from "./file-events.js";
 
 interface EditEntry {
   oldString: string;
   newString: string;
   lineStart?: number;
-  lineEnd?: number;
 }
 
 interface MultiEditArgs {
@@ -30,8 +29,8 @@ export const multiEditTool = {
   name: "multi_edit",
   description:
     "Apply multiple edits to a single file atomically. All-or-nothing validation. " +
-    "Each edit's oldString and lineStart/lineEnd reference the ORIGINAL file — the tool handles offset tracking internally. " +
-    "Provide lineStart and lineEnd (1-indexed) for reliable edits.",
+    "Each edit's oldString and lineStart reference the ORIGINAL file — the tool handles offset tracking internally. " +
+    "Always provide lineStart (1-indexed). The range is derived from oldString line count.",
   execute: async (args: MultiEditArgs): Promise<ToolResult> => {
     try {
       const filePath = resolve(args.path);
@@ -73,7 +72,6 @@ export const multiEditTool = {
         if (!edit) continue;
         const label = `Edit ${String(i + 1)}/${String(args.edits.length)}`;
         const adjustedLineStart = edit.lineStart != null ? edit.lineStart + lineOffset : undefined;
-        const adjustedLineEnd = edit.lineEnd != null ? edit.lineEnd + lineOffset : undefined;
         const oldLineCount = edit.oldString.split("\n").length;
         const newLineCount = edit.newString.split("\n").length;
 
@@ -93,7 +91,7 @@ export const multiEditTool = {
         // Line numbers are AUTHORITATIVE — oldString is verification only.
         if (adjustedLineStart != null) {
           const start = adjustedLineStart - 1;
-          const end = adjustedLineEnd != null ? adjustedLineEnd : start + oldLineCount;
+          const end = start + oldLineCount;
           const lines = content.split("\n");
 
           if (start >= 0 && end <= lines.length && start < end) {
@@ -114,14 +112,17 @@ export const multiEditTool = {
               continue;
             }
 
-            // oldString doesn't match range — apply by line numbers anyway
-            // (line numbers are authoritative, oldString may be stale)
-            warnings.push(
-              `Edit ${String(i + 1)}: oldString did not match lines ${String(edit.lineStart)}-${String(edit.lineEnd ?? (edit.lineStart ?? 0) + oldLineCount - 1)} — applied by line numbers`,
-            );
-            applyLineReplace(start, end);
-            lineOffset += newLineCount - oldLineCount;
-            continue;
+            // oldString doesn't match range — FAIL instead of blindly applying.
+            // Applying by stale line numbers after formatting causes corruption.
+            const rangeSnippet = lines
+              .slice(start, end)
+              .map((l, idx) => `${String(start + idx + 1).padStart(4)} │ ${l}`)
+              .join("\n");
+            return {
+              success: false,
+              output: `Edit ${String(i + 1)}: oldString does not match lines ${String(edit.lineStart)}-${String((edit.lineStart ?? 0) + oldLineCount - 1)}. Actual content:\n${rangeSnippet}\nRe-read the file and retry with the correct content.`,
+              error: `edit ${String(i + 1)}: oldString mismatch at line range`,
+            };
           }
           // Line range invalid — fall through to string-based matching
         }
@@ -130,7 +131,7 @@ export const multiEditTool = {
         if (content.includes(edit.oldString)) {
           const occurrences = content.split(edit.oldString).length - 1;
           if (occurrences > 1) {
-            const msg = `${label}: found ${String(occurrences)} matches. Provide lineStart+lineEnd to disambiguate.`;
+            const msg = `${label}: found ${String(occurrences)} matches. Provide lineStart to disambiguate.`;
             return { success: false, output: msg, error: msg };
           }
           // Single occurrence — safe to replace
@@ -171,11 +172,20 @@ export const multiEditTool = {
       // Kick off pre-edit diagnostics in parallel — don't block the file write
       const diagsPromise = import("../intelligence/index.js")
         .then(async (intel) => {
+          const client = intel.getIntelligenceClient();
           const r = intel.getIntelligenceRouter(process.cwd());
-          const lang = r.detectLanguage(filePath);
-          const diags = await r.executeWithFallback(lang, "getDiagnostics", (b) =>
-            b.getDiagnostics ? b.getDiagnostics(filePath) : Promise.resolve(null),
-          );
+          const lang = client
+            ? await client.routerDetectLanguage(filePath)
+            : r.detectLanguage(filePath);
+          let diags: import("../intelligence/types.js").Diagnostic[] | null = null;
+          if (client) {
+            const tracked = await client.routerGetDiagnostics(filePath);
+            diags = tracked?.value ?? null;
+          } else {
+            diags = await r.executeWithFallback(lang, "getDiagnostics", (b) =>
+              b.getDiagnostics ? b.getDiagnostics(filePath) : Promise.resolve(null),
+            );
+          }
           return {
             beforeDiags: diags ?? [],
             router: r,
@@ -187,6 +197,13 @@ export const multiEditTool = {
           };
         })
         .catch((): null => null);
+
+      // CAS: verify file hasn't been modified since we read it
+      const currentOnDisk = await readFile(filePath, "utf-8");
+      if (currentOnDisk !== originalContent) {
+        const msg = "File was modified concurrently since last read. Re-read and retry.";
+        return { success: false, output: msg, error: "concurrent modification" };
+      }
 
       // Push single undo entry for the entire batch — write immediately
       pushEdit(filePath, originalContent, content, args.tabId);
@@ -220,7 +237,11 @@ export const multiEditTool = {
 
       // Auto-format after edit (cached command, 5s timeout)
       const formatted = await autoFormatAfterEdit(filePath);
-      if (formatted) output += " (formatted)";
+      if (formatted) {
+        output += " (formatted)";
+        const postFormatContent = await readBufferContent(filePath);
+        updateLastAfterHash(filePath, postFormatContent, args.tabId);
+      }
 
       // Post-edit diagnostics: same-file only (skip expensive cross-file findImporters)
       try {

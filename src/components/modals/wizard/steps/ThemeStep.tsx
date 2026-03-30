@@ -87,6 +87,14 @@ export function ThemeStep({ iw, setActive }: ThemeStepProps) {
     <>
       <Gap iw={iw} />
       <StepHeader iw={iw} ic="◎" title="Pick Your Theme" />
+      <PopupRow w={iw}>
+        <text fg={t.textDim} bg={popupBg}>
+          {"  Tip: add your own tailwind-style theme in "}
+        </text>
+        <text fg={t.info} bg={popupBg} attributes={BOLD}>
+          {"~/.soulforge/themes.json"}
+        </text>
+      </PopupRow>
       <Gap iw={iw} />
 
       <PopupRow w={iw}>

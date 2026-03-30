@@ -1,11 +1,11 @@
-import { mkdir, stat as statAsync, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat as statAsync, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import type { ToolResult } from "../../types";
 import { analyzeFile } from "../analysis/complexity";
 import { markToolWrite, readBufferContent, reloadBuffer } from "../editor/instance";
 import { isForbidden } from "../security/forbidden.js";
 import { autoFormatAfterEdit } from "./auto-format.js";
-import { pushEdit } from "./edit-stack.js";
+import { pushEdit, updateLastAfterHash } from "./edit-stack.js";
 import { emitFileEdited } from "./file-events.js";
 
 interface EditFileArgs {
@@ -13,7 +13,6 @@ interface EditFileArgs {
   oldString: string;
   newString: string;
   lineStart?: number;
-  lineEnd?: number;
   tabId?: string;
 }
 
@@ -47,7 +46,7 @@ export function buildRichEditError(
   const backslashDensity = (oldStr.match(/\\/g) || []).length / Math.max(oldStr.length, 1);
   const escapeHint =
     backslashDensity > 0.05
-      ? "\n[Escape-heavy content detected — use lineStart + lineEnd for line-range replacement, or use editor(action: edit, startLine, endLine, replacement)]"
+      ? "\n[Escape-heavy content detected — use lineStart for line-based replacement, or use editor(action: edit, startLine, endLine, replacement)]"
       : "";
   return {
     output: `old_string not found in file (re-read performed — content below is current):\n${snippet}${escapeHint}`,
@@ -104,13 +103,26 @@ function correctIndentation(
   newStr: string,
 ): string {
   const newLines = newStr.split("\n");
+  let lastOldIndent = "";
+  let lastActualIndent = "";
   return newLines
     .map((newLine, idx) => {
       const oldLine = oldLines[idx];
-      if (!oldLine) return newLine;
+      if (!oldLine) {
+        // NEW line beyond oldStr — apply the last known indent delta
+        if (lastOldIndent !== lastActualIndent) {
+          const newIndent = newLine.match(/^[\t ]*/)?.[0] ?? "";
+          if (newIndent.startsWith(lastOldIndent)) {
+            return lastActualIndent + newLine.slice(lastOldIndent.length);
+          }
+        }
+        return newLine;
+      }
       const oldIndent = oldLine.match(/^[\t ]*/)?.[0] ?? "";
       const actualLine = contentLines[matchStart + idx] as string;
       const actualIndent = actualLine.match(/^[\t ]*/)?.[0] ?? "";
+      lastOldIndent = oldIndent;
+      lastActualIndent = actualIndent;
       if (oldIndent === actualIndent) return newLine;
       const newIndent = newLine.match(/^[\t ]*/)?.[0] ?? "";
       if (newIndent === oldIndent) {
@@ -135,11 +147,20 @@ async function applyEdit(
   // Kick off pre-edit diagnostics in parallel — don't block the file write
   const diagsPromise = import("../intelligence/index.js")
     .then(async (intel) => {
+      const client = intel.getIntelligenceClient();
       const router = intel.getIntelligenceRouter(process.cwd());
-      const language = router.detectLanguage(filePath);
-      const diags = await router.executeWithFallback(language, "getDiagnostics", (b) =>
-        b.getDiagnostics ? b.getDiagnostics(filePath) : Promise.resolve(null),
-      );
+      const language = client
+        ? await client.routerDetectLanguage(filePath)
+        : router.detectLanguage(filePath);
+      let diags: import("../intelligence/types.js").Diagnostic[] | null = null;
+      if (client) {
+        const tracked = await client.routerGetDiagnostics(filePath);
+        diags = tracked?.value ?? null;
+      } else {
+        diags = await router.executeWithFallback(language, "getDiagnostics", (b) =>
+          b.getDiagnostics ? b.getDiagnostics(filePath) : Promise.resolve(null),
+        );
+      }
       return { beforeDiags: diags ?? [], router, language } as {
         beforeDiags: import("../intelligence/types.js").Diagnostic[];
         router: import("../intelligence/router.js").CodeIntelligenceRouter;
@@ -147,6 +168,13 @@ async function applyEdit(
       };
     })
     .catch((): null => null);
+
+  // CAS: verify file hasn't been modified since we read it (prevents concurrent edit races)
+  const currentOnDisk = await readFile(filePath, "utf-8");
+  if (currentOnDisk !== content) {
+    const msg = "File was modified concurrently since last read. Re-read and retry.";
+    return { success: false, output: msg, error: "concurrent modification" };
+  }
 
   // Write file immediately — don't wait for diagnostics
   pushEdit(filePath, content, updated, tabId);
@@ -167,7 +195,11 @@ async function applyEdit(
 
   // Auto-format after edit (cached command, 5s timeout)
   const formatted = await autoFormatAfterEdit(filePath);
-  if (formatted) output += " (formatted)";
+  if (formatted) {
+    output += " (formatted)";
+    const postFormatContent = await readBufferContent(filePath);
+    updateLastAfterHash(filePath, postFormatContent, tabId);
+  }
 
   // Post-edit diagnostics: same-file only (skip expensive cross-file findImporters)
   try {
@@ -197,12 +229,11 @@ function resolveLineRange(
   content: string,
   oldStr: string,
   lineStart: number,
-  lineEnd?: number,
 ): { start: number; end: number } | null {
   const lines = content.split("\n");
   const oldLineCount = oldStr.split("\n").length;
   const start = lineStart - 1;
-  const end = lineEnd != null ? lineEnd : start + oldLineCount;
+  const end = start + oldLineCount;
   if (start < 0 || start >= lines.length || end > lines.length || start >= end) return null;
   return { start, end };
 }
@@ -211,7 +242,7 @@ export const editFileTool = {
   name: "edit_file",
   description:
     "[TIER-1] Edit a file by replacing content. Read first, then provide path, oldString, newString. " +
-    "Prefer line-based editing: always provide lineStart and lineEnd (1-indexed from read_file output) for the most reliable edits. " +
+    "Always provide lineStart (1-indexed from read_file output) — the range is derived from oldString line count. " +
     "Empty oldString creates a new file. Use multi_edit for multiple changes to the same file. " +
     "Edits are applied immediately.",
   execute: async (args: EditFileArgs): Promise<ToolResult> => {
@@ -269,13 +300,13 @@ export const editFileTool = {
       // matches multiple places in the file.
       // ═══════════════════════════════════════════════════════════════
       if (args.lineStart != null) {
-        const range = resolveLineRange(content, oldStr, args.lineStart, args.lineEnd);
+        const range = resolveLineRange(content, oldStr, args.lineStart);
         if (range) {
           const replacedLines = lines.slice(range.start, range.end);
           const newLines = newStr.split("\n");
 
-          // Safety: don't delete large blocks with empty replacement
-          if (replacedLines.length > 10 && newLines.length === 0) {
+          // Safety: don't delete large blocks with empty/whitespace-only replacement
+          if (replacedLines.length > 10 && newStr.trim() === "") {
             return {
               success: false,
               output: `Refusing to delete ${String(replacedLines.length)} lines with empty replacement.`,
@@ -285,7 +316,7 @@ export const editFileTool = {
 
           // Verify oldString matches the line range content (warn if mismatch)
           const rangeContent = replacedLines.join("\n");
-          let label = ` (lines ${String(args.lineStart)}-${String(range.end)})`;
+          const label = ` (lines ${String(args.lineStart)}-${String(range.end)})`;
 
           // If oldString exactly matches the range, great — high confidence edit
           if (rangeContent === oldStr) {
@@ -304,13 +335,17 @@ export const editFileTool = {
             return applyEdit(filePath, content, updated, args.lineStart, label, args.tabId);
           }
 
-          // oldString doesn't match the range — apply anyway (line numbers are authoritative)
-          // but add a note so the agent knows the verification failed
-          label += " [oldString did not match range — applied by line numbers]";
-          const before = lines.slice(0, range.start);
-          const after = lines.slice(range.end);
-          const updated = [...before, ...newLines, ...after].join("\n");
-          return applyEdit(filePath, content, updated, args.lineStart, label, args.tabId);
+          // oldString doesn't match the range — FAIL instead of blindly applying.
+          // Applying by stale line numbers after formatting causes corruption.
+          const rangeSnippet = lines
+            .slice(range.start, range.end)
+            .map((l, i) => `${String(range.start + i + 1).padStart(4)} │ ${l}`)
+            .join("\n");
+          return {
+            success: false,
+            output: `oldString does not match lines ${String(args.lineStart)}-${String(range.end)}. Actual content at those lines:\n${rangeSnippet}\nRe-read the file and retry with the correct content.`,
+            error: "oldString mismatch at line range",
+          };
         }
 
         // Line range invalid — fall back to string match as last resort

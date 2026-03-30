@@ -387,6 +387,93 @@ const handlers: Record<string, (...args: unknown[]) => unknown> = {
     );
   },
 
+  routerGetFileRenameEdits: async (files: unknown) => {
+    const r = requireRouter();
+    const lang = r.detectLanguage((files as Array<{ oldPath: string }>)[0]?.oldPath);
+    return r.executeWithFallbackTracked(
+      lang,
+      "getFileRenameEdits",
+      (b) =>
+        b.getFileRenameEdits?.(files as Array<{ oldPath: string; newPath: string }>) ??
+        Promise.resolve(null),
+    );
+  },
+
+  routerNotifyFilesRenamed: (files: unknown) => {
+    const r = requireRouter();
+    const lang = r.detectLanguage((files as Array<{ oldPath: string }>)[0]?.oldPath);
+    r.executeWithFallback(lang, "notifyFilesRenamed", (b) => {
+      b.notifyFilesRenamed?.(files as Array<{ oldPath: string; newPath: string }>);
+      return Promise.resolve(null);
+    });
+  },
+
+  routerInvalidateFileCache: (file: unknown) => {
+    requireRouter().fileCache.invalidate(file as string);
+  },
+
+  routerExtractFunction: async (
+    file: unknown,
+    startLine: unknown,
+    endLine: unknown,
+    functionName: unknown,
+  ) => {
+    const r = requireRouter();
+    const lang = r.detectLanguage(file as string);
+    return r.executeWithFallbackTracked(
+      lang,
+      "extractFunction",
+      (b) =>
+        b.extractFunction?.(
+          file as string,
+          startLine as number,
+          endLine as number,
+          functionName as string,
+        ) ?? Promise.resolve(null),
+    );
+  },
+
+  routerExtractVariable: async (
+    file: unknown,
+    startLine: unknown,
+    endLine: unknown,
+    variableName: unknown,
+  ) => {
+    const r = requireRouter();
+    const lang = r.detectLanguage(file as string);
+    return r.executeWithFallbackTracked(
+      lang,
+      "extractVariable",
+      (b) =>
+        b.extractVariable?.(
+          file as string,
+          startLine as number,
+          endLine as number,
+          variableName as string,
+        ) ?? Promise.resolve(null),
+    );
+  },
+
+  routerOrganizeImports: async (file: unknown) => {
+    const r = requireRouter();
+    const lang = r.detectLanguage(file as string);
+    return r.executeWithFallbackTracked(
+      lang,
+      "organizeImports",
+      (b) => b.organizeImports?.(file as string) ?? Promise.resolve(null),
+    );
+  },
+
+  routerFixAll: async (file: unknown) => {
+    const r = requireRouter();
+    const lang = r.detectLanguage(file as string);
+    return r.executeWithFallbackTracked(
+      lang,
+      "fixAll",
+      (b) => b.fixAll?.(file as string) ?? Promise.resolve(null),
+    );
+  },
+
   // Router management
   routerGetStatus: () => requireRouter().getStatus(),
   routerGetDetailedLspServers: () => requireRouter().getDetailedLspServers(),

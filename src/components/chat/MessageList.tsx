@@ -53,6 +53,7 @@ interface Props {
   messages: ChatMessage[];
   chatStyle: ChatStyle;
   diffStyle?: "default" | "sidebyside" | "compact";
+  autoCompactDiffs?: boolean;
   showReasoning?: boolean;
   reasoningExpanded?: boolean;
 }
@@ -203,18 +204,20 @@ function isDenied(error?: string): boolean {
 function ToolCallRow({
   tc,
   diffStyle,
+  autoCompactDiffs = false,
 }: {
   tc: ToolCall;
   diffStyle?: "default" | "sidebyside" | "compact";
+  autoCompactDiffs?: boolean;
 }) {
   const t = useTheme();
   const expanded = useCodeExpanded();
   const errorsExpanded = useReasoningExpanded();
   const props = buildFinalToolRowProps(tc);
 
-  // For edit tools, use compact diff by default, expanded on Ctrl+O
+  // For edit tools, use compact diff by default (unless autoCompactDiffs is off), expanded on Ctrl+O
   if (props.diff) {
-    props.diffStyle = expanded ? diffStyle : "compact";
+    props.diffStyle = expanded || !autoCompactDiffs ? diffStyle : "compact";
   }
 
   // Expanded error detail (2-line view)
@@ -445,6 +448,7 @@ function renderSegments(
   segments: MessageSegment[],
   toolCallMap: Map<string, ToolCall>,
   diffStyle: "default" | "sidebyside" | "compact" = "default",
+  autoCompactDiffs = false,
   showReasoning = true,
   reasoningExpanded = false,
   t: ThemeTokens = getThemeTokens(),
@@ -641,7 +645,7 @@ function renderSegments(
               {g.tc.name === "write_plan" || g.tc.name === "plan" ? (
                 <WritePlanCall tc={g.tc} />
               ) : (
-                <ToolCallRow tc={g.tc} diffStyle={diffStyle} />
+                <ToolCallRow tc={g.tc} diffStyle={diffStyle} autoCompactDiffs={autoCompactDiffs} />
               )}
             </box>
           );
@@ -654,11 +658,13 @@ function renderSegments(
 const AssistantMessage = memo(function AssistantMessage({
   msg,
   diffStyle = "default",
+  autoCompactDiffs = false,
   showReasoning = true,
   reasoningExpanded = false,
 }: {
   msg: ChatMessage;
   diffStyle?: "default" | "sidebyside" | "compact";
+  autoCompactDiffs?: boolean;
   showReasoning?: boolean;
   reasoningExpanded?: boolean;
 }) {
@@ -702,6 +708,7 @@ const AssistantMessage = memo(function AssistantMessage({
           msg.segments as MessageSegment[],
           toolCallMap,
           diffStyle,
+          autoCompactDiffs,
           showReasoning,
           reasoningExpanded,
           t,
@@ -715,7 +722,11 @@ const AssistantMessage = memo(function AssistantMessage({
                 ?.filter((tc) => tc.name !== "task_list" && tc.name !== "update_plan_step")
                 .map((tc) => (
                   <box key={tc.id} flexDirection="column">
-                    <ToolCallRow tc={tc} diffStyle={diffStyle} />
+                    <ToolCallRow
+                      tc={tc}
+                      diffStyle={diffStyle}
+                      autoCompactDiffs={autoCompactDiffs}
+                    />
                   </box>
                 ))}
             </box>
@@ -730,6 +741,7 @@ export const StaticMessage = memo(function StaticMessage({
   msg,
   chatStyle,
   diffStyle = "default",
+  autoCompactDiffs = false,
   showReasoning = true,
   reasoningExpanded = false,
   animate = false,
@@ -737,6 +749,7 @@ export const StaticMessage = memo(function StaticMessage({
   msg: ChatMessage;
   chatStyle: ChatStyle;
   diffStyle?: "default" | "sidebyside" | "compact";
+  autoCompactDiffs?: boolean;
   showReasoning?: boolean;
   reasoningExpanded?: boolean;
   animate?: boolean;
@@ -760,6 +773,7 @@ export const StaticMessage = memo(function StaticMessage({
       <AssistantMessage
         msg={msg}
         diffStyle={diffStyle}
+        autoCompactDiffs={autoCompactDiffs}
         showReasoning={showReasoning}
         reasoningExpanded={reasoningExpanded}
       />
@@ -771,6 +785,7 @@ export const MessageList = memo(function MessageList({
   messages,
   chatStyle,
   diffStyle = "default",
+  autoCompactDiffs = false,
   showReasoning = true,
 }: Props) {
   const t = useTheme();
@@ -813,6 +828,7 @@ export const MessageList = memo(function MessageList({
             key={msg.id}
             msg={msg}
             diffStyle={diffStyle}
+            autoCompactDiffs={autoCompactDiffs}
             showReasoning={showReasoning}
           />
         );

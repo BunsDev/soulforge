@@ -70,12 +70,19 @@ async function applyAndDiagnose(
   tabId?: string,
 ): Promise<string | null> {
   // Snapshot before-diagnostics for each file
+  const client = getIntelligenceClient();
   const beforeMap = new Map<string, import("../intelligence/types.js").Diagnostic[]>();
   for (const edit of edits) {
-    const lang = router.detectLanguage(edit.file);
-    const diags = await router.executeWithFallback(lang, "getDiagnostics", (b) =>
-      b.getDiagnostics ? b.getDiagnostics(edit.file) : Promise.resolve(null),
-    );
+    let diags: import("../intelligence/types.js").Diagnostic[] | null = null;
+    if (client) {
+      const tracked = await client.routerGetDiagnostics(edit.file);
+      diags = tracked?.value ?? null;
+    } else {
+      const lang = router.detectLanguage(edit.file);
+      diags = await router.executeWithFallback(lang, "getDiagnostics", (b) =>
+        b.getDiagnostics ? b.getDiagnostics(edit.file) : Promise.resolve(null),
+      );
+    }
     if (diags) beforeMap.set(edit.file, diags);
   }
 
@@ -182,11 +189,14 @@ export const refactorTool = {
             };
           }
 
-          const tracked = await fallbackTracked(file, "extractFunction", (b) =>
-            b.extractFunction
-              ? b.extractFunction(file, startLine, endLine, newName)
-              : Promise.resolve(null),
-          );
+          const client = getIntelligenceClient();
+          const tracked = client
+            ? await client.routerExtractFunction(file, startLine, endLine, newName)
+            : await fallbackTracked(file, "extractFunction", (b) =>
+                b.extractFunction
+                  ? b.extractFunction(file, startLine, endLine, newName)
+                  : Promise.resolve(null),
+              );
 
           if (!tracked) {
             return {
@@ -245,11 +255,14 @@ export const refactorTool = {
             };
           }
 
-          const tracked = await fallbackTracked(file, "extractVariable", (b) =>
-            b.extractVariable
-              ? b.extractVariable(file, startLine, endLine, newName)
-              : Promise.resolve(null),
-          );
+          const client = getIntelligenceClient();
+          const tracked = client
+            ? await client.routerExtractVariable(file, startLine, endLine, newName)
+            : await fallbackTracked(file, "extractVariable", (b) =>
+                b.extractVariable
+                  ? b.extractVariable(file, startLine, endLine, newName)
+                  : Promise.resolve(null),
+              );
 
           if (!tracked) {
             return {
@@ -361,9 +374,12 @@ export const refactorTool = {
             };
           }
 
-          const tracked = await fallbackTracked(file, "organizeImports", (b) =>
-            b.organizeImports ? b.organizeImports(file) : Promise.resolve(null),
-          );
+          const client = getIntelligenceClient();
+          const tracked = client
+            ? await client.routerOrganizeImports(file)
+            : await fallbackTracked(file, "organizeImports", (b) =>
+                b.organizeImports ? b.organizeImports(file) : Promise.resolve(null),
+              );
 
           if (!tracked) {
             return {
