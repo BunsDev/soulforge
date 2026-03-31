@@ -81,7 +81,14 @@ function truncate(str: string, max: number): string {
   return str.length > max ? `${str.slice(0, max - 1)}…` : str;
 }
 
-const ABORT_ON_LOADING = new Set(["/clear", "/compact", "/plan"]);
+const ABORT_ON_LOADING = new Set([
+  "/clear",
+  "/compact",
+  "/plan",
+  "/session clear",
+  "/session compact",
+  "/session plan",
+]);
 
 const DEFAULT_TASK_ROUTER: TaskRouter = {
   coding: null,
@@ -738,17 +745,26 @@ export function App({
   const handleTabCommand = useCallback(
     (input: string, chat: ChatInstance) => {
       const cmd = input.trim().toLowerCase().split(/\s+/)[0] ?? "";
-      if (chat.isLoading && ABORT_ON_LOADING.has(cmd)) {
+      const twoWord = input.trim().toLowerCase().split(/\s+/).slice(0, 2).join(" ");
+      if (chat.isLoading && (ABORT_ON_LOADING.has(cmd) || ABORT_ON_LOADING.has(twoWord))) {
         chat.abort();
         chat.setMessageQueue([]);
       }
 
-      if (cmd === "/continue") {
+      if (cmd === "/continue" || twoWord === "/session continue") {
         chat.handleSubmit("Continue from where you left off. Complete any remaining work.");
         return;
       }
-      if (cmd === "/plan" || input.trim().toLowerCase().startsWith("/plan ")) {
-        const desc = input.trim().slice(5).trim();
+      if (
+        cmd === "/plan" ||
+        input.trim().toLowerCase().startsWith("/plan ") ||
+        twoWord === "/session plan" ||
+        input.trim().toLowerCase().startsWith("/session plan ")
+      ) {
+        const desc = input
+          .trim()
+          .replace(/^\/(session\s+)?plan\s*/i, "")
+          .trim();
         if (chat.planMode) {
           chat.setPlanMode(false);
           chat.setPlanRequest(null);

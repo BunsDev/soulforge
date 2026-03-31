@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import stripAnsi from "strip-ansi";
 import type { ToolResult } from "../../types";
 import { isForbidden } from "../security/forbidden.js";
+// TODO(beta): inline image rendering — disabled until suspend/resume bridge is stable
+// import { canRenderImages, renderImages } from "../terminal/image.js";
 import { getIOClient } from "../workers/io-client.js";
 import { checkShellBinaryRead } from "./binary-detect.js";
 import { compressShellOutputFull as compressLocal } from "./shell-compress.js";
@@ -331,12 +333,14 @@ function detectProjectCommand(command: string): string | null {
   return null;
 }
 
+const SHELL_DESCRIPTION =
+  "[TIER-2] Shell command execution. Use for git operations, package installs, system commands. " +
+  "AVOID for: reading files (use read_file), searching code (use soul_grep), verifying edits (use project). " +
+  "LIMITATIONS: Output truncated at 30000 chars. Use '&&' to chain commands, not newlines.";
+
 export const shellTool = {
   name: "shell",
-  description:
-    "[TIER-2] Shell command execution. Use for git operations, package installs, system commands. " +
-    "AVOID for: reading files (use read_file), searching code (use soul_grep), verifying edits (use project). " +
-    "LIMITATIONS: Output truncated at 30000 chars. Use '&&' to chain commands, not newlines.",
+  description: SHELL_DESCRIPTION,
   execute: async (args: ShellArgs, abortSignal?: AbortSignal): Promise<ToolResult> => {
     const command = injectCoAuthor(args.command);
     const cwd = args.cwd ?? process.cwd();

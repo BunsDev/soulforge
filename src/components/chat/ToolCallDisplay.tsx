@@ -31,6 +31,8 @@ export interface LiveToolCall {
   error?: string;
   /** Set at tool-call start when the backend is known upfront (e.g. routed web search agent). */
   backend?: string;
+  /** Half-block ANSI art lines for inline image display. */
+  imageArt?: Array<{ name: string; lines: string[] }>;
 }
 
 export const SUBAGENT_NAMES = new Set(["dispatch", "web_search"]);

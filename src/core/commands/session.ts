@@ -79,7 +79,7 @@ async function handleExportAll(ctx: CommandContext): Promise<void> {
 
 async function handleExport(input: string, ctx: CommandContext): Promise<void> {
   const trimmed = input.trim();
-  const arg = trimmed.slice(7).trim();
+  const arg = trimmed.replace(/^\/(session\s+)?export\s*/i, "").trim();
 
   if (arg === "all" || arg === "diagnostic") {
     await handleExportAll(ctx);
@@ -127,7 +127,7 @@ async function handleExport(input: string, ctx: CommandContext): Promise<void> {
 
 function handlePlan(input: string, ctx: CommandContext): void {
   const trimmed = input.trim();
-  const arg = trimmed.slice(5).trim();
+  const arg = trimmed.replace(/^\/(session\s+)?plan\s*/i, "").trim();
   if (arg) {
     ctx.chat.setPlanMode(true);
     ctx.chat.setPlanRequest(arg);
@@ -179,14 +179,25 @@ function handleSessions(_input: string, ctx: CommandContext): void {
 }
 
 export function register(map: Map<string, CommandHandler>): void {
+  // Grouped commands
+  map.set("/session", handleSessions);
+  map.set("/session clear", handleClear);
+  map.set("/session compact", handleCompact);
+  map.set("/session continue", handleContinue);
+  map.set("/session history", handleSessions);
+  map.set("/session export", handleExport);
+
+  // Legacy aliases (backward compat)
   map.set("/clear", handleClear);
   map.set("/compact", handleCompact);
   map.set("/sessions", handleSessions);
-  map.set("/session", handleSessions);
   map.set("/continue", handleContinue);
 }
 
 export function matchSessionPrefix(cmd: string): CommandHandler | null {
+  if (cmd === "/session export" || cmd.startsWith("/session export ")) return handleExport;
+  if (cmd === "/session plan" || cmd.startsWith("/session plan ")) return handlePlan;
+  // Legacy aliases
   if (cmd === "/export" || cmd.startsWith("/export ")) return handleExport;
   if (cmd === "/plan" || cmd.startsWith("/plan ")) return handlePlan;
   return null;

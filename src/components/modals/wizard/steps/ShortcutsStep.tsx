@@ -31,6 +31,17 @@ export const ShortcutsStep = memo(function ShortcutsStep({ iw }: { iw: number })
           ))}
         </box>
       ))}
+
+      <Gap iw={iw} n={2} />
+      <PopupRow w={iw}>
+        <text fg={t.textFaint} bg={bg}>
+          {"  "}These are just the highlights — type <span fg={t.brand}>/help</span> or press{" "}
+          <span fg={t.info} attributes={BOLD}>
+            Ctrl+K
+          </span>{" "}
+          to browse all commands
+        </text>
+      </PopupRow>
     </>
   );
 });

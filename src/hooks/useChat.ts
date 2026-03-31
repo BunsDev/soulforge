@@ -1925,6 +1925,18 @@ export function useChat({
               if (tc) {
                 tc.state = "done";
                 tc.result = resultStr;
+                // Extract half-block image art from shell tool results
+                if (
+                  typeof part.output === "object" &&
+                  part.output !== null &&
+                  "_imageArt" in part.output
+                ) {
+                  tc.imageArt = (
+                    part.output as {
+                      _imageArt: Array<{ name: string; lines: string[] }>;
+                    }
+                  )._imageArt;
+                }
               }
               toolCharsRef.current += resultStr.length;
               const parsedArgs = safeParseArgs(toolCallArgs.get(part.toolCallId));
@@ -1966,12 +1978,18 @@ export function useChat({
                 if (d.filesEdited) toolResult.filesEdited = d.filesEdited;
                 if (d.miniForge) toolResult.miniForge = true;
               }
-              completedCalls.push({
+              // Preserve imageArt from the streaming LiveToolCall for the final ToolCall
+              const streamingTc = tcBuf.find((c) => c.id === part.toolCallId);
+              const completedCall: import("../types/index.js").ToolCall = {
                 id: part.toolCallId,
                 name: part.toolName,
                 args: parsedArgs,
                 result: toolResult,
-              });
+              };
+              if (streamingTc?.imageArt) {
+                completedCall.imageArt = streamingTc.imageArt;
+              }
+              completedCalls.push(completedCall);
               if (workingStateRef.current) {
                 extractFromToolCall(workingStateRef.current, part.toolName, parsedArgs);
                 extractFromToolResult(

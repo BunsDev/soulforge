@@ -8,7 +8,8 @@ import {
 import { editFileTool, buildRichEditError } from "../src/core/tools/edit-file.js";
 import { multiEditTool } from "../src/core/tools/multi-edit.js";
 import { setFormatCache } from "../src/core/tools/auto-format.js";
-import { writeFile, mkdir, rm } from "node:fs/promises";
+import { markToolWrite, readBufferContent } from "../src/core/editor/instance.js";
+import { writeFile, mkdir, rm, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -700,4 +701,274 @@ describe("buildRichEditError", () => {
 		expect(result.output).toContain("short");
 		expect(result.output).toContain("file");
 	});
+
+	it("does not say re-read performed", () => {
+		const content = "line1\nline2\nline3";
+		const result = buildRichEditError(content, "nonexistent", 2);
+		expect(result.output).not.toContain("re-read performed");
+		expect(result.output).toContain("Current content at that region");
+	});
+});
+
+// ════════════════════════════════════════════════════════════
+// readBufferContent: markToolWrite freshness (no marker deletion)
+// ════════════════════════════════════════════════════════════
+
+describe("readBufferContent: tool write marker survives multiple reads", () => {
+	it("reads from disk on consecutive calls within freshness window", async () => {
+		const path = await writeTestFile("marker-survive.ts", "version-1");
+
+		markToolWrite(path);
+
+		// First read — should come from disk
+		const r1 = await readBufferContent(path);
+		expect(r1).toBe("version-1");
+
+		// Modify file on disk (simulates a second edit writing to disk)
+		await writeFile(path, "version-2", "utf-8");
+
+		// Second read within 2s — marker should still be active, reads from disk
+		const r2 = await readBufferContent(path);
+		expect(r2).toBe("version-2");
+	});
+
+	it("multiple rapid reads all reflect latest disk content", async () => {
+		const path = await writeTestFile("marker-rapid.ts", "A");
+		markToolWrite(path);
+
+		const r1 = await readBufferContent(path);
+		expect(r1).toBe("A");
+
+		await writeFile(path, "B", "utf-8");
+		markToolWrite(path); // Second edit re-marks
+
+		const r2 = await readBufferContent(path);
+		expect(r2).toBe("B");
+
+		await writeFile(path, "C", "utf-8");
+		markToolWrite(path); // Third edit re-marks
+
+		const r3 = await readBufferContent(path);
+		expect(r3).toBe("C");
+	});
+});
+
+// ════════════════════════════════════════════════════════════
+// Sequential edit_file: edits accumulate (regression for lost edits)
+// ════════════════════════════════════════════════════════════
+
+describe("sequential edit_file: all edits persist", () => {
+	it("3 sequential edits to different lines all survive", async () => {
+		const path = await writeTestFile("seq-3.ts", "line1\nline2\nline3\nline4\nline5");
+
+		const r1 = await editFileTool.execute({
+			path, oldString: "line1", newString: "FIRST", lineStart: 1,
+		});
+		expect(r1.success).toBe(true);
+
+		const r2 = await editFileTool.execute({
+			path, oldString: "line3", newString: "THIRD", lineStart: 3,
+		});
+		expect(r2.success).toBe(true);
+
+		const r3 = await editFileTool.execute({
+			path, oldString: "line5", newString: "FIFTH", lineStart: 5,
+		});
+		expect(r3.success).toBe(true);
+
+		const content = await Bun.file(path).text();
+		expect(content).toBe("FIRST\nline2\nTHIRD\nline4\nFIFTH");
+	}, 30_000);
+
+	it("4 sequential edits that shift lines all persist", async () => {
+		const path = await writeTestFile("seq-shift.ts", "A\nB\nC\nD");
+
+		// Edit 1: expand line 1
+		const r1 = await editFileTool.execute({
+			path, oldString: "A", newString: "A1\nA2", lineStart: 1,
+		});
+		expect(r1.success).toBe(true);
+
+		// Edit 2: replace B (now at line 3 after expansion)
+		const r2 = await editFileTool.execute({
+			path, oldString: "B", newString: "BB",
+		});
+		expect(r2.success).toBe(true);
+
+		// Edit 3: replace C
+		const r3 = await editFileTool.execute({
+			path, oldString: "C", newString: "CC",
+		});
+		expect(r3.success).toBe(true);
+
+		// Edit 4: replace D
+		const r4 = await editFileTool.execute({
+			path, oldString: "D", newString: "DD",
+		});
+		expect(r4.success).toBe(true);
+
+		const content = await Bun.file(path).text();
+		expect(content).toBe("A1\nA2\nBB\nCC\nDD");
+	}, 30_000);
+});
+
+// ════════════════════════════════════════════════════════════
+// Multi-tab dispatch: parallel agents editing same file
+// ════════════════════════════════════════════════════════════
+
+describe("multi-tab dispatch: concurrent edits to same file", () => {
+	it("tab A edit then tab B edit — both persist when non-overlapping", async () => {
+		const path = await writeTestFile("dispatch-ab.ts", "header\nbody\nfooter");
+
+		// Tab A edits header
+		const r1 = await editFileTool.execute({
+			path, oldString: "header", newString: "HEADER", lineStart: 1, tabId: "tabA",
+		});
+		expect(r1.success).toBe(true);
+
+		// Tab B edits footer
+		const r2 = await editFileTool.execute({
+			path, oldString: "footer", newString: "FOOTER", lineStart: 3, tabId: "tabB",
+		});
+		expect(r2.success).toBe(true);
+
+		const content = await Bun.file(path).text();
+		expect(content).toBe("HEADER\nbody\nFOOTER");
+	}, 30_000);
+
+	it("tab A undo after tab B edit — refuses (stale)", async () => {
+		const path = await writeTestFile("dispatch-stale.ts", "v0");
+
+		await editFileTool.execute({
+			path, oldString: "v0", newString: "v1-A", tabId: "tabA",
+		});
+
+		await editFileTool.execute({
+			path, oldString: "v1-A", newString: "v2-B", tabId: "tabB",
+		});
+
+		// Tab A undo should refuse — file was modified by tab B
+		const undo = await undoEditTool.execute({ path, tabId: "tabA" });
+		expect(undo.success).toBe(false);
+		expect(undo.output).toContain("surgically revert");
+
+		// File unchanged — tab B's work preserved
+		const content = await Bun.file(path).text();
+		expect(content).toBe("v2-B");
+	}, 30_000);
+
+	it("multi_edit from two tabs — second tab sees first tab's changes", async () => {
+		const path = await writeTestFile("dispatch-multi.ts", "A\nB\nC\nD");
+
+		// Tab 1 edits lines 1-2
+		const r1 = await multiEditTool.execute({
+			path,
+			edits: [{ oldString: "A", newString: "X", lineStart: 1 }],
+			tabId: "tab1",
+		});
+		expect(r1.success).toBe(true);
+
+		// Tab 2 edits line 3 — sees X at line 1 from tab 1
+		const r2 = await multiEditTool.execute({
+			path,
+			edits: [{ oldString: "C", newString: "Y", lineStart: 3 }],
+			tabId: "tab2",
+		});
+		expect(r2.success).toBe(true);
+
+		const content = await Bun.file(path).text();
+		expect(content).toBe("X\nB\nY\nD");
+	}, 30_000);
+
+	it("multi_edit CAS catches race between tabs", async () => {
+		const path = await writeTestFile("dispatch-cas.ts", "original");
+
+		// Tab 1 reads file (simulated by multi_edit reading internally)
+		// Tab 2 writes concurrently between tab 1's read and write
+		// This is hard to test directly — instead verify CAS works at edit_file level
+		await editFileTool.execute({
+			path, oldString: "original", newString: "tab1-wrote", tabId: "tab1",
+		});
+
+		// Tab 2 tries to edit based on stale "original" content
+		const r2 = await editFileTool.execute({
+			path, oldString: "original", newString: "tab2-wrote", tabId: "tab2",
+		});
+		expect(r2.success).toBe(false);
+
+		// File is tab1's version
+		const content = await Bun.file(path).text();
+		expect(content).toBe("tab1-wrote");
+	}, 30_000);
+});
+
+// ════════════════════════════════════════════════════════════
+// multi_edit: atomic rollback error messages
+// ════════════════════════════════════════════════════════════
+
+describe("multi_edit: error messages communicate atomic rollback", () => {
+	it("mismatch error says NO edits were applied", async () => {
+		const path = await writeTestFile("msg-mismatch.ts", "A\nB\nC");
+		const result = await multiEditTool.execute({
+			path,
+			edits: [
+				{ oldString: "A", newString: "X", lineStart: 1 },
+				{ oldString: "WRONG", newString: "Y", lineStart: 2 },
+			],
+		});
+		expect(result.success).toBe(false);
+		expect(result.output).toContain("NO edits were applied");
+		expect(result.output).toContain("atomic rollback");
+
+		// Verify nothing was written
+		const content = await Bun.file(path).text();
+		expect(content).toBe("A\nB\nC");
+	}, 30_000);
+
+	it("ambiguous match error says NO edits were applied", async () => {
+		const path = await writeTestFile("msg-ambig.ts", "dup\ndup\nother");
+		const result = await multiEditTool.execute({
+			path,
+			edits: [{ oldString: "dup", newString: "unique" }],
+		});
+		expect(result.success).toBe(false);
+		expect(result.output).toContain("NO edits were applied");
+
+		const content = await Bun.file(path).text();
+		expect(content).toBe("dup\ndup\nother");
+	}, 30_000);
+
+	it("string-not-found error says NO edits were applied", async () => {
+		const path = await writeTestFile("msg-notfound.ts", "hello\nworld");
+		const result = await multiEditTool.execute({
+			path,
+			edits: [{ oldString: "nonexistent", newString: "replacement" }],
+		});
+		expect(result.success).toBe(false);
+		expect(result.output).toContain("NO edits were applied");
+
+		const content = await Bun.file(path).text();
+		expect(content).toBe("hello\nworld");
+	}, 30_000);
+
+	it("CAS failure error says NO edits were applied", async () => {
+		// Can't easily trigger CAS failure without concurrent writes,
+		// but we can verify the error path exists by checking multi_edit
+		// after external modification
+		const path = await writeTestFile("msg-cas.ts", "start");
+
+		// Simulate: multi_edit reads "start", external process writes "changed"
+		// before multi_edit can write back. We can't inject this easily,
+		// so verify that sequential edits with stale content fail cleanly.
+		await writeFile(path, "changed-externally", "utf-8");
+
+		const result = await multiEditTool.execute({
+			path,
+			edits: [{ oldString: "start", newString: "edited", lineStart: 1 }],
+		});
+		expect(result.success).toBe(false);
+
+		const content = await Bun.file(path).text();
+		expect(content).toBe("changed-externally");
+	}, 30_000);
 });

@@ -836,14 +836,17 @@ export function register(map: Map<string, CommandHandler>): void {
   map.set("/nvim-config", handleNvimConfig);
   map.set("/verbose", handleVerbose);
   map.set("/reasoning", handleReasoning);
-  map.set("/compaction", handleCompaction);
+  map.set("/compact settings", handleCompaction);
+  map.set("/compaction", handleCompaction); // legacy alias
   map.set("/agent-features", handleAgentFeatures);
   map.set("/instructions", handleInstructions);
   map.set("/diff-style", handleDiffStyle);
-  map.set("/split", handleSplit);
+  map.set("/editor split", handleSplit);
+  map.set("/split", handleSplit); // legacy alias
   map.set("/vim-hints", handleVimHints);
   map.set("/model-scope", handleModelScope);
   map.set("/font nerd", handleNerdFont);
+  map.set("/font set", handleFont);
   map.set("/settings", handleSettingsHub);
   map.set("/theme", handleTheme);
 }

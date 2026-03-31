@@ -44,6 +44,8 @@ interface StaticToolRowProps {
     impact?: string;
   } | null;
   diffStyle?: "default" | "sidebyside" | "compact";
+  /** Half-block ANSI art for inline image display. */
+  imageArt?: Array<{ name: string; lines: string[] }>;
 }
 
 /**
@@ -67,6 +69,7 @@ export function StaticToolRow({
   suffixColor,
   diff,
   diffStyle = "default",
+  imageArt,
 }: StaticToolRowProps) {
   const t = useTheme();
   const rc = {
@@ -126,6 +129,18 @@ export function StaticToolRow({
           ) : null}
         </box>
       ) : null}
+      {imageArt && imageArt.length > 0
+        ? imageArt.map((img) => (
+            <box key={img.name} flexDirection="column" marginTop={1}>
+              <ghostty-terminal
+                ansi={img.lines.join("\n")}
+                cols={130}
+                rows={img.lines.length}
+                trimEnd
+              />
+            </box>
+          ))
+        : null}
     </box>
   );
 }
@@ -233,6 +248,7 @@ export function buildLiveToolRowProps(
     result?: string;
     error?: string;
     backend?: string;
+    imageArt?: Array<{ name: string; lines: string[] }>;
   },
   extra?: {
     isRepoMapHit?: boolean;
@@ -348,6 +364,7 @@ export function buildLiveToolRowProps(
     suffixColor,
     diff,
     diffStyle: extra?.diffStyle,
+    imageArt: tc.imageArt,
   };
 }
 
@@ -362,6 +379,7 @@ export function buildFinalToolRowProps(tc: {
     backend?: string;
     miniForge?: boolean;
   };
+  imageArt?: Array<{ name: string; lines: string[] }>;
 }): StaticToolRowProps {
   const toolDisplay = resolveToolDisplay(tc.name);
   const argsJson = JSON.stringify(tc.args);
@@ -445,5 +463,6 @@ export function buildFinalToolRowProps(tc: {
     suffix,
     suffixColor,
     diff,
+    imageArt: tc.imageArt,
   };
 }

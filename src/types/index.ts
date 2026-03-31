@@ -142,6 +142,8 @@ export interface ToolCall {
   name: string;
   args: Record<string, unknown>;
   result?: ToolResult;
+  /** Half-block ANSI art for inline image display (shell tool with outputImages). */
+  imageArt?: Array<{ name: string; lines: string[] }>;
 }
 
 export type NvimConfigMode = "default" | "user" | "none";

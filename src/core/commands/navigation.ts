@@ -16,9 +16,12 @@ function handleHelp(_input: string, _ctx: CommandContext): void {
 }
 
 function handleOpen(input: string, ctx: CommandContext): void {
-  const filePath = input.trim().slice(6).trim();
+  const filePath = input
+    .trim()
+    .replace(/^\/(editor\s+)?open\s*/i, "")
+    .trim();
   if (!filePath) {
-    sysMsg(ctx, "Usage: /open <file-path>");
+    sysMsg(ctx, "Usage: /editor open <file-path>");
     return;
   }
   ctx.openEditorWithFile(filePath);
@@ -230,7 +233,13 @@ export function register(map: Map<string, CommandHandler>): void {
   map.set("/editor", handleEditor);
   map.set("/edit", handleEditor);
   map.set("/help", handleHelp);
-  map.set("/editor-settings", handleEditorSettings);
+
+  // Editor subcommands
+  map.set("/editor settings", handleEditorSettings);
+  map.set("/editor open", handleOpen);
+  map.set("/editor-settings", handleEditorSettings); // legacy alias
+  map.set("/open", handleOpen); // legacy alias
+
   map.set("/router", handleRouter);
   map.set("/provider-settings", handleProviderSettings);
   map.set("/perf", handleProviderSettings);
@@ -244,7 +253,8 @@ export function register(map: Map<string, CommandHandler>): void {
   map.set("/changes", handleChanges);
   map.set("/files", handleChanges);
   map.set("/errors", handleErrors);
-  map.set("/compact-v2-logs", handleCompactionLogs);
+  map.set("/compact logs", handleCompactionLogs);
+  map.set("/compact-v2-logs", handleCompactionLogs); // legacy alias
   map.set("/skills", handleSkills);
   map.set("/terminals", handleTerminals);
   map.set("/terminal", handleTerminals);
@@ -256,6 +266,7 @@ export function register(map: Map<string, CommandHandler>): void {
 }
 
 export function matchNavPrefix(cmd: string): CommandHandler | null {
+  if (cmd.startsWith("/editor open ")) return handleOpen;
   if (cmd.startsWith("/open ")) return handleOpen;
   if (cmd.startsWith("/tab rename ")) return handleRename;
   if (cmd.startsWith("/terminals ")) return handleTerminals;

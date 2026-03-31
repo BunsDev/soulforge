@@ -208,7 +208,7 @@ export const InputBox = memo(function InputBox({
       const m = fuzzyMatch(commandToken, c.cmd);
       if (m) results.push({ ...c, score: m.score, indices: m.indices });
     }
-    results.sort((a, b) => b.score - a.score);
+    results.sort((a, b) => b.score - a.score || a.cmd.localeCompare(b.cmd));
     return results;
   }, [showAutocomplete, commandToken]);
   const hasMatches = matches.length > 0;

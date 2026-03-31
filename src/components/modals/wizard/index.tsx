@@ -6,12 +6,13 @@ import { MAX_W, STEPS } from "./data.js";
 import { FooterNav } from "./FooterNav.js";
 import { ProgressBar } from "./ProgressBar.js";
 import { Hr } from "./primitives.js";
-import { FeaturesStep } from "./steps/FeaturesStep.js";
+import { IntelligenceStep } from "./steps/IntelligenceStep.js";
 import { ReadyStep } from "./steps/ReadyStep.js";
 import { SetupStep } from "./steps/SetupStep.js";
 import { ShortcutsStep } from "./steps/ShortcutsStep.js";
 import { ThemeStep } from "./steps/ThemeStep.js";
 import { WelcomeStep } from "./steps/WelcomeStep.js";
+import { WorkflowStep } from "./steps/WorkflowStep.js";
 
 interface Props {
   visible: boolean;
@@ -126,7 +127,8 @@ export const FirstRunWizard = memo(function FirstRunWizard({
               setActive={setSetupActive}
             />
           )}
-          {step === "features" && <FeaturesStep iw={iw} />}
+          {step === "intelligence" && <IntelligenceStep iw={iw} />}
+          {step === "workflow" && <WorkflowStep iw={iw} />}
           {step === "shortcuts" && <ShortcutsStep iw={iw} />}
           {step === "theme" && (
             <ThemeStep iw={iw} active={setupActive} setActive={setSetupActive} />
