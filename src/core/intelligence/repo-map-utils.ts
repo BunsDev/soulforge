@@ -320,7 +320,12 @@ export async function collectFiles(dir: string, depth = 0): Promise<CollectedFil
     const gitFiles = await collectFilesViaGit(dir);
     if (gitFiles) return gitFiles;
   }
-  return collectFilesWalk(dir, depth);
+  // Fallback walk with a 60s safety timeout (circular symlinks, huge non-git dirs)
+  const result = await Promise.race([
+    collectFilesWalk(dir, depth),
+    new Promise<CollectedFile[]>((r) => setTimeout(() => r([]), 60_000)),
+  ]);
+  return result;
 }
 
 /**
@@ -334,8 +339,15 @@ async function collectFilesViaGit(dir: string): Promise<CollectedFile[] | null> 
       stdout: "pipe",
       stderr: "ignore",
     });
+    const code = await Promise.race([
+      proc.exited,
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 30_000)),
+    ]);
+    if (code === "timeout") {
+      proc.kill();
+      return null;
+    }
     const text = await new Response(proc.stdout).text();
-    const code = await proc.exited;
     if (code !== 0) return null;
 
     const files: CollectedFile[] = [];

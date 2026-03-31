@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { logBackgroundError } from "../../stores/errors.js";
 import { useWorkerStore } from "../../stores/workers.js";
 import type { RepoMapOptions, SymbolForSummary } from "../intelligence/repo-map.js";
 import type { HealthCheckResult } from "../intelligence/router.js";
@@ -64,7 +65,7 @@ export class IntelligenceClient extends WorkerClient {
   onScanComplete: ((success: boolean) => void) | null = null;
   onStaleSymbols: ((count: number) => void) | null = null;
 
-  private static readonly SCAN_TIMEOUT = 300_000; // 5 min for full repo scan
+  private static readonly SCAN_IDLE_TIMEOUT = 120_000; // 2 min without progress = stuck
 
   constructor(cwd: string) {
     const workerPath = IS_COMPILED
@@ -157,7 +158,28 @@ export class IntelligenceClient extends WorkerClient {
   // ── Core ───────────────────────────────────────────────────────────
 
   async scan(): Promise<void> {
-    await this.callWithTimeout<void>(IntelligenceClient.SCAN_TIMEOUT, "scan");
+    // Activity-based timeout: resets every time a progress event arrives.
+    // Large repos can take 30+ min — stays alive as long as progress is made.
+    // Only aborts if no progress for SCAN_IDLE_TIMEOUT (scan is stuck).
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const resetTimer = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        this.off("progress", resetTimer);
+      }, IntelligenceClient.SCAN_IDLE_TIMEOUT);
+    };
+    this.on("progress", resetTimer);
+    resetTimer();
+    try {
+      await this.call<void>("scan");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logBackgroundError("Soul Map", `Scan failed: ${msg}`);
+      throw err;
+    } finally {
+      if (timer) clearTimeout(timer);
+      this.off("progress", resetTimer);
+    }
   }
 
   async close(): Promise<void> {
@@ -215,11 +237,7 @@ export class IntelligenceClient extends WorkerClient {
   }
 
   async generateSemanticSummaries(maxSymbols?: number): Promise<number> {
-    return this.callWithTimeout<number>(
-      IntelligenceClient.SCAN_TIMEOUT,
-      "generateSemanticSummaries",
-      maxSymbols,
-    );
+    return this.callWithTimeout<number>(300_000, "generateSemanticSummaries", maxSymbols);
   }
 
   clearFreeSummaries(): void {
