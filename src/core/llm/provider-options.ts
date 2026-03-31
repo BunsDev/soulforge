@@ -281,33 +281,53 @@ function supportsAnthropicOptions(modelId: string): boolean {
 }
 
 function buildContextEdits(
-  config: ContextManagementConfig,
+  config: ContextManagementConfig | undefined,
   contextWindow: number,
   thinkingEnabled: boolean,
 ): unknown[] | null {
   const edits: unknown[] = [];
 
-  if (config.clearThinking && thinkingEnabled) {
+  // Default: clear old thinking blocks (keep last 2 turns) — enabled unless explicitly disabled
+  if (config?.clearThinking !== false && thinkingEnabled) {
     edits.push({
       type: "clear_thinking_20251015",
       keep: { type: "thinking_turns", value: 2 },
     });
   }
 
-  if (config.clearToolUses) {
+  // Default: clear old tool uses server-side — enabled unless explicitly disabled.
+  // Reduces what the model processes (faster responses, extends context window).
+  // Does NOT break prompt caching — we still send the same bytes, Anthropic edits server-side.
+  if (config?.clearToolUses !== false) {
     edits.push({
       type: "clear_tool_uses_20250919",
       trigger: { type: "input_tokens", value: 100_000 },
       keep: { type: "tool_uses", value: 6 },
       clearToolInputs: true,
-      clear_at_least: { type: "input_tokens", value: 5_000 },
+      clearAtLeast: { type: "input_tokens", value: 5_000 },
     });
   }
 
-  if (config.compact && contextWindow >= 200_000) {
+  // Server-side compaction: opt-in via config (disabled by default).
+  // Summarizes older context when approaching context limit. Uses pause_after_compaction
+  // so we can inject plan state / working context after the summary.
+  if (config?.compact && contextWindow >= 200_000) {
+    // Trigger at 50% of context window — high enough to avoid premature compaction,
+    // low enough to leave room for the summary + continued work.
+    // Minimum 150k tokens to avoid triggering on small context windows.
+    const trigger = Math.max(150_000, Math.floor(contextWindow * 0.5));
     edits.push({
       type: "compact_20260112",
-      trigger: { type: "input_tokens", value: Math.floor(contextWindow * 0.75) },
+      trigger: { type: "input_tokens", value: trigger },
+      instructions: [
+        "Write a concise summary of the conversation so far.",
+        "Focus on: files modified, key decisions made, current task progress, and next steps.",
+        "Preserve exact file paths, function names, and error messages.",
+        "Do NOT list what you plan to do — only what has already been done and what remains.",
+        "Do NOT dump internal state or repeat tool outputs.",
+        "Keep the summary under 2000 tokens.",
+        "Wrap in <summary></summary> tags.",
+      ].join("\n"),
     });
   }
 
@@ -365,10 +385,13 @@ function buildAnthropicOptions(
     opts.effort = config.performance.effort;
   }
 
-  // `speed` requires @ai-sdk/anthropic >= 4.x (current 3.x rejects it as unknown field)
-  // if (caps.speed && config.performance?.speed && config.performance.speed !== "off") {
-  //   opts.speed = config.performance.speed;
-  // }
+  if (caps.speed && config.performance?.speed && config.performance.speed !== "off") {
+    opts.speed = config.performance.speed;
+  }
+
+  if (config.performance?.toolStreaming === false) {
+    opts.toolStreaming = false;
+  }
 
   if (config.performance?.disableParallelToolUse) {
     opts.disableParallelToolUse = true;
@@ -378,7 +401,7 @@ function buildAnthropicOptions(
     opts.sendReasoning = false;
   }
 
-  if (caps.contextManagement && config.contextManagement) {
+  if (caps.contextManagement) {
     const contextWindow = getModelContextWindow(modelId);
     const edits = buildContextEdits(config.contextManagement, contextWindow, thinkingEnabled);
     if (edits) {

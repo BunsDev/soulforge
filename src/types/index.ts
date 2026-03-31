@@ -176,6 +176,8 @@ export interface PerformanceConfig {
   disableParallelToolUse?: boolean;
   /** Send reasoning content in requests. Default: true. */
   sendReasoning?: boolean;
+  /** Stream tool call arguments incrementally. Default: true. Set false to receive complete tool calls. */
+  toolStreaming?: boolean;
   /** OpenAI reasoning effort for o3/o4/gpt-5 models. "off" = not sent. */
   openaiReasoningEffort?: OpenAIReasoningEffort | "off";
   /** OpenAI service tier — "flex" saves 50% with latency trade-off. */
@@ -260,6 +262,10 @@ export interface AppConfig {
   contextManagement?: ContextManagementConfig;
   compaction?: CompactionConfig;
   codeExecution?: boolean;
+  /** Enable Anthropic's computer use tool (keyboard/mouse/screenshot). Claude-only. Default: false */
+  computerUse?: boolean;
+  /** Enable Anthropic's text editor tool (str_replace_based_edit_tool). Claude-only. Default: false */
+  anthropicTextEditor?: boolean;
   /** Enable web search tool for all LLMs. Always prompts for approval before searching. Default: true */
   webSearch?: boolean;
   /** Show vim keybinding hints in the editor panel. Default: true */

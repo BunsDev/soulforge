@@ -355,6 +355,8 @@ interface ForgeAgentOptions {
   providerOptions?: ProviderOptions;
   headers?: Record<string, string>;
   codeExecution?: boolean;
+  computerUse?: boolean;
+  anthropicTextEditor?: boolean;
   cwd?: string;
   sessionId?: string;
   sharedCacheRef?: SharedCacheRef;
@@ -383,6 +385,8 @@ export function createForgeAgent({
   providerOptions,
   headers,
   codeExecution,
+  computerUse,
+  anthropicTextEditor,
   cwd,
   sessionId,
   sharedCacheRef,
@@ -405,13 +409,16 @@ export function createForgeAgent({
   // Ensure ContextManager knows the model before building the system prompt
   // (family-specific prompt selection depends on this)
   if (modelId) contextManager.setActiveModel(modelId);
-  const canUseCodeExecution = codeExecution && isAnthropicNative(modelId);
+  const isAnthropic = isAnthropicNative(modelId);
+  const canUseCodeExecution = codeExecution && isAnthropic;
 
   const onDemandEnabled = !disabledTools?.has("request_tools") && !isRestricted && !planExecution;
   const activeDeferredTools = onDemandEnabled ? new Set<string>() : undefined;
 
   const directTools = buildTools(undefined, editorIntegration, onApproveWebSearch, {
     codeExecution: canUseCodeExecution,
+    computerUse: computerUse && isAnthropic,
+    anthropicTextEditor: anthropicTextEditor && isAnthropic,
     contextManager,
     agentSkills: !disabledTools?.has("skills"),
     webSearchModel,

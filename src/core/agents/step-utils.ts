@@ -200,6 +200,11 @@ function buildSummary(toolName: string, text: string, ctx?: SummaryContext): str
     const entryMatch = text.match(/(\d+) entries/);
     return `${tag} ${entryMatch ? entryMatch[1] : String(lineCount)} entries`;
   }
+  if (toolName === "fetch_page" || toolName === "web_search") {
+    const truncated = text.includes("page truncated");
+    const url = typeof args?.url === "string" ? ` ${args.url.slice(0, 80)}` : "";
+    return `${tag} ${String(lineCount)} lines${url}${truncated ? " (truncated — cached, try a sub-page URL)" : ""}`;
+  }
   // soul_find: NOT summarized — results are small (file paths) and compacting them
   // causes the agent to think it hasn't found anything, triggering loops
   if (toolName === "soul_analyze" || toolName === "soul_impact") {

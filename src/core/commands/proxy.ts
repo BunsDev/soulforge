@@ -7,7 +7,7 @@ import { sysMsg } from "./utils.js";
 
 async function cleanupProxySelections(ctx: CommandContext): Promise<void> {
   if (ctx.chat.activeModel.startsWith("proxy/")) {
-    ctx.chat.setActiveModel("none");
+    ctx.syncActiveModel("none");
     ctx.saveToScope({ defaultModel: "none" }, ctx.detectScope("defaultModel"));
     const { notifyProviderSwitch } = await import("../llm/provider.js");
     await notifyProviderSwitch("none");
@@ -200,6 +200,13 @@ async function handleProxyLogin(_input: string, ctx: CommandContext): Promise<vo
             label: ok ? "Authentication complete." : "Authentication failed.",
             color: ok ? getThemeTokens().success : getThemeTokens().brandSecondary,
           });
+          if (ok && ctx.chat.activeModel === "none") {
+            loginLines.push({
+              type: "text",
+              label: "Press Ctrl+L or type /model to select a proxy model.",
+              color: getThemeTokens().textSecondary,
+            });
+          }
           updatePopup([...loginLines]);
         })
         .catch((err: unknown) => {

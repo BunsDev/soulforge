@@ -3,7 +3,9 @@ import { parseHTML } from "linkedom";
 import type { ToolResult } from "../../types/index.js";
 import { getSecret } from "../secrets.js";
 
-const MAX_CONTENT_LENGTH = 16_000;
+// Generous limit — models are 200K+ context, so 120KB (~30K tokens) is fine.
+// Compaction prunes old fetch_page results anyway.
+const MAX_CONTENT_LENGTH = 120_000;
 
 function parseIpFromInt(n: number): string | null {
   if (n < 0 || n > 0xffffffff) return null;
@@ -223,7 +225,15 @@ function truncate(text: string, siteLinks: string[]): string {
       ? `\n\n## Available pages (use these URLs with fetch_page instead of guessing)\n${siteLinks.map((l) => `- ${l}`).join("\n")}`
       : "";
   const budget = MAX_CONTENT_LENGTH - linksSection.length;
-  const body = text.length > budget ? `${text.slice(0, budget)}\n\n[...]` : text;
+  if (text.length <= budget) return text + linksSection;
+
+  // Head+tail truncation: keep beginning (context/intro) and end (examples/API details)
+  const tailBudget = Math.min(Math.floor(budget * 0.25), 20_000);
+  const headBudget = budget - tailBudget;
+  const head = text.slice(0, headBudget);
+  const tail = text.slice(-tailBudget);
+  const omitted = text.length - headBudget - tailBudget;
+  const body = `${head}\n\n[... ${String(Math.round(omitted / 1024))}KB omitted — ${String(Math.round(text.length / 1024))}KB total. Showing first ${String(Math.round(headBudget / 1024))}KB + last ${String(Math.round(tailBudget / 1024))}KB. For specific sections, try a sub-page URL from the links below.]\n\n${tail}`;
   return body + linksSection;
 }
 

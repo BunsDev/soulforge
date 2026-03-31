@@ -213,8 +213,12 @@ export const InputBox = memo(function InputBox({
   }, [showAutocomplete, commandToken]);
   const hasMatches = matches.length > 0;
   // Nav active when input is still a prefix of at least one match (not past the command into args).
+  // For fuzzy matches (e.g. "/clear" → "/context clear"), allow nav when the input
+  // is a single token (no space after the slash-word) even if it's not a literal prefix.
+  const trimmedToken = commandToken.trimEnd();
   const isCommandPrefix =
-    hasMatches && matches.some((m) => m.cmd.startsWith(commandToken.trimEnd()));
+    hasMatches &&
+    (matches.some((m) => m.cmd.startsWith(trimmedToken)) || !trimmedToken.includes(" ", 1));
   const hasMatchesForNav = hasMatches && isCommandPrefix;
 
   const ghost =
@@ -278,7 +282,11 @@ export const InputBox = memo(function InputBox({
 
   const handleSubmit = useCallback(
     (input: string) => {
-      if (hasMatchesForNav && matches[selectedIdx]) {
+      // Auto-select top fuzzy match when input is a slash command with no exact handler.
+      // e.g. "/api" fuzzy-matches "/session export api" — select it instead of "command not found".
+      const useAutocomplete =
+        hasMatchesForNav || (showAutocomplete && hasMatches && matches[selectedIdx]);
+      if (useAutocomplete && matches[selectedIdx]) {
         const completed = matches[selectedIdx].cmd;
         if (completed === "/open" || completed === "/git branch") {
           const withSpace = `${completed} `;
@@ -326,6 +334,8 @@ export const InputBox = memo(function InputBox({
       isCompacting,
       onQueue,
       hasMatchesForNav,
+      showAutocomplete,
+      hasMatches,
     ],
   );
 

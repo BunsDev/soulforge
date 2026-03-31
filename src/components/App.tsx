@@ -855,6 +855,10 @@ export function App({
         detectScope,
         agentFeatures: effectiveConfig.agentFeatures,
         instructionFiles: effectiveConfig.instructionFiles,
+        syncActiveModel: (modelId: string) => {
+          chat.setActiveModel(modelId);
+          setActiveModelForHeader(modelId);
+        },
       });
     },
     [

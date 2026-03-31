@@ -14,7 +14,7 @@ import type {
 import type { ConfigScope } from "../layout/shared.js";
 import { CONFIG_SCOPES, Overlay, POPUP_BG, POPUP_HL, PopupRow } from "../layout/shared.js";
 
-const MAX_POPUP_WIDTH = 78;
+const MAX_POPUP_WIDTH = 88;
 const CHROME_ROWS = 7;
 
 type ItemType = "cycle" | "toggle" | "budget";
@@ -65,9 +65,33 @@ const CLAUDE_ITEMS: SettingItem[] = [
   {
     key: "speed",
     label: "Speed",
-    desc: "Opus only — 2.5x faster output (requires SDK update)",
+    desc: "Opus 4.6 — 2.5x faster output (standard | fast)",
     type: "cycle",
     options: ["off", "standard", "fast"],
+  },
+  {
+    key: "codeExecution",
+    label: "Code Execution",
+    desc: "Sandboxed code evaluation (Python/Bash)",
+    type: "toggle",
+  },
+  {
+    key: "computerUse",
+    label: "Computer Use",
+    desc: "Keyboard/mouse/screenshot control",
+    type: "toggle",
+  },
+  {
+    key: "anthropicTextEditor",
+    label: "Anthropic Text Editor",
+    desc: "Anthropic's str_replace editor tool",
+    type: "toggle",
+  },
+  {
+    key: "toolStreaming",
+    label: "Tool Streaming",
+    desc: "Stream tool call args incrementally (disable to debug)",
+    type: "toggle",
   },
   {
     key: "sendReasoning",
@@ -78,27 +102,20 @@ const CLAUDE_ITEMS: SettingItem[] = [
   {
     key: "compact",
     label: "Server Compaction",
-    desc: "API-level context compaction (200K+ models)",
+    desc: "Anthropic server-side context compaction (200K+ models)",
     type: "toggle",
   },
   {
     key: "clearToolUses",
     label: "Clear Tool Uses",
-    desc: "Auto-clear old tool results, keep last 10",
+    desc: "Server-side — auto-clear old tool results, keep last 6",
     type: "toggle",
   },
   {
     key: "clearThinking",
     label: "Clear Thinking",
-    desc: "Auto-clear old thinking blocks, keep last 5",
+    desc: "Server-side — auto-clear old thinking blocks, keep last 2",
     type: "toggle",
-  },
-  {
-    key: "pruning",
-    label: "Tool Result Pruning",
-    desc: "Compact old tool results — main | subagents | both | none",
-    type: "cycle",
-    options: ["none", "main", "subagents", "both"],
   },
 ];
 
@@ -127,16 +144,17 @@ const GENERAL_ITEMS: SettingItem[] = [
     type: "toggle",
   },
   {
-    key: "codeExecution",
-    label: "Code Execution",
-    desc: "Sandboxed code evaluation",
-    type: "toggle",
-  },
-  {
     key: "webSearch",
     label: "Web Search",
     desc: "Allow web search tool",
     type: "toggle",
+  },
+  {
+    key: "pruning",
+    label: "Tool Result Pruning",
+    desc: "Client-side — compact old tool results: main | subagents | both | none",
+    type: "cycle",
+    options: ["none", "main", "subagents", "both"],
   },
 ];
 
@@ -152,10 +170,13 @@ interface CurrentValues {
   effort: string;
   speed: "off" | "standard" | "fast";
   sendReasoning: boolean;
+  toolStreaming: boolean;
   disableParallelToolUse: boolean;
   openaiReasoningEffort: string;
   serviceTier: string;
   codeExecution: boolean;
+  computerUse: boolean;
+  anthropicTextEditor: boolean;
   webSearch: boolean;
   compact: boolean;
   clearToolUses: boolean;
@@ -169,10 +190,13 @@ const DEFAULTS: CurrentValues = {
   effort: "off",
   speed: "off",
   sendReasoning: false,
+  toolStreaming: true,
   disableParallelToolUse: false,
   openaiReasoningEffort: "off",
   serviceTier: "off",
   codeExecution: false,
+  computerUse: false,
+  anthropicTextEditor: false,
   webSearch: true,
   compact: false,
   clearToolUses: false,
@@ -189,12 +213,16 @@ function readValuesFromLayer(layer: Partial<AppConfig> | null): Partial<CurrentV
   if (layer.performance?.speed !== undefined) v.speed = layer.performance.speed;
   if (layer.performance?.sendReasoning !== undefined)
     v.sendReasoning = layer.performance.sendReasoning;
+  if (layer.performance?.toolStreaming !== undefined)
+    v.toolStreaming = layer.performance.toolStreaming;
   if (layer.performance?.disableParallelToolUse !== undefined)
     v.disableParallelToolUse = layer.performance.disableParallelToolUse;
   if (layer.performance?.openaiReasoningEffort !== undefined)
     v.openaiReasoningEffort = layer.performance.openaiReasoningEffort;
   if (layer.performance?.serviceTier !== undefined) v.serviceTier = layer.performance.serviceTier;
   if (layer.codeExecution !== undefined) v.codeExecution = layer.codeExecution;
+  if (layer.computerUse !== undefined) v.computerUse = layer.computerUse;
+  if (layer.anthropicTextEditor !== undefined) v.anthropicTextEditor = layer.anthropicTextEditor;
   if (layer.webSearch !== undefined) v.webSearch = layer.webSearch;
   if (layer.contextManagement?.compact !== undefined) v.compact = layer.contextManagement.compact;
   if (layer.contextManagement?.clearToolUses !== undefined)
@@ -226,6 +254,8 @@ function buildPatch(key: string, value: string | number | boolean): Partial<AppC
       return { performance: { speed: value as "off" | "standard" | "fast" } as PerformanceConfig };
     case "sendReasoning":
       return { performance: { sendReasoning: value as boolean } as PerformanceConfig };
+    case "toolStreaming":
+      return { performance: { toolStreaming: value as boolean } as PerformanceConfig };
     case "disableParallelToolUse":
       return { performance: { disableParallelToolUse: value as boolean } as PerformanceConfig };
     case "openaiReasoningEffort":
@@ -234,6 +264,10 @@ function buildPatch(key: string, value: string | number | boolean): Partial<AppC
       return { performance: { serviceTier: value as string } as PerformanceConfig };
     case "codeExecution":
       return { codeExecution: value as boolean };
+    case "computerUse":
+      return { computerUse: value as boolean };
+    case "anthropicTextEditor":
+      return { anthropicTextEditor: value as boolean };
     case "webSearch":
       return { webSearch: value as boolean };
     case "compact":
@@ -282,7 +316,7 @@ export function ProviderSettings({
   const containerRows = termRows - 2;
   const popupWidth = Math.min(MAX_POPUP_WIDTH, Math.floor(termCols * 0.85));
   const innerW = popupWidth - 2;
-  const maxVisible = Math.max(4, Math.floor(containerRows * 0.8) - CHROME_ROWS);
+  const maxVisible = Math.max(4, Math.floor(containerRows * 0.85) - CHROME_ROWS);
 
   const t = useTheme();
   const [tab, setTab] = useState<ProviderTab>("claude");

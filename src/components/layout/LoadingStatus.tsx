@@ -1,4 +1,4 @@
-import { fg as fgStyle, StyledText, type TextRenderable } from "@opentui/core";
+import { fg as fgStyle, StyledText, TextAttributes, type TextRenderable } from "@opentui/core";
 import { useTerminalDimensions } from "@opentui/react";
 import { useEffect, useRef } from "react";
 import { icon } from "../../core/icons.js";
@@ -203,9 +203,16 @@ export function LoadingStatus({ isLoading, isCompacting, queueCount }: LoadingSt
   return (
     <box paddingX={0} flexDirection="column" flexShrink={0}>
       {showBusy && (
-        <box height={1} paddingX={1}>
-          <text ref={scanRef} content={buildScanContent(scanPosRef.current, scanWidth)} />
-        </box>
+        <>
+          <box height={1} paddingX={1}>
+            <text fg={getThemeTokens().error} attributes={TextAttributes.BOLD}>
+              {icon("stop")} ^X to stop
+            </text>
+          </box>
+          <box height={1} paddingX={1}>
+            <text ref={scanRef} content={buildScanContent(scanPosRef.current, scanWidth)} />
+          </box>
+        </>
       )}
       <box height={1} flexDirection="row">
         {showBusy ? (

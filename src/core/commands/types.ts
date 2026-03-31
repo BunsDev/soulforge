@@ -59,6 +59,8 @@ export interface CommandContext {
   detectScope: (key: string) => ConfigScope;
   agentFeatures: AgentFeatures | undefined;
   instructionFiles: string[] | undefined;
+  /** Sync model change to both the active chat and the header UI */
+  syncActiveModel: (modelId: string) => void;
 }
 
 export type CommandHandler = (input: string, ctx: CommandContext) => void | Promise<void>;

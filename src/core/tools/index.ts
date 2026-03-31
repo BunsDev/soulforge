@@ -271,6 +271,8 @@ export function buildTools(
   onApproveWebSearch?: (query: string) => Promise<boolean>,
   opts?: {
     codeExecution?: boolean;
+    computerUse?: boolean;
+    anthropicTextEditor?: boolean;
     memoryManager?: MemoryManager;
     contextManager?: import("../context/manager.js").ContextManager;
     agentSkills?: boolean;
@@ -1533,6 +1535,69 @@ export function buildTools(
 
     ...(opts?.codeExecution
       ? { code_execution: createAnthropic().tools.codeExecution_20260120() }
+      : {}),
+
+    ...(opts?.computerUse
+      ? {
+          computer: createAnthropic().tools.computer_20251124({
+            displayWidthPx: 1920,
+            displayHeightPx: 1080,
+            execute: async ({ action, coordinate, text }) => {
+              return `Computer use action: ${action}${coordinate ? ` at (${coordinate.join(",")})` : ""}${text ? ` text: ${text}` : ""}`;
+            },
+          }),
+        }
+      : {}),
+
+    ...(opts?.anthropicTextEditor
+      ? {
+          str_replace_based_edit_tool: createAnthropic().tools.textEditor_20250728({
+            async execute({ command, path, old_str, new_str, insert_text, file_text, view_range }) {
+              // Delegate to our own file operations
+              const fs = await import("node:fs");
+              const absPath = path.startsWith("/") ? path : resolve(effectiveCwd, path);
+              switch (command) {
+                case "view": {
+                  if (!fs.existsSync(absPath)) return `File not found: ${path}`;
+                  const content = fs.readFileSync(absPath, "utf-8");
+                  const lines = content.split("\n");
+                  if (view_range && view_range.length >= 2) {
+                    const start = view_range[0] ?? 1;
+                    const end = view_range[1] ?? lines.length;
+                    return lines
+                      .slice(start - 1, end)
+                      .map((l, i) => `${start + i}\t${l}`)
+                      .join("\n");
+                  }
+                  return lines.map((l, i) => `${i + 1}\t${l}`).join("\n");
+                }
+                case "create": {
+                  fs.mkdirSync(resolve(absPath, ".."), { recursive: true });
+                  fs.writeFileSync(absPath, file_text ?? "", "utf-8");
+                  return `Created ${path}`;
+                }
+                case "str_replace": {
+                  if (!fs.existsSync(absPath)) return `File not found: ${path}`;
+                  const src = fs.readFileSync(absPath, "utf-8");
+                  if (!old_str || !src.includes(old_str)) return `old_str not found in ${path}`;
+                  fs.writeFileSync(absPath, src.replace(old_str, new_str ?? ""), "utf-8");
+                  return `Applied replacement in ${path}`;
+                }
+                case "insert": {
+                  if (!fs.existsSync(absPath)) return `File not found: ${path}`;
+                  const orig = fs.readFileSync(absPath, "utf-8");
+                  const origLines = orig.split("\n");
+                  const insertLine = view_range?.[0] ?? origLines.length;
+                  origLines.splice(insertLine, 0, insert_text ?? "");
+                  fs.writeFileSync(absPath, origLines.join("\n"), "utf-8");
+                  return `Inserted text at line ${insertLine} in ${path}`;
+                }
+                default:
+                  return `Unknown command: ${command}`;
+              }
+            },
+          }),
+        }
       : {}),
   };
 }

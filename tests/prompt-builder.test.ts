@@ -71,8 +71,8 @@ describe("family prompt content", () => {
     }
   });
 
-  test("claude prompt has zero-filler instructions", () => {
-    expect(CLAUDE_PROMPT).toContain("Skip summaries");
+  test("claude prompt has silent tool use instructions", () => {
+    expect(CLAUDE_PROMPT).toContain("Stay silent while gathering information");
   });
 
   test("openai prompt has agent framing", () => {
@@ -106,7 +106,7 @@ describe("buildSystemPrompt assembly", () => {
   test("includes family prompt for the model", () => {
     const prompt = buildSystemPrompt(baseOpts());
     expect(prompt).toContain("Forge");
-    expect(prompt).toContain("Skip summaries"); // claude-specific
+    expect(prompt).toContain("Silent tool use"); // claude-specific
   });
 
   test("includes tool guidance when repo map is ready", () => {
@@ -166,7 +166,7 @@ describe("buildSystemPrompt assembly", () => {
   test("uses correct family for different models", () => {
     const claude = buildSystemPrompt(baseOpts({ modelId: "anthropic/claude-opus-4" }));
     const openai = buildSystemPrompt(baseOpts({ modelId: "openai/gpt-4o" }));
-    expect(claude).toContain("Skip summaries"); // claude-specific
+    expect(claude).toContain("Silent tool use"); // claude-specific
     expect(openai).toContain("keep going until"); // openai-specific
   });
 });

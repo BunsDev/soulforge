@@ -25,7 +25,6 @@ const SHORTCUTS: ShortcutDef[] = [
   { k: "^N", ic: icon("ghost"), l: "New Session", ls: "New", tier: 3 },
   { k: "^P", ic: icon("clock_alt"), l: "Sessions", ls: "Sessions", tier: 3 },
   { k: "^T", ic: icon("tabs"), l: "Tab", ls: "Tab", tier: 3 },
-  { k: "^X", ic: icon("stop"), l: "Stop", ls: "Stop", tier: 3 },
   { k: "^C", ic: icon("quit"), l: "Quit", ls: "Quit", tier: 3 },
 ];
 
