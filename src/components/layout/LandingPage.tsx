@@ -49,59 +49,6 @@ function pickQuip(): string {
   return IDLE_QUIPS[Math.floor(Math.random() * IDLE_QUIPS.length)] as string;
 }
 
-function hexToRgb(hex: string): [number, number, number] {
-  let h = hex.slice(1);
-  if (h.length <= 4) h = [...h].map((c) => c + c).join("");
-  const n = Number.parseInt(h, 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
-
-function lerpHex(a: string, b: string, t: number): string {
-  const [r1, g1, b1] = hexToRgb(a);
-  const [r2, g2, b2] = hexToRgb(b);
-  const r = Math.round(r1 + (r2 - r1) * t);
-  const g = Math.round(g1 + (g2 - g1) * t);
-  const bl = Math.round(b1 + (b2 - b1) * t);
-  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${bl.toString(16).padStart(2, "0")}`;
-}
-
-/** Gradient wordmark line — supports garble mode for glitch-decode entrance. */
-function GradientLine({
-  text,
-  from,
-  to,
-  garbled,
-}: {
-  text: string;
-  from: string;
-  to: string;
-  garbled?: boolean;
-}) {
-  const len = text.length;
-  if (len === 0) return null;
-  const display = garbled ? garble(text) : text;
-
-  const segments: { chars: string; color: string }[] = [];
-  const CHUNK = 4;
-
-  for (let i = 0; i < len; i += CHUNK) {
-    const slice = display.slice(i, i + CHUNK);
-    const t = len > 1 ? i / (len - 1) : 0;
-    segments.push({ chars: slice, color: lerpHex(from, to, t) });
-  }
-
-  return (
-    <box flexDirection="row">
-      {segments.map((seg, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: stable gradient segments
-        <text key={i} fg={seg.color} attributes={BOLD}>
-          {seg.chars}
-        </text>
-      ))}
-    </box>
-  );
-}
-
 interface LandingPageProps {
   bootProviders: ProviderStatus[];
   bootPrereqs: PrerequisiteStatus[];
@@ -180,17 +127,12 @@ export function LandingPage({ bootProviders, bootPrereqs, activeModel }: Landing
 
         {!compact && <box height={1} />}
 
-        {/* ── Wordmark with glitch-decode ── */}
+        {/* ── Wordmark with glitch-decode (matches ShutdownSplash style) ── */}
         {showWordmark ? (
-          WORDMARK.map((line, i) => (
-            <GradientLine
-              // biome-ignore lint/suspicious/noArrayIndexKey: stable wordmark rows
-              key={i}
-              text={line}
-              from={tk.brand}
-              to={tk.brandSecondary}
-              garbled={wordmarkGarbled}
-            />
+          WORDMARK.map((line) => (
+            <text key={line} fg={tk.brand} attributes={BOLD}>
+              {wordmarkGarbled ? garble(line) : line}
+            </text>
           ))
         ) : (
           <text fg={tk.brand} attributes={BOLD}>
@@ -277,13 +219,10 @@ function StatusLine({
   return (
     <box flexDirection="row" gap={0} justifyContent="center">
       {providers.length > 0 ? (
-        <>
-          <text fg={tk.success}>{icon("check")} </text>
-          <text fg={tk.textMuted}>
-            {names.join(" · ")}
-            {overflow > 0 ? ` +${String(overflow)}` : ""}
-          </text>
-        </>
+        <text fg={tk.textMuted}>
+          {names.join(" · ")}
+          {overflow > 0 ? ` +${String(overflow)}` : ""}
+        </text>
       ) : (
         <text fg={tk.warning}>○ no providers configured</text>
       )}
