@@ -108,13 +108,13 @@ const CLAUDE_ITEMS: SettingItem[] = [
   {
     key: "clearToolUses",
     label: "Clear Tool Uses",
-    desc: "Server-side — auto-clear old tool results, keep last 6",
+    desc: "Server-side — clear old tool results at 65% context. ⚠️ Busts prompt cache when triggered",
     type: "toggle",
   },
   {
     key: "clearThinking",
     label: "Clear Thinking",
-    desc: "Server-side — auto-clear old thinking blocks, keep last 2",
+    desc: "Server-side — preserve all thinking blocks (maximizes cache hits)",
     type: "toggle",
   },
 ];

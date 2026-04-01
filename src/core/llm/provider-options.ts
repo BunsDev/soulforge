@@ -287,26 +287,32 @@ function buildContextEdits(
 ): unknown[] | null {
   const edits: unknown[] = [];
 
-  // Default: clear old thinking blocks (keep last 2 turns) — enabled unless explicitly disabled
+  // Default: preserve all thinking blocks for maximum cache hits.
+  // Clearing thinking busts the prompt cache at the clearing point.
+  // With keep: "all", thinking stays in context and the prefix stays stable.
+  // The API default (without this edit) only keeps the last 1 turn — sending
+  // keep: "all" explicitly overrides that to preserve the full prefix.
   if (config?.clearThinking !== false && thinkingEnabled) {
     edits.push({
       type: "clear_thinking_20251015",
-      keep: { type: "thinking_turns", value: 2 },
+      keep: "all",
     });
   }
 
-  // Default: clear old tool uses server-side — enabled unless explicitly disabled.
-  // Reduces what the model processes (faster responses, extends context window).
-  // Does NOT break prompt caching — we still send the same bytes, Anthropic edits server-side.
-  if (config?.clearToolUses !== false) {
-    // Scale trigger with context window — 30% of window, minimum 80k
-    const clearTrigger = Math.max(80_000, Math.floor(contextWindow * 0.3));
+  // Opt-in: clear old tool uses server-side. Off by default because it busts
+  // the prompt cache every time it fires. Only enable for very long sessions
+  // where context pressure outweighs cache savings.
+  if (config?.clearToolUses === true) {
+    // Trigger late — 65% of window, minimum 120k. Most conversations never hit this.
+    const clearTrigger = Math.max(120_000, Math.floor(contextWindow * 0.65));
+    // When we do bust cache, clear at least 40k tokens to make it worthwhile.
+    const clearAtLeast = Math.max(40_000, Math.floor(contextWindow * 0.2));
     edits.push({
       type: "clear_tool_uses_20250919",
       trigger: { type: "input_tokens", value: clearTrigger },
-      keep: { type: "tool_uses", value: 6 },
+      keep: { type: "tool_uses", value: 5 },
       clearToolInputs: true,
-      clearAtLeast: { type: "input_tokens", value: 5_000 },
+      clearAtLeast: { type: "input_tokens", value: clearAtLeast },
     });
   }
 
