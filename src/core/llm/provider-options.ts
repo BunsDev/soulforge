@@ -299,23 +299,25 @@ function buildContextEdits(
   // Reduces what the model processes (faster responses, extends context window).
   // Does NOT break prompt caching — we still send the same bytes, Anthropic edits server-side.
   if (config?.clearToolUses !== false) {
+    // Scale trigger with context window — 30% of window, minimum 80k
+    const clearTrigger = Math.max(80_000, Math.floor(contextWindow * 0.3));
     edits.push({
       type: "clear_tool_uses_20250919",
-      trigger: { type: "input_tokens", value: 100_000 },
+      trigger: { type: "input_tokens", value: clearTrigger },
       keep: { type: "tool_uses", value: 6 },
       clearToolInputs: true,
       clearAtLeast: { type: "input_tokens", value: 5_000 },
     });
   }
 
-  // Server-side compaction: opt-in via config (disabled by default).
+  // Server-side compaction (Anthropic): opt-in via config (disabled by default).
   // Summarizes older context when approaching context limit. Uses pause_after_compaction
   // so we can inject plan state / working context after the summary.
   if (config?.compact && contextWindow >= 200_000) {
-    // Trigger at 50% of context window — high enough to avoid premature compaction,
-    // low enough to leave room for the summary + continued work.
-    // Minimum 150k tokens to avoid triggering on small context windows.
-    const trigger = Math.max(150_000, Math.floor(contextWindow * 0.5));
+    // Trigger at 80% of context window — late enough to maximize usable context,
+    // early enough to leave room for the summary + continued work.
+    // Minimum 160k tokens to avoid triggering on small context windows.
+    const trigger = Math.max(160_000, Math.floor(contextWindow * 0.8));
     edits.push({
       type: "compact_20260112",
       trigger: { type: "input_tokens", value: trigger },
@@ -353,13 +355,19 @@ export const EPHEMERAL_CACHE: ProviderOptions = {
 export interface ProviderOptionsResult {
   providerOptions: ProviderOptions;
   headers: Record<string, string> | undefined;
+  /** Accurate context window (tokens) for the model — fetched from provider/OpenRouter cache. */
+  contextWindow: number;
 }
 
-function buildAnthropicOptions(
+async function buildAnthropicOptions(
   modelId: string,
   caps: EffectiveCaps,
   config: AppConfig,
-): { opts: Record<string, unknown>; headers: Record<string, string>; thinkingEnabled: boolean } {
+): Promise<{
+  opts: Record<string, unknown>;
+  headers: Record<string, string>;
+  thinkingEnabled: boolean;
+}> {
   // biome-ignore lint/suspicious/noExplicitAny: ProviderOptions inner shape is parsed by Zod at runtime
   const opts: Record<string, any> = {};
   const headers: Record<string, string> = {};
@@ -402,7 +410,7 @@ function buildAnthropicOptions(
   }
 
   if (caps.contextManagement) {
-    const contextWindow = getModelContextWindow(modelId);
+    const contextWindow = await getModelContextWindow(modelId);
     const edits = buildContextEdits(config.contextManagement, contextWindow, thinkingEnabled);
     if (edits) {
       opts.contextManagement = { edits };
@@ -444,13 +452,19 @@ function buildOpenAIOptions(
   return { opts };
 }
 
-export function buildProviderOptions(modelId: string, config: AppConfig): ProviderOptionsResult {
+export async function buildProviderOptions(
+  modelId: string,
+  config: AppConfig,
+): Promise<ProviderOptionsResult> {
   const caps = getEffectiveCaps(modelId);
   const providerOptions: Record<string, unknown> = {};
   let headers: Record<string, string> = {};
 
+  // Fetch accurate context window (triggers metadata fetch if cache empty)
+  const contextWindow = await getModelContextWindow(modelId);
+
   if (caps.anthropicOptions) {
-    const result = buildAnthropicOptions(modelId, caps, config);
+    const result = await buildAnthropicOptions(modelId, caps, config);
     if (Object.keys(result.opts).length > 0) {
       providerOptions.anthropic = result.opts;
     }
@@ -467,12 +481,13 @@ export function buildProviderOptions(modelId: string, config: AppConfig): Provid
   return {
     providerOptions: providerOptions as ProviderOptions,
     headers: Object.keys(headers).length > 0 ? headers : undefined,
+    contextWindow,
   };
 }
 
 export function degradeProviderOptions(modelId: string, level: number): ProviderOptionsResult {
   if (level >= 2 || !supportsAnthropicOptions(modelId)) {
-    return { providerOptions: {}, headers: undefined };
+    return { providerOptions: {}, headers: undefined, contextWindow: 0 };
   }
 
   const caps = getModelCapabilities(modelId);
@@ -486,6 +501,7 @@ export function degradeProviderOptions(modelId: string, level: number): Provider
   return {
     providerOptions: { anthropic: opts } as ProviderOptions,
     headers: undefined,
+    contextWindow: 0,
   };
 }
 

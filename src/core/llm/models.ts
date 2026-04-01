@@ -40,6 +40,7 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = getAllProviders().map((p) => (
 }));
 
 const DEFAULT_CONTEXT_TOKENS = 128_000;
+const METADATA_FETCH_TIMEOUT = 5_000;
 
 type ContextWindowSource = "api" | "openrouter" | "fallback";
 
@@ -49,14 +50,10 @@ interface ContextWindowResult {
 }
 
 /**
- * Get the context window size (in tokens) for a model ID.
- * Priority: provider API cache → OpenRouter cache → hardcoded patterns → default.
+ * Synchronous cache-only lookup — returns best-known value from populated caches.
+ * Used internally and as fallback when async fetch times out.
  */
-export function getModelContextWindow(modelId: string): number {
-  return getModelContextInfo(modelId).tokens;
-}
-
-export function getModelContextInfo(modelId: string): ContextWindowResult {
+export function getModelContextInfoSync(modelId: string): ContextWindowResult {
   const slashIdx = modelId.indexOf("/");
   const providerId = slashIdx >= 0 ? modelId.slice(0, slashIdx) : "";
   const model = slashIdx >= 0 ? modelId.slice(slashIdx + 1) : modelId;
@@ -90,6 +87,75 @@ export function getModelContextInfo(modelId: string): ContextWindowResult {
     }
   }
   return { tokens: DEFAULT_CONTEXT_TOKENS, source: "fallback" };
+}
+
+/**
+ * Get the context window size (in tokens) for a model ID.
+ * Async — fetches metadata if cache is empty, with 5s timeout.
+ * Falls back to hardcoded patterns on timeout/failure.
+ */
+export async function getModelContextWindow(modelId: string): Promise<number> {
+  return (await getModelContextInfo(modelId)).tokens;
+}
+
+/**
+ * Synchronous cache-only context window lookup.
+ * Returns best-known value from already-populated caches.
+ * Use only where async is impossible (e.g. React render). Prefer getModelContextWindow.
+ */
+export function getModelContextWindowSync(modelId: string): number {
+  return getModelContextInfoSync(modelId).tokens;
+}
+
+export async function getModelContextInfo(modelId: string): Promise<ContextWindowResult> {
+  // Fast path: check caches first (no async needed)
+  const cached = getModelContextInfoSync(modelId);
+  if (cached.source !== "fallback" || cached.tokens !== DEFAULT_CONTEXT_TOKENS) {
+    return cached;
+  }
+
+  // Cache miss on a non-hardcoded model — fetch metadata
+  try {
+    await ensureModelMetadata(modelId);
+  } catch {
+    // timeout or network failure — fall through to sync result
+  }
+
+  // Re-check after fetch
+  return getModelContextInfoSync(modelId);
+}
+
+/**
+ * Fetch and cache metadata for a model's provider. Deduped, 5s timeout.
+ * Safe to call multiple times — no-ops if cache is already populated.
+ */
+export async function ensureModelMetadata(modelId: string): Promise<void> {
+  const slashIdx = modelId.indexOf("/");
+  const providerId = slashIdx >= 0 ? modelId.slice(0, slashIdx) : "";
+  if (!providerId) return;
+
+  const provider = getProvider(providerId);
+
+  const doFetch = async () => {
+    if (provider?.grouped) {
+      // Grouped providers (openrouter, proxy, vercel_gateway, llmgateway)
+      // fetchGroupedModels is already deduped via cache check
+      await fetchGroupedModels(providerId);
+    } else if (provider) {
+      // Direct providers (anthropic, openai, google, xai, ollama)
+      await fetchProviderModels(providerId);
+    }
+    // Also fetch OpenRouter catalog as universal fallback
+    await fetchOpenRouterMetadata();
+  };
+
+  // Race against timeout — never block forever
+  await Promise.race([
+    doFetch(),
+    new Promise<void>((_, reject) =>
+      setTimeout(() => reject(new Error("metadata fetch timeout")), METADATA_FETCH_TIMEOUT),
+    ),
+  ]);
 }
 
 interface OpenRouterModel {

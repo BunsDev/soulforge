@@ -22,7 +22,11 @@ import {
 import type { ContextManager } from "../core/context/manager.js";
 import { getWorkspaceCoordinator } from "../core/coordination/WorkspaceCoordinator.js";
 import { setCoAuthorEnabled } from "../core/git/status.js";
-import { getModelContextWindow, getShortModelLabel } from "../core/llm/models.js";
+import {
+  getModelContextWindow,
+  getModelContextWindowSync,
+  getShortModelLabel,
+} from "../core/llm/models.js";
 import { resolveModel } from "../core/llm/provider.js";
 import {
   buildProviderOptions,
@@ -462,17 +466,38 @@ export function useChat({
   contextManagerRef.current = contextManager;
   const pinnedContextWindow = useRef(new Map<string, number>());
 
-  // Sync context window immediately on mount + on model change (not deferred to useEffect)
+  // Sync context window on mount + model change.
+  // Uses sync cache for instant render, then async fetch to correct if needed.
   const prevSyncedModel = useRef("");
   if (activeModel !== prevSyncedModel.current && activeModel !== "none") {
     prevSyncedModel.current = activeModel;
     const cached = pinnedContextWindow.current.get(activeModel);
-    const fresh = getModelContextWindow(activeModel);
+    const fresh = getModelContextWindowSync(activeModel);
     const windowTokens = cached ? Math.max(cached, fresh) : fresh;
     pinnedContextWindow.current.set(activeModel, windowTokens);
     contextManagerRef.current.setContextWindow(windowTokens);
     if (visible) useStatusBarStore.getState().setContextWindow(windowTokens);
   }
+
+  // Async fetch to get accurate context window — updates pinned value when resolved
+  const activeModelForEffect = activeModel;
+  useEffect(() => {
+    if (activeModelForEffect === "none") return;
+    let cancelled = false;
+    getModelContextWindow(activeModelForEffect).then((accurate) => {
+      if (cancelled) return;
+      const prev = pinnedContextWindow.current.get(activeModelForEffect) ?? 0;
+      const best = Math.max(prev, accurate);
+      if (best > prev) {
+        pinnedContextWindow.current.set(activeModelForEffect, best);
+        contextManagerRef.current.setContextWindow(best);
+        if (visibleRef.current) useStatusBarStore.getState().setContextWindow(best);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeModelForEffect]);
 
   const [tokenUsage, setTokenUsageRaw] = useState<TokenUsage>(
     initialState?.tokenUsage ?? { ...ZERO_USAGE },
@@ -721,7 +746,7 @@ export function useChat({
         const model = resolveModel(compactModelId);
         const modelLabel = getShortModelLabel(compactModelId);
 
-        const contextWindow = getModelContextWindow(activeModelRef.current);
+        const contextWindow = await getModelContextWindow(activeModelRef.current);
         const charsPerToken = 3;
         const systemChars = (await contextManager.getContextBreakdown()).reduce(
           (sum, s) => sum + s.chars,
@@ -806,7 +831,17 @@ export function useChat({
           return lines.join("\n");
         })();
 
-        const { providerOptions, headers } = buildProviderOptions(compactModelId, effectiveConfig);
+        const {
+          providerOptions,
+          headers,
+          contextWindow: compactCtxWindow,
+        } = await buildProviderOptions(compactModelId, effectiveConfig);
+        // Update pinned context window for the compaction model too
+        if (compactCtxWindow > 0) {
+          const prev = pinnedContextWindow.current.get(compactModelId) ?? 0;
+          if (compactCtxWindow > prev)
+            pinnedContextWindow.current.set(compactModelId, compactCtxWindow);
+        }
 
         let summary: string;
         let compactUsage: { inputTokens: number; outputTokens: number } | undefined;
@@ -1107,7 +1142,9 @@ export function useChat({
     if (effectiveConfig.compaction?.strategy === "disabled") return;
     if (activeModelRef.current === "none") return;
     if (contextTokens <= 0) return;
-    const ctxWindow = getModelContextWindow(activeModelRef.current);
+    const ctxWindow =
+      pinnedContextWindow.current.get(activeModelRef.current) ??
+      getModelContextWindowSync(activeModelRef.current);
     const pct = contextTokens / ctxWindow;
     const triggerAt =
       effectiveConfig.compaction?.triggerThreshold ??
@@ -1498,7 +1535,21 @@ export function useChat({
         const effectiveWebSearchModel = webSearchEnabled ? webSearchModel : undefined;
 
         // Build providerOptions (thinking, effort, context management)
-        const { providerOptions, headers } = buildProviderOptions(modelId, effectiveConfig);
+        const {
+          providerOptions,
+          headers,
+          contextWindow: fetchedCtxWindow,
+        } = await buildProviderOptions(modelId, effectiveConfig);
+        // Propagate accurate context window from provider metadata
+        if (fetchedCtxWindow > 0) {
+          const prev = pinnedContextWindow.current.get(modelId) ?? 0;
+          const best = Math.max(prev, fetchedCtxWindow);
+          if (best > prev) {
+            pinnedContextWindow.current.set(modelId, best);
+            contextManagerRef.current.setContextWindow(best);
+            if (visibleRef.current) useStatusBarStore.getState().setContextWindow(best);
+          }
+        }
 
         steeringAbortedRef.current = false;
         /**

@@ -162,11 +162,71 @@ export async function performUpgrade(
   });
 }
 
+// ── Changelog types ──────────────────────────────────────────────────
+
+export interface ChangelogCommit {
+  type: "feat" | "fix" | "perf" | "refactor" | "docs" | "other";
+  scope?: string;
+  message: string;
+  breaking?: boolean;
+}
+
+export interface ChangelogRelease {
+  version: string;
+  date?: string;
+  commits: ChangelogCommit[];
+}
+
+function parseReleaseBody(body: string): ChangelogCommit[] {
+  const commits: ChangelogCommit[] = [];
+  const lines = body.split("\n");
+  let currentGroup: ChangelogCommit["type"] = "other";
+
+  for (const line of lines) {
+    // Detect group headers like "### Features", "### Bug Fixes"
+    const groupMatch = line.match(/^###\s+(.+)/);
+    if (groupMatch) {
+      const g = (groupMatch[1] ?? "").trim().toLowerCase();
+      if (g.includes("feature")) currentGroup = "feat";
+      else if (g.includes("bug") || g.includes("fix")) currentGroup = "fix";
+      else if (g.includes("perf")) currentGroup = "perf";
+      else if (g.includes("refactor")) currentGroup = "refactor";
+      else if (g.includes("doc")) currentGroup = "docs";
+      else currentGroup = "other";
+      continue;
+    }
+
+    // Parse commit lines like "- **scope**: message" or "- message"
+    const scopedMatch = line.match(/^\s*-\s+\*\*([^*]+)\*\*:\s*(.+)/);
+    const plainMatch = !scopedMatch && line.match(/^\s*-\s+(.+)/);
+
+    if (scopedMatch) {
+      const breaking = scopedMatch[2]?.includes("[**BREAKING**]") ?? false;
+      commits.push({
+        type: currentGroup,
+        scope: scopedMatch[1]?.trim(),
+        message: (scopedMatch[2] ?? "").replace(/\s*\[\*\*BREAKING\*\*\]/, "").trim(),
+        ...(breaking && { breaking: true }),
+      });
+    } else if (plainMatch) {
+      const msg = plainMatch[1] ?? "";
+      const breaking = msg.includes("[**BREAKING**]");
+      commits.push({
+        type: currentGroup,
+        message: msg.replace(/\s*\[\*\*BREAKING\*\*\]/, "").trim(),
+        ...(breaking && { breaking: true }),
+      });
+    }
+  }
+  return commits;
+}
+
 // ── Version cache ────────────────────────────────────────────────────
 
 interface VersionCache {
   latest: string;
-  changelog: string[];
+  changelog: ChangelogRelease[];
+  currentRelease: ChangelogRelease | null;
   checkedAt: number;
 }
 
@@ -231,12 +291,75 @@ export function isNewer(latest: string, current: string): boolean {
   return false;
 }
 
+// ── Fetch changelog from GitHub releases ─────────────────────────────
+
+const GH_REPO = "ProxySoul/soulforge";
+
+interface GitHubChangelogResult {
+  changelog: ChangelogRelease[];
+  currentRelease: ChangelogRelease | null;
+  changelogError: boolean;
+}
+
+async function fetchGitHubChangelog(
+  current: string,
+  latest: string,
+): Promise<GitHubChangelogResult> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(`https://api.github.com/repos/${GH_REPO}/releases?per_page=15`, {
+      signal: controller.signal,
+      headers: { Accept: "application/vnd.github+json" },
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) return { changelog: [], currentRelease: null, changelogError: true };
+
+    const releases = (await res.json()) as Array<{
+      tag_name: string;
+      published_at?: string;
+      body?: string;
+    }>;
+
+    const changelog: ChangelogRelease[] = [];
+    let currentRelease: ChangelogRelease | null = null;
+
+    for (const rel of releases) {
+      const ver = rel.tag_name.replace(/^v/, "");
+      const commits = rel.body ? parseReleaseBody(rel.body) : [];
+      const entry: ChangelogRelease = {
+        version: ver,
+        date: rel.published_at?.split("T")[0],
+        commits,
+      };
+
+      // Capture the current version's release notes
+      if (ver === current) {
+        currentRelease = entry;
+        continue;
+      }
+
+      // Only include versions newer than current, up to latest
+      if (!isNewer(ver, current)) continue;
+      if (isNewer(ver, latest)) continue;
+      changelog.push(entry);
+    }
+
+    return { changelog, currentRelease, changelogError: false };
+  } catch {
+    return { changelog: [], currentRelease: null, changelogError: true };
+  }
+}
+
 // ── Fetch latest version from npm ────────────────────────────────────
 
 export interface VersionCheckResult {
   current: string;
   latest: string | null;
-  changelog: string[];
+  changelog: ChangelogRelease[];
+  currentRelease: ChangelogRelease | null;
+  changelogError: boolean;
   updateAvailable: boolean;
 }
 
@@ -250,11 +373,14 @@ export async function checkForUpdate(): Promise<VersionCheckResult> {
       current,
       latest: cached.latest,
       changelog: cached.changelog,
+      currentRelease: cached.currentRelease ?? null,
+      changelogError: false,
       updateAvailable: isNewer(cached.latest, current),
     };
   }
 
   try {
+    // Fetch latest version from npm
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
     const res = await fetch(`https://registry.npmjs.org/${PKG_NAME}`, {
@@ -263,44 +389,57 @@ export async function checkForUpdate(): Promise<VersionCheckResult> {
     });
     clearTimeout(timeout);
 
-    if (!res.ok) return { current, latest: null, changelog: [], updateAvailable: false };
+    if (!res.ok)
+      return {
+        current,
+        latest: null,
+        changelog: [],
+        currentRelease: null,
+        changelogError: false,
+        updateAvailable: false,
+      };
 
     const data = (await res.json()) as {
       "dist-tags"?: { latest?: string };
-      versions?: Record<string, { description?: string }>;
     };
 
     const latest = data["dist-tags"]?.latest ?? null;
-    if (!latest) return { current, latest: null, changelog: [], updateAvailable: false };
+    if (!latest)
+      return {
+        current,
+        latest: null,
+        changelog: [],
+        currentRelease: null,
+        changelogError: false,
+        updateAvailable: false,
+      };
 
-    // Build a simple changelog from version descriptions or just list versions
-    const changelog: string[] = [];
-    if (data.versions) {
-      const versions = Object.keys(data.versions)
-        .filter((v) => isNewer(v, current))
-        .sort((a, b) => {
-          const pa = parseVersion(a);
-          const pb = parseVersion(b);
-          for (let i = 0; i < 3; i++) {
-            if ((pb[i] ?? 0) !== (pa[i] ?? 0)) return (pb[i] ?? 0) - (pa[i] ?? 0);
-          }
-          return 0;
-        })
-        .slice(0, 10);
-      for (const v of versions) {
-        changelog.push(`v${v}`);
-      }
+    // Fetch changelog from GitHub releases
+    const { changelog, currentRelease, changelogError } = await fetchGitHubChangelog(
+      current,
+      latest,
+    );
+
+    if (!changelogError) {
+      writeCache({ latest, changelog, currentRelease, checkedAt: Date.now() });
     }
-
-    writeCache({ latest, changelog, checkedAt: Date.now() });
 
     return {
       current,
       latest,
       changelog,
+      currentRelease,
+      changelogError,
       updateAvailable: isNewer(latest, current),
     };
   } catch {
-    return { current, latest: null, changelog: [], updateAvailable: false };
+    return {
+      current,
+      latest: null,
+      changelog: [],
+      currentRelease: null,
+      changelogError: false,
+      updateAvailable: false,
+    };
   }
 }

@@ -58,7 +58,7 @@ async function setupAgent(
   }
 
   const model = resolveModel(modelId);
-  const providerOpts = buildProviderOptions(modelId, merged);
+  const providerOpts = await buildProviderOptions(modelId, merged);
 
   const repoMapDisabled =
     merged.repoMap === false || opts.noRepomap || process.env.SOULFORGE_NO_REPOMAP === "1";
@@ -69,6 +69,8 @@ async function setupAgent(
     },
     { repoMapEnabled: !repoMapDisabled },
   );
+  // Set accurate context window from provider metadata (avoids 200k default for 1M+ models)
+  contextManager.setContextWindow(providerOpts.contextWindow);
   if (!repoMapDisabled) {
     const REPO_MAP_TIMEOUT = 15_000;
     if (!contextManager.isRepoMapReady()) {

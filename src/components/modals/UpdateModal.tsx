@@ -2,9 +2,15 @@ import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { icon } from "../../core/icons.js";
-import { useTheme } from "../../core/theme/index.js";
+import { type ThemeTokens, useTheme } from "../../core/theme/index.js";
 import { garble } from "../../core/utils/splash.js";
-import { dismissVersion, getUpgradeCommand, performUpgrade } from "../../core/version.js";
+import {
+  type ChangelogCommit,
+  type ChangelogRelease,
+  dismissVersion,
+  getUpgradeCommand,
+  performUpgrade,
+} from "../../core/version.js";
 import { useVersionStore } from "../../stores/version.js";
 import { Overlay, POPUP_BG, PopupRow } from "../layout/shared.js";
 
@@ -37,6 +43,16 @@ const LATEST_QUIPS = [
   "The scrolls confirm: you're up to date.",
   "No new runes to inscribe today.",
   "Your version is so fresh it's still warm.",
+];
+
+const CHANGELOG_ERROR_QUIPS = [
+  "The scroll courier didn't make it — changelog unavailable",
+  "The raven carrying the changelog was lost to the void",
+  "The archive gates are sealed — try again later",
+  "The changelog runes could not be summoned",
+  "The forge's scrying pool is clouded — no changelog today",
+  "The record keeper is away from the anvil",
+  "The changelog embers have gone cold — GitHub unreachable",
 ];
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -74,6 +90,105 @@ function Gap({ w, bg, n = 1 }: { w: number; bg: string; n?: number }) {
   return <>{rows}</>;
 }
 
+const TYPE_BADGE: Record<
+  ChangelogCommit["type"],
+  {
+    label: string;
+    color: keyof ThemeTokens;
+  }
+> = {
+  feat: { label: "feat", color: "success" },
+  fix: { label: "fix", color: "brandSecondary" },
+  perf: { label: "perf", color: "brandAlt" },
+  refactor: { label: "refac", color: "textSecondary" },
+  docs: { label: "docs", color: "textMuted" },
+  other: { label: "misc", color: "textMuted" },
+};
+
+function ChangelogSection({
+  releases,
+  maxLines,
+  iw,
+  bg,
+  t,
+}: {
+  releases: ChangelogRelease[];
+  maxLines: number;
+  iw: number;
+  bg: string;
+  t: ThemeTokens;
+}) {
+  // Flatten all commits across releases into renderable rows
+  const rows: Array<
+    { type: "header"; version: string; date?: string } | { type: "commit"; commit: ChangelogCommit }
+  > = [];
+  for (const rel of releases) {
+    rows.push({ type: "header", version: rel.version, date: rel.date });
+    for (const c of rel.commits) {
+      rows.push({ type: "commit", commit: c });
+    }
+  }
+
+  const visible = rows.slice(0, maxLines);
+  const remaining = rows.length - visible.length;
+
+  return (
+    <>
+      <box flexDirection="column" height={Math.min(rows.length, maxLines)} overflow="hidden">
+        {visible.map((row, i) => {
+          if (row.type === "header") {
+            return (
+              <PopupRow key={String(i)} w={iw}>
+                <text bg={bg}>
+                  <span fg={t.brand} attributes={BOLD}>
+                    {"  "}v{row.version}
+                  </span>
+                  {row.date && (
+                    <span fg={t.textFaint} attributes={DIM}>
+                      {" "}
+                      {row.date}
+                    </span>
+                  )}
+                </text>
+              </PopupRow>
+            );
+          }
+          const badge = TYPE_BADGE[row.commit.type] ?? TYPE_BADGE.other;
+          const scope = row.commit.scope ? `(${row.commit.scope}) ` : "";
+          const breakingMark = row.commit.breaking ? " !!" : "";
+          return (
+            <PopupRow key={String(i)} w={iw}>
+              <text bg={bg}>
+                <span fg={t[badge.color] ?? t.textMuted}>
+                  {"    "}
+                  {badge.label.padEnd(5)}
+                </span>
+                <span fg={t.textFaint}>{" │ "}</span>
+                {row.commit.breaking ? (
+                  <span fg={t.brandSecondary} attributes={BOLD}>
+                    {trunc(`${scope}${row.commit.message}${breakingMark}`, iw - 16)}
+                  </span>
+                ) : (
+                  <span fg={t.textSecondary}>
+                    {trunc(`${scope}${row.commit.message}`, iw - 16)}
+                  </span>
+                )}
+              </text>
+            </PopupRow>
+          );
+        })}
+      </box>
+      {remaining > 0 && (
+        <PopupRow w={iw}>
+          <text bg={bg} fg={t.textFaint} attributes={DIM}>
+            {"      "}… and {remaining} more
+          </text>
+        </PopupRow>
+      )}
+    </>
+  );
+}
+
 // ── Component ──────────────────────────────────────────────────────
 
 interface Props {
@@ -85,7 +200,15 @@ interface Props {
 export function UpdateModal({ visible, onClose, onRestart }: Props) {
   const t = useTheme();
   const { width: termCols, height: termRows } = useTerminalDimensions();
-  const { current, latest, changelog, installMethod, updateAvailable } = useVersionStore();
+  const {
+    current,
+    latest,
+    changelog,
+    currentRelease,
+    changelogError,
+    installMethod,
+    updateAvailable,
+  } = useVersionStore();
   const [copied, setCopied] = useState(false);
   const [phase, setPhase] = useState<Phase>("info");
   const [quipIdx, setQuipIdx] = useState(0);
@@ -111,9 +234,9 @@ export function UpdateModal({ visible, onClose, onRestart }: Props) {
     return () => clearInterval(timer);
   }, [visible, tick]);
 
-  const pw = Math.min(60, Math.floor(termCols * 0.85));
+  const pw = Math.min(76, Math.floor(termCols * 0.9));
   const iw = pw - 2;
-  const maxChangelog = Math.max(3, Math.floor(termRows * 0.3) - 8);
+  const maxChangelog = Math.max(6, Math.floor(termRows * 0.5) - 10);
   const logH = Math.max(3, Math.min(6, Math.floor(termRows * 0.2)));
   const bg = POPUP_BG;
 
@@ -198,6 +321,16 @@ export function UpdateModal({ visible, onClose, onRestart }: Props) {
         setTimeout(() => setCopied(false), 2000);
       } catch {}
     }
+    if (evt.name === "g") {
+      const tag = updateAvailable ? latest : current;
+      const url = tag
+        ? `https://github.com/ProxySoul/soulforge/releases/tag/v${tag}`
+        : "https://github.com/ProxySoul/soulforge/releases";
+      try {
+        const cmd = process.platform === "darwin" ? "open" : "xdg-open";
+        Bun.spawn([cmd, url], { stdio: ["ignore", "ignore", "ignore"] });
+      } catch {}
+    }
   });
 
   if (!visible) return null;
@@ -262,11 +395,11 @@ export function UpdateModal({ visible, onClose, onRestart }: Props) {
             <text bg={bg} truncate>
               <span fg={t.success} attributes={BOLD}>
                 {" "}
-                {arrowIc} [y]
+                {arrowIc} {"<Y>"}
               </span>
               <span fg={t.textMuted}> restart now</span>
               <span fg={t.textFaint}>{"    "}</span>
-              <span fg={t.textFaint}>[n]</span>
+              <span fg={t.textFaint}>{"<N>"}</span>
               <span fg={t.textMuted}> later</span>
             </text>
           </PopupRow>
@@ -385,7 +518,7 @@ export function UpdateModal({ visible, onClose, onRestart }: Props) {
           <PopupRow w={iw}>
             <text bg={bg} fg={t.textMuted}>
               {" "}
-              [esc] back
+              {"<Esc>"} back
             </text>
           </PopupRow>
         </box>
@@ -396,6 +529,8 @@ export function UpdateModal({ visible, onClose, onRestart }: Props) {
   // ── Info: no update available (already on latest) ────────────────
   if (!updateAvailable) {
     const quip = LATEST_QUIPS[Math.floor(Date.now() / 60000) % LATEST_QUIPS.length] ?? "";
+    const clErrorQuip =
+      CHANGELOG_ERROR_QUIPS[Math.floor(Date.now() / 60000) % CHANGELOG_ERROR_QUIPS.length] ?? "";
 
     return (
       <Overlay>
@@ -442,20 +577,63 @@ export function UpdateModal({ visible, onClose, onRestart }: Props) {
             </text>
           </PopupRow>
           <Gap w={iw} bg={bg} />
+
+          {/* Current version changelog */}
+          {currentRelease && currentRelease.commits.length > 0 ? (
+            <>
+              <Hr w={iw} bg={bg} fg={t.textFaint} />
+              <Gap w={iw} bg={bg} />
+              <PopupRow w={iw}>
+                <text bg={bg} fg={t.brandAlt} attributes={BOLD}>
+                  {"  "}What's in this version
+                </text>
+              </PopupRow>
+              <Gap w={iw} bg={bg} />
+              <ChangelogSection
+                releases={[currentRelease]}
+                maxLines={maxChangelog}
+                iw={iw}
+                bg={bg}
+                t={t}
+              />
+              <Gap w={iw} bg={bg} />
+            </>
+          ) : changelogError ? (
+            <>
+              <Hr w={iw} bg={bg} fg={t.textFaint} />
+              <Gap w={iw} bg={bg} />
+              <PopupRow w={iw}>
+                <text bg={bg} fg={t.error} attributes={ITALIC}>
+                  {"  "}
+                  {icon("warning")} {clErrorQuip}
+                </text>
+              </PopupRow>
+              <Gap w={iw} bg={bg} />
+            </>
+          ) : (
+            <>
+              <Hr w={iw} bg={bg} fg={t.textFaint} />
+              <Gap w={iw} bg={bg} />
+              <PopupRow w={iw}>
+                <text bg={bg} fg={t.brandAlt} attributes={ITALIC}>
+                  {"  "}
+                  {quip}
+                </text>
+              </PopupRow>
+              <Gap w={iw} bg={bg} />
+            </>
+          )}
+
           <Hr w={iw} bg={bg} fg={t.textFaint} />
-          <Gap w={iw} bg={bg} />
           <PopupRow w={iw}>
-            <text bg={bg} fg={t.brandAlt} attributes={ITALIC}>
-              {"  "}
-              {quip}
-            </text>
-          </PopupRow>
-          <Gap w={iw} bg={bg} />
-          <Hr w={iw} bg={bg} fg={t.textFaint} />
-          <PopupRow w={iw}>
-            <text bg={bg} fg={t.textFaint}>
-              {" "}
-              [esc] close
+            <text bg={bg} truncate>
+              <span fg={t.brandDim}>
+                {" "}
+                {icon("globe")} {"<G>"}
+              </span>
+              <span fg={t.textFaint}> view full changelog on GitHub</span>
+              <span fg={t.textFaint}>{"  "}</span>
+              <span fg={t.textFaint}>{"<Esc>"}</span>
             </text>
           </PopupRow>
         </box>
@@ -521,40 +699,37 @@ export function UpdateModal({ visible, onClose, onRestart }: Props) {
         <Gap w={iw} bg={bg} />
 
         {/* Changelog */}
-        {changelog.length > 0 && (
+        {changelog.length > 0 ? (
           <>
             <Hr w={iw} bg={bg} fg={t.textFaint} />
             <Gap w={iw} bg={bg} />
             <PopupRow w={iw}>
               <text bg={bg} fg={t.brandAlt} attributes={BOLD}>
-                {"  "}Versions since yours
+                {"  "}What's new
               </text>
             </PopupRow>
             <Gap w={iw} bg={bg} />
-            <box
-              flexDirection="column"
-              height={Math.min(changelog.length, maxChangelog)}
-              overflow="hidden"
-            >
-              {changelog.slice(0, maxChangelog).map((entry, i) => (
-                <PopupRow key={String(i)} w={iw}>
-                  <text bg={bg}>
-                    <span fg={t.brand}>{"    ◆ "}</span>
-                    <span fg={t.textSecondary}>{trunc(entry, iw - 10)}</span>
-                  </text>
-                </PopupRow>
-              ))}
-            </box>
-            {changelog.length > maxChangelog && (
-              <PopupRow w={iw}>
-                <text bg={bg} fg={t.textFaint}>
-                  {"      "}… and {changelog.length - maxChangelog} more
-                </text>
-              </PopupRow>
-            )}
+            <ChangelogSection releases={changelog} maxLines={maxChangelog} iw={iw} bg={bg} t={t} />
             <Gap w={iw} bg={bg} />
           </>
-        )}
+        ) : changelogError ? (
+          <>
+            <Hr w={iw} bg={bg} fg={t.textFaint} />
+            <Gap w={iw} bg={bg} />
+            <PopupRow w={iw}>
+              <text bg={bg} fg={t.error} attributes={ITALIC}>
+                {"  "}
+                {icon("warning")}{" "}
+                {
+                  CHANGELOG_ERROR_QUIPS[
+                    Math.floor(Date.now() / 60000) % CHANGELOG_ERROR_QUIPS.length
+                  ]
+                }
+              </text>
+            </PopupRow>
+            <Gap w={iw} bg={bg} />
+          </>
+        ) : null}
 
         {/* Upgrade command */}
         <Hr w={iw} bg={bg} fg={t.textFaint} />
@@ -586,17 +761,26 @@ export function UpdateModal({ visible, onClose, onRestart }: Props) {
               <>
                 <span fg={t.success} attributes={BOLD}>
                   {" "}
-                  {arrowIc} [u]
+                  {arrowIc} {"<U>"}
                 </span>
                 <span fg={t.textMuted}> upgrade</span>
                 <span fg={t.textFaint}>{"  "}</span>
               </>
             )}
-            <span fg={copied ? t.success : t.textFaint}>{copied ? " ✓ copied" : " [c] copy"}</span>
+            <span fg={copied ? t.success : t.textFaint}>{copied ? " ✓ copied" : " <C> copy"}</span>
             <span fg={t.textFaint}>{"  "}</span>
-            <span fg={t.textFaint}>[d] dismiss</span>
+            <span fg={t.textFaint}>{"<D>"} dismiss</span>
             <span fg={t.textFaint}>{"  "}</span>
-            <span fg={t.textFaint}>[esc]</span>
+            <span fg={t.textFaint}>{"<Esc>"}</span>
+          </text>
+        </PopupRow>
+        <PopupRow w={iw}>
+          <text bg={bg} truncate>
+            <span fg={t.brandDim}>
+              {" "}
+              {icon("globe")} {"<G>"}
+            </span>
+            <span fg={t.textFaint}> view full changelog on GitHub</span>
           </text>
         </PopupRow>
       </box>

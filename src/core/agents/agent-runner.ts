@@ -308,7 +308,7 @@ export async function runAgentTask(
 
     try {
       attemptsMade = attempt + 1;
-      const { agent } = createAgent(task, models, bus, parentToolCallId);
+      const { agent } = await createAgent(task, models, bus, parentToolCallId);
       const callbacks = buildStepCallbacks(parentToolCallId, task.agentId, selectedModelId);
 
       // biome-ignore lint/suspicious/noExplicitAny: agent.generate result type varies with Output generic
@@ -423,7 +423,7 @@ export async function runAgentTask(
 
           for (let retryAttempt = 0; retryAttempt < MAX_NO_EDIT_RETRIES; retryAttempt++) {
             try {
-              const { agent: retryAgent } = createAgent(task, models, bus, parentToolCallId);
+              const { agent: retryAgent } = await createAgent(task, models, bus, parentToolCallId);
               const retryCallbacks = buildStepCallbacks(
                 parentToolCallId,
                 task.agentId,

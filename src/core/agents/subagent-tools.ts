@@ -222,13 +222,13 @@ export function autoPostCompletionSummary(bus: AgentBus, task: AgentTask): void 
   });
 }
 
-export function createAgent(
+export async function createAgent(
   task: AgentTask,
   models: SubagentModels,
   bus: AgentBus,
   parentToolCallId?: string,
   // biome-ignore lint/suspicious/noExplicitAny: explore/code agents have different tool generics
-): { agent: any; modelId: string; tier: string } {
+): Promise<{ agent: any; modelId: string; tier: string }> {
   const useExplore =
     task.role === "explore" || task.role === "investigate" || models.readOnly === true;
   const { model } = selectModel(task, models);
@@ -255,7 +255,7 @@ export function createAgent(
     subagentProviderOptions = patched as ProviderOptions;
   }
 
-  const contextWindow = getModelContextWindow(modelId);
+  const contextWindow = await getModelContextWindow(modelId);
   const forgeInstructions = useMiniForge ? models.forgeInstructions : undefined;
 
   // miniForge: use forge's tool definitions (guarded by role) for cache prefix hits.

@@ -79,7 +79,7 @@ export async function runDesloppify(
 
     bus.registerTasks([desloppifyTask]);
 
-    const { agent } = createAgent(
+    const { agent } = await createAgent(
       { ...desloppifyTask, tier: "standard" },
       { ...models, codingModel: models.desloppifyModel },
       bus,
@@ -266,7 +266,7 @@ export async function runVerifier(
 
     bus.registerTasks([verifyTask]);
 
-    const { agent } = createAgent(
+    const { agent } = await createAgent(
       verifyTask,
       { ...models, explorationModel: reviewModel },
       bus,

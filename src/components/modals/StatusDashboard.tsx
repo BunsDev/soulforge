@@ -5,7 +5,8 @@ import type { ContextManager } from "../../core/context/manager.js";
 import { getNvimInstance } from "../../core/editor/instance.js";
 import { icon } from "../../core/icons.js";
 import { getIntelligenceStatus } from "../../core/intelligence/index.js";
-import { getModelContextInfo, getShortModelLabel } from "../../core/llm/models.js";
+import { getModelContextInfoSync, getShortModelLabel } from "../../core/llm/models.js";
+import { isAnthropicNative } from "../../core/llm/provider-options.js";
 import { getProxyPid } from "../../core/proxy/lifecycle.js";
 import { getTerminalStats } from "../../core/terminal/manager.js";
 import { useTheme } from "../../core/theme/index.js";
@@ -222,7 +223,8 @@ export function StatusDashboard({
   const contextLines = useMemo(() => {
     const breakdown = contextManager.getContextBreakdown();
     const systemChars = breakdown.reduce((sum, s) => sum + s.chars, 0);
-    const ctxWindow = sb.contextWindow > 0 ? sb.contextWindow : getModelContextInfo(modelId).tokens;
+    const ctxWindow =
+      sb.contextWindow > 0 ? sb.contextWindow : getModelContextInfoSync(modelId).tokens;
     const isApi = sb.contextTokens > 0;
     const charEstimate = (systemChars + sb.chatChars + sb.subagentChars) / 4;
     const chatCharsDelta = Math.max(0, sb.chatChars - (sb.chatCharsAtSnapshot ?? 0));
@@ -250,6 +252,46 @@ export function StatusDashboard({
     );
     lines.push(
       <EntryRow key="model" label="Model" value={getShortModelLabel(modelId)} innerW={innerW} />,
+    );
+
+    // ── Compaction thresholds ──
+    const isAnthropic = isAnthropicNative(modelId);
+    const clientTriggerPct = 70;
+    const clientTrigger = Math.floor(ctxWindow * (clientTriggerPct / 100));
+    lines.push(<Spacer key="s-thresh-pre" innerW={innerW} />);
+    lines.push(<SectionHeader key="h-thresh" label="Compaction Thresholds" innerW={innerW} />);
+    if (isAnthropic) {
+      const clearPct = 30;
+      const clearTrigger = Math.max(80_000, Math.floor(ctxWindow * (clearPct / 100)));
+      const serverPct = 80;
+      const serverTrigger = Math.max(160_000, Math.floor(ctxWindow * (serverPct / 100)));
+      lines.push(
+        <EntryRow
+          key="th-clear"
+          label="  Tool clearing"
+          value={`${String(clearPct)}% — ${fmtTokens(clearTrigger)}`}
+          valueColor={t.textMuted}
+          innerW={innerW}
+        />,
+      );
+      lines.push(
+        <EntryRow
+          key="th-server"
+          label="  Server compact"
+          value={`${String(serverPct)}% — ${fmtTokens(serverTrigger)}`}
+          valueColor={t.textMuted}
+          innerW={innerW}
+        />,
+      );
+    }
+    lines.push(
+      <EntryRow
+        key="th-client"
+        label="  Client compact"
+        value={`${String(clientTriggerPct)}% — ${fmtTokens(clientTrigger)}`}
+        valueColor={t.textMuted}
+        innerW={innerW}
+      />,
     );
     lines.push(<Spacer key="s1" innerW={innerW} />);
 

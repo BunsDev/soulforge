@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import {
+  type ChangelogRelease,
   CURRENT_VERSION,
   checkForUpdate,
   detectInstallMethod,
@@ -10,7 +11,9 @@ import {
 interface VersionState {
   current: string;
   latest: string | null;
-  changelog: string[];
+  changelog: ChangelogRelease[];
+  currentRelease: ChangelogRelease | null;
+  changelogError: boolean;
   updateAvailable: boolean;
   installMethod: InstallMethod;
   checking: boolean;
@@ -22,6 +25,8 @@ export const useVersionStore = create<VersionState>()((set) => ({
   current: CURRENT_VERSION,
   latest: null,
   changelog: [],
+  currentRelease: null,
+  changelogError: false,
   updateAvailable: false,
   installMethod: detectInstallMethod(),
   checking: false,
@@ -34,6 +39,8 @@ export const useVersionStore = create<VersionState>()((set) => ({
         current: result.current,
         latest: result.latest,
         changelog: result.changelog,
+        currentRelease: result.currentRelease,
+        changelogError: result.changelogError,
         updateAvailable: result.updateAvailable,
         checking: false,
       });
