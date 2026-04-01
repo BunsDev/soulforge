@@ -23,6 +23,12 @@ const ROTATE_INTERVAL = 8000;
 const GLITCH_FRAMES = 4;
 const GLITCH_TICK = 50;
 
+// Phase-specific spinners for lock-in status header
+const SPIN_EXPLORE = ["◴", "◷", "◶", "◵"];
+const SPIN_EDIT = ["▏", "▎", "▍", "▌", "▋", "▊", "▉", "█", "▉", "▊", "▋", "▌", "▍", "▎", "▏"];
+const SPIN_DISPATCH = ["◇", "◈", "◆", "◈"];
+const DOTS_CYCLE = [".", "..", "...", "..", ".", ".."];
+
 const EXPLORE_PAIRS: [string, string][] = [
   ["Scanning the codebase…", "Scanned the codebase"],
   ["Reading the runes…", "Read the runes"],
@@ -114,7 +120,8 @@ function useRotatingMessage(pairs: [string, string][], done: boolean) {
 
   const pair = pairs[index % pairs.length] as [string, string];
   const raw = done ? pair[1] : pair[0];
-  const text = glitchTick >= 0 ? garble(raw) : raw;
+  // Strip trailing … — animated dots added separately by caller
+  const text = glitchTick >= 0 ? garble(raw.replace(/…$/, "")) : raw.replace(/…$/, "");
 
   return text;
 }
@@ -146,6 +153,8 @@ export const LockInWrapper = memo(function LockInWrapper({
   const pairs = hasDispatch ? DISPATCH_PAIRS : hasEdits ? EDIT_PAIRS : EXPLORE_PAIRS;
   const statusMsg = useRotatingMessage(pairs, effectiveDone);
   const statusColor = hasDispatch ? t.info : hasEdits ? t.warning : t.brand;
+  const spinFrames = hasDispatch ? SPIN_DISPATCH : hasEdits ? SPIN_EDIT : SPIN_EXPLORE;
+  const spinChar = spinFrames[frame % spinFrames.length] ?? "◴";
 
   const hiddenCount = Math.max(0, tools.length - MAX_VISIBLE);
   const hidden = tools.slice(0, hiddenCount);
@@ -161,7 +170,7 @@ export const LockInWrapper = memo(function LockInWrapper({
             <span fg={t.success}>{"✓ "}</span>
           ) : (
             <span fg={statusColor} attributes={TextAttributes.BOLD}>
-              {SPINNER_FRAMES[frame % SPINNER_FRAMES.length] ?? "⠋"}{" "}
+              {spinChar}{" "}
             </span>
           )}
           <span
@@ -169,6 +178,7 @@ export const LockInWrapper = memo(function LockInWrapper({
             attributes={effectiveDone ? undefined : TextAttributes.BOLD}
           >
             {statusMsg}
+            {effectiveDone ? "" : DOTS_CYCLE[Math.floor(frame / 3) % DOTS_CYCLE.length]}
           </span>
         </text>
       </box>
