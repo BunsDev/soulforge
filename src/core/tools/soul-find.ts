@@ -168,7 +168,8 @@ async function searchIntelligenceClient(
 const TEST_RE = new RegExp(
   [
     // Test directories (all languages)
-    /(?:^|\/)(?:tests?|__tests__|specs?|__mocks__|__snapshots__|__fixtures__|fixtures|test_helpers?|test_support)\//.source,
+    /(?:^|\/)(?:tests?|__tests__|specs?|__mocks__|__snapshots__|__fixtures__|fixtures|test_helpers?|test_support)\//
+      .source,
     // JS/TS/Python/Ruby/Rust/Java/Kotlin/Scala/C#/Lua: .test.ext, .spec.ext
     /\.(test|spec|cy|stories)\.(ts|tsx|js|jsx|mjs|cjs|py|rb|rs|java|kt|scala|cs|lua)$/.source,
     // Go/Python/Ruby/Elixir/Erlang/C/C++/Dart/Clojure/Haskell/ML/Gleam/V/Zig/Nim: _test.ext
@@ -195,7 +196,8 @@ const DOCS_RE = new RegExp(
   [
     /\.(?:md|mdx|txt|rst|adoc)$/.source,
     /(?:^|\/)(?:docs?|documentation|javadoc|man|examples?|demos?|samples?)\//.source,
-    /(?:^|\/)(?:README|CHANGELOG|CHANGES|CONTRIBUTING|COPYING|INSTALL|LICEN[CS]E|CITATION|CODE_OF_CONDUCT|SECURITY)(?:\.|$)/.source,
+    /(?:^|\/)(?:README|CHANGELOG|CHANGES|CONTRIBUTING|COPYING|INSTALL|LICEN[CS]E|CITATION|CODE_OF_CONDUCT|SECURITY)(?:\.|$)/
+      .source,
   ].join("|"),
   "i",
 );
@@ -207,7 +209,8 @@ const JUNK_RE = new RegExp(
     // OS metadata
     /(?:^|\/)(?:\.DS_Store|Thumbs\.db|desktop\.ini|\._[^/]+)$/.source,
     // AI tool config (tracked but not source code)
-    /(?:^|\/)(?:\.claude|\.copilot|\.cursor|\.windsurf|\.aider|\.cline|\.codeium|\.tabnine|\.codex)\//.source,
+    /(?:^|\/)(?:\.claude|\.copilot|\.cursor|\.windsurf|\.aider|\.cline|\.codeium|\.tabnine|\.codex)\//
+      .source,
     // Git internals & hooks
     /(?:^|\/)\.git\//.source,
     /(?:^|\/)(?:\.husky|\.changeset)\//.source,
@@ -220,9 +223,11 @@ const JUNK_RE = new RegExp(
 const GENERATED_RE = new RegExp(
   [
     // Build output (universal)
-    /(?:^|\/)(?:dist|build|out|target|obj|_build|ebin|coverage|htmlcov|\.nyc_output|TestResults)\//.source,
+    /(?:^|\/)(?:dist|build|out|target|obj|_build|ebin|coverage|htmlcov|\.nyc_output|TestResults)\//
+      .source,
     // JS/TS frameworks & compilers
-    /(?:^|\/)(?:\.next|\.nuxt|\.svelte-kit|\.turbo|\.cache|\.output|\.parcel-cache|\.vite|\.bun|\.swc)\//.source,
+    /(?:^|\/)(?:\.next|\.nuxt|\.svelte-kit|\.turbo|\.cache|\.output|\.parcel-cache|\.vite|\.bun|\.swc)\//
+      .source,
     // TS build info
     /\.tsbuildinfo$/.source,
     // Mobile: Expo, iOS, Android, Flutter
@@ -244,9 +249,10 @@ const GENERATED_RE = new RegExp(
   "i",
 );
 
-const LOCK_RE = /(?:^|\/)(?:package-lock\.json|pnpm-lock\.ya?ml|bun\.lockb?|bun\.lock|yarn\.lock|composer\.lock|Cargo\.lock|Gemfile\.lock|poetry\.lock|pdm\.lock|uv\.lock|Gopkg\.lock|Package\.resolved|deno\.lock|gradle\.lockfile|npm-shrinkwrap\.json|flake\.lock|pixi\.lock|\.terraform\.lock\.hcl)$/;
+const LOCK_RE =
+  /(?:^|\/)(?:package-lock\.json|pnpm-lock\.ya?ml|bun\.lockb?|bun\.lock|yarn\.lock|composer\.lock|Cargo\.lock|Gemfile\.lock|poetry\.lock|pdm\.lock|uv\.lock|Gopkg\.lock|Package\.resolved|deno\.lock|gradle\.lockfile|npm-shrinkwrap\.json|flake\.lock|pixi\.lock|\.terraform\.lock\.hcl)$/;
 
-function fileTypePenalty(relPath: string): number {
+export function fileTypePenalty(relPath: string): number {
   if (GENERATED_RE.test(relPath)) return 0.05;
   if (LOCK_RE.test(relPath)) return 0.05;
   if (JUNK_RE.test(relPath)) return 0.1;

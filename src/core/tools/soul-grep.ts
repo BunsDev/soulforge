@@ -9,14 +9,14 @@ import { enrichWithSymbolContext } from "./grep.js";
 const ENRICHMENT_TIMEOUT_MS = 2000;
 const MAX_SEARCH_OUTPUT_BYTES = 32_000;
 
-interface DepResolution {
+export interface DepResolution {
   searchPath: string;
   extraArgs: string[];
   resolved: boolean;
   dep: string;
 }
 
-function resolveDepSearch(dep: string, explicitPath?: string): DepResolution {
+export function resolveDepSearch(dep: string, explicitPath?: string): DepResolution {
   const noIgnoreFollow = ["--no-ignore", "--follow"];
 
   if (explicitPath) {
@@ -43,7 +43,7 @@ function resolveDepSearch(dep: string, explicitPath?: string): DepResolution {
   };
 }
 
-function annotateDepNoMatch(result: ToolResult, depRes: DepResolution): ToolResult {
+export function annotateDepNoMatch(result: ToolResult, depRes: DepResolution): ToolResult {
   const noMatch = result.output === "No matches found." || result.output === "0 matches.";
   if (!noMatch) return result;
 
