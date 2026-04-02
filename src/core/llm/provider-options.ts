@@ -276,6 +276,14 @@ export function isAnthropicNative(modelId: string): boolean {
   return detectModelFamily(modelId) === "claude";
 }
 
+/** Programmatic tool calling (allowedCallers) requires Claude 4+ non-haiku. */
+export function supportsProgrammaticToolCalling(modelId: string): boolean {
+  const base = extractBaseModel(modelId);
+  const gen = getClaudeGen(base);
+  if (gen !== "4+") return false;
+  return !base.includes("haiku");
+}
+
 function supportsAnthropicOptions(modelId: string): boolean {
   return getEffectiveCaps(modelId).anthropicOptions;
 }
