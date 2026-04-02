@@ -1530,6 +1530,8 @@ export function useChat({
       }
       stallRetryPendingRef.current = false;
 
+      const responseStartedAt = Date.now();
+
       try {
         setIsLoading(true);
         const modelId = activeModelRef.current;
@@ -2437,6 +2439,7 @@ export function useChat({
               timestamp: Date.now(),
               toolCalls: completedCalls.length > 0 ? completedCalls : undefined,
               segments: finalSegments.length > 0 ? finalSegments : undefined,
+              durationMs: Date.now() - responseStartedAt,
             }
           : null;
 

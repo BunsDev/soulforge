@@ -4,6 +4,7 @@ import { icon } from "../../core/icons.js";
 import { useTheme } from "../../core/theme/index.js";
 import { resolveToolDisplay } from "../../core/tool-display.js";
 import { garble } from "../../core/utils/splash.js";
+import { formatElapsed } from "../../hooks/useElapsed.js";
 import { SPINNER_FRAMES, useSpinnerFrame } from "../layout/shared.js";
 
 export const LOCKIN_EDIT_TOOLS = new Set([
@@ -194,7 +195,9 @@ export const LockInWrapper = memo(function LockInWrapper({
               {(DOTS_CYCLE[Math.floor(frame / 3) % DOTS_CYCLE.length] ?? ".").padEnd(3)}
             </span>
           )}
-          {!effectiveDone && elapsed > 0 ? <span fg={t.textFaint}>{String(elapsed)}s</span> : null}
+          {!effectiveDone && elapsed > 0 ? (
+            <span fg={t.textFaint}>{formatElapsed(elapsed)}</span>
+          ) : null}
         </text>
       </box>
 

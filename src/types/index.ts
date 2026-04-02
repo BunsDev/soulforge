@@ -135,6 +135,8 @@ export interface ChatMessage {
   showInChat?: boolean;
   /** Marks a user message injected via steering (sent while AI was working). */
   isSteering?: boolean;
+  /** How long the assistant response took (ms). Set when the response completes. */
+  durationMs?: number;
 }
 
 export interface ToolCall {

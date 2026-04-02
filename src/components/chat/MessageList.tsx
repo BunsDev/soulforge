@@ -13,6 +13,7 @@ import {
 import { icon as getIcon, icon } from "../../core/icons.js";
 import { getThemeTokens, type ThemeTokens, useTheme } from "../../core/theme/index.js";
 import { resolveToolDisplay, TOOL_ICONS, TOOL_LABELS } from "../../core/tool-display.js";
+import { formatElapsed } from "../../hooks/useElapsed.js";
 import type {
   ChatMessage,
   ChatStyle,
@@ -1009,6 +1010,14 @@ const AssistantMessage = memo(function AssistantMessage({
                 </text>
               </box>
               <Markdown text={lockInFinalAnswer} />
+            </box>
+          ) : null}
+          {msg.durationMs != null ? (
+            <box height={1} marginTop={1}>
+              <text fg={t.textFaint}>
+                {"✓ Completed in "}
+                {formatElapsed(Math.floor(msg.durationMs / 1000))}
+              </text>
             </box>
           ) : null}
         </>
