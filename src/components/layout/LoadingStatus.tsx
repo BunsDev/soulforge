@@ -81,9 +81,15 @@ interface LoadingStatusProps {
   isLoading: boolean;
   isCompacting: boolean;
   queueCount?: number;
+  loadingStartedAt?: number;
 }
 
-export function LoadingStatus({ isLoading, isCompacting, queueCount }: LoadingStatusProps) {
+export function LoadingStatus({
+  isLoading,
+  isCompacting,
+  queueCount,
+  loadingStartedAt,
+}: LoadingStatusProps) {
   const { width: termWidth } = useTerminalDimensions();
   const ghostRef = useRef<TextRenderable>(null);
   const statusRef = useRef<TextRenderable>(null);
@@ -108,7 +114,8 @@ export function LoadingStatus({ isLoading, isCompacting, queueCount }: LoadingSt
     forgeStatusRef.current = FORGE_STATUSES[
       Math.floor(Math.random() * FORGE_STATUSES.length)
     ] as string;
-    loadingStartRef.current = Date.now();
+    // Use shared timestamp from parent when available (survives lock-in ↔ default toggle)
+    loadingStartRef.current = loadingStartedAt || Date.now();
     elapsedSecRef.current = 0;
     completedTimeRef.current = null;
   }

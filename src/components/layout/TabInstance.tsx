@@ -592,6 +592,7 @@ export const TabInstance = memo(function TabInstance({
                   isLoading={chat.isLoading}
                   isCompacting={chat.isCompacting}
                   queueCount={chat.messageQueue.length}
+                  loadingStartedAt={loadingStartedAtRef.current}
                 />
               )}
             </scrollbox>

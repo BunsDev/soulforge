@@ -8,7 +8,7 @@ import type { WorkingStateManager } from "./working-state.js";
  */
 
 const READ_TOOLS = new Set([
-  "read_file",
+  "read",
   "navigate",
   "grep",
   "glob",
@@ -94,7 +94,7 @@ export function extractFromToolResult(
     );
   }
 
-  if (toolName === "read_file") {
+  if (toolName === "read") {
     const lineCount = resultStr.split("\n").length;
     const outline = extractFileOutline(resultStr);
     if (outline) {
