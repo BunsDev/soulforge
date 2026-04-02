@@ -1277,7 +1277,7 @@ export function App({
         visible={modalStatusDashboard}
         initialTab={statusDashboardTab}
         onClose={getCloser("statusDashboard")}
-        chat={activeChatRef.current}
+        activeModel={activeModelForHeader}
         contextManager={contextManager}
         tabMgr={tabMgr}
         currentMode={activeChatRef.current?.forgeMode ?? "default"}

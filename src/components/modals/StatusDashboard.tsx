@@ -10,7 +10,6 @@ import { isAnthropicNative } from "../../core/llm/provider-options.js";
 import { getProxyPid } from "../../core/proxy/lifecycle.js";
 import { getTerminalStats } from "../../core/terminal/manager.js";
 import { useTheme } from "../../core/theme/index.js";
-import type { ChatInstance } from "../../hooks/useChat.js";
 import type { UseTabsReturn } from "../../hooks/useTabs.js";
 import { useRepoMapStore } from "../../stores/repomap.js";
 import {
@@ -144,7 +143,7 @@ interface Props {
   visible: boolean;
   initialTab?: Tab;
   onClose: () => void;
-  chat: ChatInstance | null;
+  activeModel: string;
   contextManager: ContextManager;
   tabMgr: UseTabsReturn;
   currentMode: string;
@@ -155,7 +154,7 @@ export function StatusDashboard({
   visible,
   initialTab,
   onClose,
-  chat,
+  activeModel: activeModelProp,
   contextManager,
   tabMgr,
   currentMode,
@@ -217,7 +216,7 @@ export function StatusDashboard({
     };
   }, [visible, tab, pollWorkerMemory]);
 
-  const modelId = chat?.activeModel ?? "none";
+  const modelId = activeModelProp;
   const tu = sb.tokenUsage;
 
   const contextLines = useMemo(() => {

@@ -130,6 +130,7 @@ export function ContextBar({ contextManager, suppressCompacting }: Props) {
   const currentPctRef = useRef(0);
   const compactFrameRef = useRef(0);
   const wasCompactingRef = useRef(false);
+  const prevWindowRef = useRef(0);
   const workerRef = useRef<WorkerIndicator>({ intel: "idle", io: "idle" });
   const suppressCompactingRef = useRef(suppressCompacting);
   suppressCompactingRef.current = suppressCompacting;
@@ -215,12 +216,15 @@ export function ContextBar({ contextManager, suppressCompacting }: Props) {
         wk.io === "crashed" ||
         wk.io === "restarting";
       const compactChanged = isCompacting !== wasCompacting;
+      const windowChanged = target.windowTokens !== prevWindowRef.current;
+      if (windowChanged) prevWindowRef.current = target.windowTokens;
       if (
         pct === currentPctRef.current &&
         !target.flash &&
         !isCompacting &&
         !compactChanged &&
-        !wkChanged
+        !wkChanged &&
+        !windowChanged
       )
         return;
       currentPctRef.current = pct;
