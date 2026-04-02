@@ -1,6 +1,6 @@
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../core/theme/index.js";
 import { usePopupScroll } from "../../hooks/usePopupScroll.js";
 import type { ConfigScope } from "../layout/shared.js";
@@ -84,6 +84,88 @@ function fuzzyScore(query: string, target: string): { score: number; indices: nu
 /** Focus zone: -1 = options list, 0+ = index into combined toggles+selectors */
 const ZONE_LIST = -1;
 
+interface OptionRowProps {
+  option: CommandPickerOption;
+  isActive: boolean;
+  isCurrent: boolean;
+  innerW: number;
+  popupBg: string;
+  popupHl: string;
+  brandSecondary: string;
+  textPrimary: string;
+  textSecondary: string;
+  textMuted: string;
+  textDim: string;
+  textFaint: string;
+  successColor: string;
+}
+
+function OptionRow({
+  option,
+  isActive,
+  isCurrent,
+  innerW,
+  popupBg,
+  popupHl,
+  brandSecondary,
+  textPrimary,
+  textSecondary,
+  textMuted,
+  textDim,
+  textFaint,
+  successColor,
+}: OptionRowProps) {
+  const isDisabled = option.disabled === true;
+  const bg = isActive && !isDisabled ? popupHl : popupBg;
+  const activeColor = option.color ?? brandSecondary;
+  const labelFg = isDisabled
+    ? textDim
+    : isActive
+      ? activeColor
+      : isCurrent
+        ? successColor
+        : textPrimary;
+
+  return (
+    <box flexDirection="column">
+      <PopupRow bg={bg} w={innerW}>
+        <text bg={bg} fg={isActive && !isDisabled ? activeColor : textMuted}>
+          {isActive && !isDisabled ? "› " : "  "}
+        </text>
+        {option.icon && (
+          <text bg={bg} fg={isDisabled ? textFaint : isActive ? activeColor : textSecondary}>
+            {option.icon}{" "}
+          </text>
+        )}
+        <text
+          bg={bg}
+          fg={labelFg}
+          attributes={isActive && !isDisabled ? TextAttributes.BOLD : undefined}
+        >
+          {option.label}
+        </text>
+        {isCurrent && !isDisabled && (
+          <text bg={bg} fg={successColor}>
+            {" "}
+            ✓
+          </text>
+        )}
+      </PopupRow>
+      {option.description && (
+        <PopupRow bg={bg} w={innerW}>
+          <text bg={bg} fg={isDisabled ? textFaint : isActive ? textSecondary : textMuted} truncate>
+            {"    "}
+            {option.icon ? "  " : ""}
+            {option.description.length > innerW - 10
+              ? `${option.description.slice(0, innerW - 13)}…`
+              : option.description}
+          </text>
+        </PopupRow>
+      )}
+    </box>
+  );
+}
+
 export function CommandPicker({ visible, config, onClose }: Props) {
   const t = useTheme();
   const { width: termCols, height: termRows } = useTerminalDimensions();
@@ -103,19 +185,18 @@ export function CommandPicker({ visible, config, onClose }: Props) {
   const [selectorState, setSelectorState] = useState<Record<string, number>>({});
   const [focusZone, setFocusZone] = useState(ZONE_LIST);
 
-  // Build combined control list: toggles then selectors
-  const controls = useMemo(() => {
+  const controls = (() => {
     const list: Array<{ type: "toggle"; key: string } | { type: "selector"; key: string }> = [];
     if (config?.toggles)
       for (const tg of config.toggles) list.push({ type: "toggle", key: tg.key });
     if (config?.selectors)
       for (const sel of config.selectors) list.push({ type: "selector", key: sel.key });
     return list;
-  }, [config?.toggles, config?.selectors]);
+  })();
 
   const hasControls = controls.length > 0;
 
-  const filteredOptions = useMemo(() => {
+  const filteredOptions = (() => {
     if (!config?.searchable || search.length === 0) return config?.options ?? [];
     const scored: Array<{ option: CommandPickerOption; score: number }> = [];
     for (const option of config.options) {
@@ -127,7 +208,7 @@ export function CommandPicker({ visible, config, onClose }: Props) {
     }
     scored.sort((a, b) => b.score - a.score);
     return scored.map((s) => s.option);
-  }, [config?.options, config?.searchable, search]);
+  })();
 
   const prevVisibleRef = useRef(false);
   const prevOptionsRef = useRef<CommandPickerOption[] | null>(null);
@@ -201,7 +282,7 @@ export function CommandPicker({ visible, config, onClose }: Props) {
     }
   }, [cursor, visible, config, filteredOptions]);
 
-  useKeyboard((evt) => {
+  const handleKeyboard = (evt: import("@opentui/core").KeyEvent) => {
     if (!visible || !config) return;
 
     if (evt.name === "escape") {
@@ -410,7 +491,9 @@ export function CommandPicker({ visible, config, onClose }: Props) {
         return;
       }
     }
-  });
+  };
+
+  useKeyboard(handleKeyboard);
 
   if (!visible || !config) return null;
 
@@ -481,67 +564,26 @@ export function CommandPicker({ visible, config, onClose }: Props) {
               </text>
             </PopupRow>
           ) : (
-            filteredOptions.slice(clampedOffset, clampedOffset + maxVisible).map((option, vi) => {
-              const i = vi + clampedOffset;
-              const isActive = i === cursor;
-              const isCurrent = option.value === config.currentValue;
-              const isDisabled = option.disabled === true;
-              const bg = isActive && !isDisabled ? POPUP_HL : POPUP_BG;
-              const activeColor = option.color ?? t.brandSecondary;
-              const labelFg = isDisabled
-                ? t.textDim
-                : isActive
-                  ? activeColor
-                  : isCurrent
-                    ? t.success
-                    : t.textPrimary;
-
-              return (
-                <box key={option.value} flexDirection="column">
-                  <PopupRow bg={bg} w={innerW}>
-                    <text bg={bg} fg={isActive && !isDisabled ? activeColor : t.textMuted}>
-                      {isActive && !isDisabled ? "› " : "  "}
-                    </text>
-                    {option.icon && (
-                      <text
-                        bg={bg}
-                        fg={isDisabled ? t.textFaint : isActive ? activeColor : t.textSecondary}
-                      >
-                        {option.icon}{" "}
-                      </text>
-                    )}
-                    <text
-                      bg={bg}
-                      fg={labelFg}
-                      attributes={isActive && !isDisabled ? TextAttributes.BOLD : undefined}
-                    >
-                      {option.label}
-                    </text>
-                    {isCurrent && !isDisabled && (
-                      <text bg={bg} fg={t.success}>
-                        {" "}
-                        ✓
-                      </text>
-                    )}
-                  </PopupRow>
-                  {option.description && (
-                    <PopupRow bg={bg} w={innerW}>
-                      <text
-                        bg={bg}
-                        fg={isDisabled ? t.textFaint : isActive ? t.textSecondary : t.textMuted}
-                        truncate
-                      >
-                        {"    "}
-                        {option.icon ? "  " : ""}
-                        {option.description.length > innerW - 10
-                          ? `${option.description.slice(0, innerW - 13)}…`
-                          : option.description}
-                      </text>
-                    </PopupRow>
-                  )}
-                </box>
-              );
-            })
+            filteredOptions
+              .slice(clampedOffset, clampedOffset + maxVisible)
+              .map((option, vi) => (
+                <OptionRow
+                  key={option.value}
+                  option={option}
+                  isActive={vi + clampedOffset === cursor}
+                  isCurrent={option.value === config.currentValue}
+                  innerW={innerW}
+                  popupBg={POPUP_BG}
+                  popupHl={POPUP_HL}
+                  brandSecondary={t.brandSecondary}
+                  textPrimary={t.textPrimary}
+                  textSecondary={t.textSecondary}
+                  textMuted={t.textMuted}
+                  textDim={t.textDim}
+                  textFaint={t.textFaint}
+                  successColor={t.success}
+                />
+              ))
           )}
         </box>
         {filteredOptions.length > maxVisible && (

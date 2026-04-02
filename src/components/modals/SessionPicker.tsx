@@ -1,6 +1,6 @@
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { icon } from "../../core/icons.js";
 import { type SessionListEntry, SessionManager } from "../../core/sessions/manager.js";
 import { useTheme } from "../../core/theme/index.js";
@@ -9,7 +9,6 @@ import { timeAgo } from "../../utils/time.js";
 import { Overlay, POPUP_BG, POPUP_HL, PopupRow } from "../layout/shared.js";
 
 const POPUP_CHROME = 8;
-// ROW_ALT resolved from theme at render time
 const COL_MSGS = 7;
 const COL_SIZE = 7;
 const COL_TIME = 11;
@@ -31,6 +30,45 @@ function rpad(s: string, w: number): string {
 
 function lpad(s: string, w: number): string {
   return s.length >= w ? s.slice(0, w) : " ".repeat(w - s.length) + s;
+}
+
+interface SessionRowProps {
+  session: SessionListEntry;
+  isActive: boolean;
+  titleColW: number;
+  innerW: number;
+}
+
+function SessionRow({ session, isActive, titleColW, innerW }: SessionRowProps) {
+  const t = useTheme();
+  const bg = isActive ? POPUP_HL : POPUP_BG;
+  const title =
+    session.title.length > titleColW - 2
+      ? `${session.title.slice(0, titleColW - 4)}\u2026`
+      : session.title;
+
+  return (
+    <PopupRow key={session.id} bg={bg} w={innerW}>
+      <text bg={bg}>
+        <span fg={isActive ? t.brand : t.textFaint}>{isActive ? "\u203A " : "  "}</span>
+        <span
+          fg={isActive ? t.textPrimary : t.textSecondary}
+          attributes={isActive ? TextAttributes.BOLD : 0}
+        >
+          {rpad(title, titleColW)}
+        </span>
+        <span fg={isActive ? t.brandAlt : t.textMuted}>
+          {lpad(String(session.messageCount), COL_MSGS)}
+        </span>
+        <span fg={isActive ? t.textMuted : t.textMuted}>
+          {lpad(formatSize(session.sizeBytes), COL_SIZE)}
+        </span>
+        <span fg={isActive ? t.textMuted : t.textDim}>
+          {lpad(timeAgo(session.updatedAt), COL_TIME)}
+        </span>
+      </text>
+    </PopupRow>
+  );
 }
 
 interface Props {
@@ -55,11 +93,11 @@ export function SessionPicker({ visible, cwd, onClose, onRestore, onSystemMessag
   const titleColW = Math.max(15, innerW - COL_FIXED - 4);
   const { cursor, setCursor, scrollOffset, adjustScroll, resetScroll } = usePopupScroll(maxVisible);
 
-  const manager = useMemo(() => new SessionManager(cwd), [cwd]);
+  const manager = new SessionManager(cwd);
 
-  const refresh = useCallback(() => {
+  const refresh = () => {
     setSessions(manager.listSessions());
-  }, [manager]);
+  };
 
   useEffect(() => {
     if (visible) {
@@ -68,14 +106,14 @@ export function SessionPicker({ visible, cwd, onClose, onRestore, onSystemMessag
       setConfirmClear(false);
       refresh();
     }
-  }, [visible, refresh, resetScroll]);
+  }, [visible, resetScroll, refresh]);
 
-  const filterQuery = query.toLowerCase().trim();
-  const filtered = filterQuery
-    ? sessions.filter((s) => s.title.toLowerCase().includes(filterQuery))
-    : sessions;
+  const filtered = (() => {
+    const fq = query.toLowerCase().trim();
+    return fq ? sessions.filter((s) => s.title.toLowerCase().includes(fq)) : sessions;
+  })();
 
-  useKeyboard((evt) => {
+  const handleKeyboard = (evt: { name?: string; ctrl?: boolean; meta?: boolean }) => {
     if (!visible) return;
 
     if (confirmClear) {
@@ -97,7 +135,7 @@ export function SessionPicker({ visible, cwd, onClose, onRestore, onSystemMessag
     }
 
     if (evt.name === "up") {
-      setCursor((prev) => {
+      setCursor((prev: number) => {
         const next = prev > 0 ? prev - 1 : Math.max(0, filtered.length - 1);
         adjustScroll(next);
         return next;
@@ -105,7 +143,7 @@ export function SessionPicker({ visible, cwd, onClose, onRestore, onSystemMessag
       return;
     }
     if (evt.name === "down") {
-      setCursor((prev) => {
+      setCursor((prev: number) => {
         const next = prev < filtered.length - 1 ? prev + 1 : 0;
         adjustScroll(next);
         return next;
@@ -134,7 +172,7 @@ export function SessionPicker({ visible, cwd, onClose, onRestore, onSystemMessag
         manager.deleteSession(session.id);
         onSystemMessage(`Deleted session: ${session.title}`);
         refresh();
-        setCursor((prev) => Math.min(prev, Math.max(0, filtered.length - 1)));
+        setCursor((prev: number) => Math.min(prev, Math.max(0, filtered.length - 1)));
       }
       return;
     }
@@ -154,11 +192,14 @@ export function SessionPicker({ visible, cwd, onClose, onRestore, onSystemMessag
       setQuery((prev) => prev + evt.name);
       resetScroll();
     }
-  });
+  };
+
+  useKeyboard(handleKeyboard);
 
   if (!visible) return null;
 
   const totalSize = sessions.reduce((s, x) => s + x.sizeBytes, 0);
+  const SEARCH_HL = t.bgPopupHighlight;
 
   return (
     <Overlay>
@@ -179,24 +220,28 @@ export function SessionPicker({ visible, cwd, onClose, onRestore, onSystemMessag
           </text>
           <text fg={t.textMuted} bg={POPUP_BG}>
             {" "}
-            {String(sessions.length)} sessions · {formatSize(totalSize)}
+            {String(sessions.length)} sessions {"\u00B7"} {formatSize(totalSize)}
           </text>
         </PopupRow>
 
         {/* Search */}
-        <PopupRow w={innerW}>
-          <text fg={t.brandAlt} bg={POPUP_BG}>
-            {icon("search")} {"> "}
+        <PopupRow w={innerW} bg={SEARCH_HL}>
+          <text fg={t.brand} bg={SEARCH_HL}>
+            {"\uD83D\uDD0D"}{" "}
           </text>
-          <text fg={t.textPrimary} bg={POPUP_BG}>
+          <text fg={t.textPrimary} attributes={TextAttributes.BOLD} bg={SEARCH_HL}>
             {query}
           </text>
-          <text fg={t.brandAlt} bg={POPUP_BG}>
-            ▎
+          <text fg={t.brandAlt} bg={SEARCH_HL}>
+            {"\u258E"}
           </text>
-          {!query && (
-            <text fg={t.textDim} bg={POPUP_BG}>
-              {" type to search…"}
+          {!query ? (
+            <text fg={t.textDim} bg={SEARCH_HL}>
+              {" type to search\u2026"}
+            </text>
+          ) : (
+            <text fg={t.textMuted} bg={SEARCH_HL}>
+              {` ${String(filtered.length)} result${filtered.length === 1 ? "" : "s"}`}
             </text>
           )}
         </PopupRow>
@@ -204,7 +249,7 @@ export function SessionPicker({ visible, cwd, onClose, onRestore, onSystemMessag
         {/* Separator */}
         <PopupRow w={innerW}>
           <text fg={t.textSubtle} bg={POPUP_BG}>
-            {"─".repeat(innerW - 4)}
+            {"\u2500".repeat(innerW - 4)}
           </text>
         </PopupRow>
 
@@ -222,7 +267,7 @@ export function SessionPicker({ visible, cwd, onClose, onRestore, onSystemMessag
         {/* Separator */}
         <PopupRow w={innerW}>
           <text fg={t.textSubtle} bg={POPUP_BG}>
-            {"─".repeat(innerW - 4)}
+            {"\u2500".repeat(innerW - 4)}
           </text>
         </PopupRow>
 
@@ -237,37 +282,20 @@ export function SessionPicker({ visible, cwd, onClose, onRestore, onSystemMessag
               <text fg={t.textMuted} bg={POPUP_BG}>
                 {"  "}
                 {icon("clock_alt")}{" "}
-                {query ? "no matching sessions" : "no sessions yet — start chatting!"}
+                {query ? "no matching sessions" : "no sessions yet \u2014 start chatting!"}
               </text>
             </PopupRow>
           ) : (
             filtered.slice(scrollOffset, scrollOffset + maxVisible).map((session, vi) => {
               const i = vi + scrollOffset;
-              const isActive = i === cursor;
-              const bg = isActive ? POPUP_HL : POPUP_BG;
-              const title =
-                session.title.length > titleColW - 2
-                  ? `${session.title.slice(0, titleColW - 4)}…`
-                  : session.title;
-
               return (
-                <PopupRow key={session.id} bg={bg} w={innerW}>
-                  <text bg={bg}>
-                    <span fg={isActive ? t.brand : t.textFaint}>{isActive ? "> " : "  "}</span>
-                    <span fg={isActive ? t.textPrimary : t.textSecondary}>
-                      {rpad(title, titleColW)}
-                    </span>
-                    <span fg={isActive ? t.brandAlt : t.textMuted}>
-                      {lpad(String(session.messageCount), COL_MSGS)}
-                    </span>
-                    <span fg={isActive ? t.textMuted : t.textMuted}>
-                      {lpad(formatSize(session.sizeBytes), COL_SIZE)}
-                    </span>
-                    <span fg={isActive ? t.textMuted : t.textDim}>
-                      {lpad(timeAgo(session.updatedAt), COL_TIME)}
-                    </span>
-                  </text>
-                </PopupRow>
+                <SessionRow
+                  key={session.id}
+                  session={session}
+                  isActive={i === cursor}
+                  titleColW={titleColW}
+                  innerW={innerW}
+                />
               );
             })
           )}
@@ -277,17 +305,17 @@ export function SessionPicker({ visible, cwd, onClose, onRestore, onSystemMessag
         {filtered.length > maxVisible && (
           <PopupRow w={innerW}>
             <text fg={t.textMuted} bg={POPUP_BG}>
-              {scrollOffset > 0 ? "↑ " : "  "}
+              {scrollOffset > 0 ? "\u2191 " : "  "}
               {String(cursor + 1)}/{String(filtered.length)}
-              {scrollOffset + maxVisible < filtered.length ? " ↓" : ""}
+              {scrollOffset + maxVisible < filtered.length ? " \u2193" : ""}
             </text>
           </PopupRow>
         )}
 
         {/* Confirm clear */}
         {confirmClear && (
-          <PopupRow w={innerW}>
-            <text fg={t.brandSecondary} attributes={TextAttributes.BOLD} bg={POPUP_BG}>
+          <PopupRow w={innerW} bg={t.error}>
+            <text fg="#fff" attributes={TextAttributes.BOLD} bg={t.error}>
               Delete all {String(sessions.length)} sessions? (y/n)
             </text>
           </PopupRow>
@@ -300,7 +328,7 @@ export function SessionPicker({ visible, cwd, onClose, onRestore, onSystemMessag
         {/* Footer */}
         <PopupRow w={innerW}>
           <text fg={t.textDim} bg={POPUP_BG}>
-            ↑↓ navigate | ⏎ restore | ^D delete | ^X clear all | esc close
+            {"\u2191\u2193"} navigate | {"\u23CE"} restore | ^D delete | ^X clear all | esc close
           </text>
         </PopupRow>
       </box>

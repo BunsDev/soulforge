@@ -1,6 +1,6 @@
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CATEGORIES, type CommandDef, getCommandDefs } from "../../core/commands/registry.js";
 import { fuzzyMatch } from "../../core/history/fuzzy.js";
 import { icon } from "../../core/icons.js";
@@ -96,6 +96,141 @@ function findNextCategory(items: PaletteItem[], from: number): number {
   return from;
 }
 
+function renderHighlightedCmd(
+  cmd: string,
+  indices: number[] | undefined,
+  baseFg: string,
+  hlFg: string,
+  bg: string,
+  bold: boolean,
+): React.ReactNode {
+  if (!indices || indices.length === 0) {
+    return (
+      <text fg={baseFg} bg={bg} attributes={bold ? TextAttributes.BOLD : undefined}>
+        {cmd}
+      </text>
+    );
+  }
+  const highlightSet = new Set(indices.filter((i) => i < cmd.length));
+  if (highlightSet.size === 0) {
+    return (
+      <text fg={baseFg} bg={bg} attributes={bold ? TextAttributes.BOLD : undefined}>
+        {cmd}
+      </text>
+    );
+  }
+
+  const spans: React.ReactNode[] = [];
+  let run = "";
+  let runHl = false;
+
+  const flush = () => {
+    if (!run) return;
+    spans.push(
+      <span
+        key={spans.length}
+        fg={runHl ? hlFg : baseFg}
+        bg={bg}
+        attributes={runHl ? TextAttributes.BOLD : undefined}
+      >
+        {run}
+      </span>,
+    );
+    run = "";
+  };
+
+  for (let i = 0; i < cmd.length; i++) {
+    const ch = cmd[i] ?? "";
+    const isHl = highlightSet.has(i);
+    if (i === 0) {
+      runHl = isHl;
+      run = ch;
+    } else if (isHl === runHl) {
+      run += ch;
+    } else {
+      flush();
+      runHl = isHl;
+      run = ch;
+    }
+  }
+  flush();
+
+  return <text bg={bg}>{spans}</text>;
+}
+
+function HeaderRow({
+  category,
+  catColor,
+  catIcon,
+  innerW,
+}: {
+  category: string;
+  catColor: string;
+  catIcon: string | undefined;
+  innerW: number;
+}) {
+  return (
+    <PopupRow w={innerW}>
+      <text fg={catColor} bg={POPUP_BG} attributes={TextAttributes.BOLD}>
+        {catIcon ? `${icon(catIcon)} ` : ""}
+        {category}
+      </text>
+    </PopupRow>
+  );
+}
+
+function CommandRow({
+  def,
+  isActive,
+  catColor,
+  innerW,
+  matchIndices,
+  textSecondary,
+  textMuted,
+  textFaint,
+  textPrimary,
+}: {
+  def: CommandDef;
+  isActive: boolean;
+  catColor: string;
+  innerW: number;
+  matchIndices: number[] | undefined;
+  textSecondary: string;
+  textMuted: string;
+  textFaint: string;
+  textPrimary: string;
+}) {
+  const bg = isActive ? POPUP_HL : POPUP_BG;
+  const cmdColor = isActive ? catColor : textSecondary;
+  const descColor = isActive ? textSecondary : textMuted;
+  const cmdText = def.cmd;
+
+  return (
+    <PopupRow bg={bg} w={innerW}>
+      <text fg={isActive ? catColor : textFaint} bg={bg}>
+        {isActive ? "› " : "  "}
+      </text>
+      <text fg={textMuted} bg={bg}>
+        {def.category ? `${def.category.slice(0, 3).toLowerCase()} ` : ""}
+      </text>
+      {renderHighlightedCmd(
+        cmdText,
+        matchIndices,
+        cmdColor,
+        isActive ? textPrimary : catColor,
+        bg,
+        isActive,
+      )}
+      <text fg={descColor} bg={bg} truncate>
+        {"  "}
+        {def.desc.length > innerW - cmdText.length - 12
+          ? `${def.desc.slice(0, innerW - cmdText.length - 15)}…`
+          : def.desc}
+      </text>
+    </PopupRow>
+  );
+}
+
 interface Props {
   visible: boolean;
   onClose: () => void;
@@ -110,28 +245,24 @@ export function CommandPalette({ visible, onClose, onExecute }: Props) {
   const innerW = popupWidth - 2;
   const maxVisible = Math.max(6, Math.floor(containerRows * 0.75) - CHROME_ROWS);
 
-  const categoryColors: Record<string, string> = useMemo(
-    () => ({
-      Git: t.warning,
-      Session: t.info,
-      Models: t.brandAlt,
-      Settings: t.brand,
-      Editor: t.success,
-      Intelligence: t.brandSecondary,
-      Tabs: t.warning,
-      System: t.textMuted,
-    }),
-    [t],
-  );
+  const categoryColors: Record<string, string> = {
+    Git: t.warning,
+    Session: t.info,
+    Models: t.brandAlt,
+    Settings: t.brand,
+    Editor: t.success,
+    Intelligence: t.brandSecondary,
+    Tabs: t.warning,
+    System: t.textMuted,
+  };
 
   const [query, setQuery] = useState("");
   const { cursor, setCursor, scrollOffset, adjustScroll, resetScroll } = usePopupScroll(maxVisible);
 
-  const allDefs = useMemo(() => getCommandDefs().filter((d) => !d.hidden), []);
-  const items = useMemo(
-    () => (query ? buildFilteredItems(allDefs, query) : buildGroupedItems(allDefs)),
-    [allDefs, query],
-  );
+  const allDefs = getCommandDefs().filter((d) => !d.hidden);
+  const items = query ? buildFilteredItems(allDefs, query) : buildGroupedItems(allDefs);
+
+  const commandCount = items.filter(isSelectable).length;
 
   const prevVisibleRef = useRef(false);
   useEffect(() => {
@@ -144,17 +275,14 @@ export function CommandPalette({ visible, onClose, onExecute }: Props) {
     resetScroll();
   }, [visible, items, setCursor, resetScroll]);
 
-  const execute = useCallback(
-    (item: PaletteItem) => {
-      if (item.def) {
-        onClose();
-        onExecute(item.def.cmd);
-      }
-    },
-    [onClose, onExecute],
-  );
+  const execute = (item: PaletteItem) => {
+    if (item.def) {
+      onClose();
+      onExecute(item.def.cmd);
+    }
+  };
 
-  useKeyboard((evt) => {
+  const handleKeyboard = (evt: { name?: string; ctrl?: boolean; meta?: boolean }) => {
     if (!visible) return;
 
     if (evt.name === "escape") {
@@ -216,11 +344,14 @@ export function CommandPalette({ visible, onClose, onExecute }: Props) {
       setQuery((q) => q + evt.name);
       resetScroll();
     }
-  });
+  };
+
+  useKeyboard(handleKeyboard);
 
   if (!visible) return null;
 
   const visibleItems = items.slice(scrollOffset, scrollOffset + maxVisible);
+  const searchBg = t.bgPopupHighlight;
 
   return (
     <Overlay>
@@ -242,19 +373,25 @@ export function CommandPalette({ visible, onClose, onExecute }: Props) {
         </PopupRow>
 
         {/* Search input */}
-        <PopupRow w={innerW}>
-          <text fg={t.brandAlt} bg={POPUP_BG}>
-            {icon("search")} {"> "}
+        <PopupRow w={innerW} bg={searchBg}>
+          <text fg={t.brandAlt} bg={searchBg}>
+            {"\uD83D\uDD0D"}{" "}
           </text>
-          <text fg={t.textPrimary} bg={POPUP_BG}>
+          <text fg={t.textPrimary} bg={searchBg}>
             {query}
           </text>
-          <text fg={t.brandAlt} bg={POPUP_BG}>
+          <text fg={t.brandAlt} bg={searchBg}>
             {"▎"}
           </text>
           {!query && (
-            <text fg={t.textDim} bg={POPUP_BG}>
+            <text fg={t.textDim} bg={searchBg}>
               {" type to search…"}
+            </text>
+          )}
+          {query && (
+            <text fg={t.textDim} bg={searchBg}>
+              {"  "}
+              {String(commandCount)} result{commandCount !== 1 ? "s" : ""}
             </text>
           )}
         </PopupRow>
@@ -277,47 +414,33 @@ export function CommandPalette({ visible, onClose, onExecute }: Props) {
 
             if (item.type === "header") {
               const cat = item.category ?? "";
-              const catColor = categoryColors[cat] ?? t.textMuted;
-              const catIcon = CATEGORY_ICONS[cat];
               return (
-                <PopupRow key={`h-${cat}`} w={innerW}>
-                  <text fg={catColor} bg={POPUP_BG} attributes={TextAttributes.BOLD}>
-                    {catIcon ? `${icon(catIcon)} ` : ""}
-                    {cat}
-                  </text>
-                </PopupRow>
+                <HeaderRow
+                  key={`h-${cat}`}
+                  category={cat}
+                  catColor={categoryColors[cat] ?? t.textMuted}
+                  catIcon={CATEGORY_ICONS[cat]}
+                  innerW={innerW}
+                />
               );
             }
 
             const def = item.def;
             if (!def) return null;
-            const isActive = idx === cursor;
-            const bg = isActive ? POPUP_HL : POPUP_BG;
-            const catColor = categoryColors[item.category ?? ""] ?? t.brandAlt;
-            const cmdColor = isActive ? catColor : t.textSecondary;
-            const descColor = isActive ? t.textSecondary : t.textMuted;
-            const cmdText = def.cmd;
 
             return (
-              <PopupRow key={def.cmd} bg={bg} w={innerW}>
-                <text fg={isActive ? catColor : t.textFaint} bg={bg}>
-                  {isActive ? "› " : "  "}
-                </text>
-                {renderHighlightedCmd(
-                  cmdText,
-                  item.matchIndices,
-                  cmdColor,
-                  isActive ? t.textPrimary : catColor,
-                  bg,
-                  isActive,
-                )}
-                <text fg={descColor} bg={bg} truncate>
-                  {"  "}
-                  {def.desc.length > innerW - cmdText.length - 8
-                    ? `${def.desc.slice(0, innerW - cmdText.length - 11)}…`
-                    : def.desc}
-                </text>
-              </PopupRow>
+              <CommandRow
+                key={def.cmd}
+                def={def}
+                isActive={idx === cursor}
+                catColor={categoryColors[item.category ?? ""] ?? t.brandAlt}
+                innerW={innerW}
+                matchIndices={item.matchIndices}
+                textSecondary={t.textSecondary}
+                textMuted={t.textMuted}
+                textFaint={t.textFaint}
+                textPrimary={t.textPrimary}
+              />
             );
           })}
         </box>
@@ -328,7 +451,7 @@ export function CommandPalette({ visible, onClose, onExecute }: Props) {
             <text fg={t.textDim} bg={POPUP_BG}>
               {scrollOffset > 0 ? "↑ " : "  "}
               {String(Math.max(1, items.slice(0, cursor + 1).filter(isSelectable).length))}/
-              {String(items.filter(isSelectable).length)}
+              {String(commandCount)}
               {scrollOffset + maxVisible < items.length ? " ↓" : ""}
             </text>
           </PopupRow>
@@ -346,66 +469,4 @@ export function CommandPalette({ visible, onClose, onExecute }: Props) {
       </box>
     </Overlay>
   );
-}
-
-function renderHighlightedCmd(
-  cmd: string,
-  indices: number[] | undefined,
-  baseFg: string,
-  hlFg: string,
-  bg: string,
-  bold: boolean,
-): React.ReactNode {
-  if (!indices || indices.length === 0) {
-    return (
-      <text fg={baseFg} bg={bg} attributes={bold ? TextAttributes.BOLD : undefined}>
-        {cmd}
-      </text>
-    );
-  }
-  const highlightSet = new Set(indices.filter((i) => i < cmd.length));
-  if (highlightSet.size === 0) {
-    return (
-      <text fg={baseFg} bg={bg} attributes={bold ? TextAttributes.BOLD : undefined}>
-        {cmd}
-      </text>
-    );
-  }
-
-  const spans: React.ReactNode[] = [];
-  let run = "";
-  let runHl = false;
-
-  const flush = () => {
-    if (!run) return;
-    spans.push(
-      <span
-        key={spans.length}
-        fg={runHl ? hlFg : baseFg}
-        bg={bg}
-        attributes={runHl ? TextAttributes.BOLD : undefined}
-      >
-        {run}
-      </span>,
-    );
-    run = "";
-  };
-
-  for (let i = 0; i < cmd.length; i++) {
-    const ch = cmd[i] ?? "";
-    const isHl = highlightSet.has(i);
-    if (i === 0) {
-      runHl = isHl;
-      run = ch;
-    } else if (isHl === runHl) {
-      run += ch;
-    } else {
-      flush();
-      runHl = isHl;
-      run = ch;
-    }
-  }
-  flush();
-
-  return <text bg={bg}>{spans}</text>;
 }
