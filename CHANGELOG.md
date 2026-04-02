@@ -2,6 +2,33 @@
 
 All notable changes to SoulForge are documented here.
 
+## [1.8.0] — 2026-04-02
+
+### Bug Fixes
+
+- context window propagation — authoritative source wins
+- improve model context window resolution
+- overhaul context window fallback tables across all providers
+- lock-in elapsed timer uses loadingStartedAt for accuracy
+- stall watchdog uses generous timeout between API steps
+- cache-friendly Anthropic context edits
+- improve tool formatters for soul_grep, soul_find, soul_impact, dispatch
+- improve tool descriptions and navigate auto-resolve
+- fuzzy clear cmd & prompt improvements
+### Features
+
+- **update**: rich changelog from GitHub releases, brew detection fix
+- lock-in UI polish — elapsed timer, color tweaks, minimal loading bar
+- wire flags param through git tool actions
+- phase-specific spinners and animated dots for lock-in mode
+- stream stall watchdog with auto-retry + sanitize empty assistant content
+- lock-in mode — hide narration, show tools + final answer
+### Performance
+
+- pre-warm OpenRouter + LLM Gateway model caches at boot
+### Refactor
+
+- improve system prompts — claude rewrite, shared rules, tool guidance
 ## [1.7.6] — 2026-04-01
 
 ### Bug Fixes
