@@ -1687,14 +1687,11 @@ export function useChat({
               const progress = s.scanProgress || "starting…";
               const stats =
                 s.files > 0 ? ` (${String(s.files)} files, ${String(s.symbols)} symbols)` : "";
-              const error = s.scanError ? `\n⚠ ${s.scanError}` : "";
+              const status = s.scanError
+                ? `**Soul Map scan failed:** ${s.scanError}`
+                : `**Soul Map indexing:** ${progress}${stats}`;
               setPendingQuestion((prev) =>
-                prev?.id === questionId
-                  ? {
-                      ...prev,
-                      question: `**Soul Map indexing:** ${progress}${stats}${error}${warning}`,
-                    }
-                  : prev,
+                prev?.id === questionId ? { ...prev, question: `${status}${warning}` } : prev,
               );
             };
 
