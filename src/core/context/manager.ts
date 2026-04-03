@@ -430,14 +430,25 @@ export class ContextManager {
     return `${String(gen)}|${modelId}|${mode}|${String(skillCount)}:${skillNames}|m${String(memGen)}`;
   }
 
-  waitForRepoMap(timeoutMs = 120_000): Promise<boolean> {
+  waitForRepoMap(timeoutMs = 120_000, signal?: AbortSignal): Promise<boolean> {
     if (!this.repoMapEnabled) return Promise.resolve(false);
     if (this.isRepoMapReady()) return Promise.resolve(true);
     return new Promise<boolean>((resolve) => {
       const start = Date.now();
+      const onAbort = () => resolve(false);
+      if (signal) {
+        if (signal.aborted) return resolve(false);
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
       const check = () => {
-        if (this.isRepoMapReady()) return resolve(true);
-        if (Date.now() - start > timeoutMs) return resolve(false);
+        if (this.isRepoMapReady()) {
+          signal?.removeEventListener("abort", onAbort);
+          return resolve(true);
+        }
+        if (signal?.aborted || Date.now() - start > timeoutMs) {
+          signal?.removeEventListener("abort", onAbort);
+          return resolve(false);
+        }
         setTimeout(check, 200);
       };
       check();

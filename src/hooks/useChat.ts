@@ -1674,24 +1674,28 @@ export function useChat({
         };
 
         if (!contextManager.isRepoMapReady()) {
-          const indexHint: ChatMessage = {
-            id: crypto.randomUUID(),
-            role: "assistant",
-            content: "Waiting for Soul Map to finish indexing…",
-            timestamp: Date.now(),
-          };
-          setMessages((prev) => [...prev, indexHint]);
+          const indexHintId = crypto.randomUUID();
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: indexHintId,
+              role: "assistant",
+              content: "Soul Map indexing… will proceed when ready.",
+              timestamp: Date.now(),
+            },
+          ]);
           setIsLoading(true);
-          const ready = await contextManager.waitForRepoMap();
-          setMessages((prev) => prev.filter((m) => m.id !== indexHint.id));
+          const ready = await contextManager.waitForRepoMap(120_000, abortController.signal);
+          setMessages((prev) => prev.filter((m) => m.id !== indexHintId));
+          if (abortController.signal.aborted) return;
           if (!ready) {
             setMessages((prev) => [
               ...prev,
               {
                 id: crypto.randomUUID(),
-                role: "assistant",
+                role: "system",
                 content:
-                  "Soul Map still indexing — proceeding without it. It will be available on the next message.",
+                  "⚠ Soul Map not ready — proceeding without soul tools. Dispatch agents will have limited capabilities.",
                 timestamp: Date.now(),
               },
             ]);
