@@ -1708,6 +1708,7 @@ export function useChat({
               question: `**Soul Map indexing:** starting…${warning}`,
               options: [{ label: "Proceed without Soul Map", value: "skip" }],
               allowSkip: false,
+              hideOther: true,
               resolve: (answer) => {
                 cleanup();
                 setPendingQuestion(null);

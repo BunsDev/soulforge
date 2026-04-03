@@ -43,7 +43,8 @@ export function QuestionPrompt({ question, isActive, onAnswer }: Props) {
   const [typing, setTyping] = useState(false);
   const [inputValue, setInputValue] = useState("");
 
-  const totalOptions = question.options.length + 1;
+  const showOther = !question.hideOther;
+  const totalOptions = question.options.length + (showOther ? 1 : 0);
 
   const handleKeyboard = (evt: import("@opentui/core").KeyEvent) => {
     if (!isActive) return;
@@ -138,7 +139,9 @@ export function QuestionPrompt({ question, isActive, onAnswer }: Props) {
           {question.options.map((opt, i) => (
             <OptionRow key={opt.value} label={opt.label} isSelected={i === selectedIdx} t={t} />
           ))}
-          <OptionRow label="Other" isSelected={selectedIdx === OTHER_IDX} t={t} />
+          {showOther && (
+            <OptionRow label="Other" isSelected={selectedIdx === OTHER_IDX} t={t} />
+          )}
           <text fg={t.textDim}>
             {"  "}↑↓ select · ⏎ confirm
             {question.allowSkip ? " · esc skip" : ""}

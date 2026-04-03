@@ -91,6 +91,8 @@ export interface PendingQuestion {
   resolve: (answer: string) => void;
   /** Permission prompts (web access, outside-cwd, destructive) — answer shown in UI but not sent as steering. */
   isPermission?: boolean;
+  /** Hide the "Other" free-text option — only show the listed options. */
+  hideOther?: boolean;
 }
 
 export type PlanReviewAction = "execute" | "clear_execute" | "cancel" | string;
