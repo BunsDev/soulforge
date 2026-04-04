@@ -29,6 +29,7 @@ const DEFAULT_CONFIG: AppConfig = {
   },
   theme: {
     name: "dark",
+    transparent: true,
   },
   nvimConfig: "default",
   editorIntegration: {

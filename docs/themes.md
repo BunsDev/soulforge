@@ -50,7 +50,10 @@ Theme is saved globally in `~/.soulforge/config.json`:
 {
   "theme": {
     "name": "catppuccin",
-    "transparent": true
+    "transparent": true,
+    "userMessageOpacity": 70,
+    "diffOpacity": 30,
+    "borderStrength": "strong"
   }
 }
 ```
@@ -59,8 +62,20 @@ Theme is saved globally in `~/.soulforge/config.json`:
 |-------|-------------|
 | `name` | Theme ID (builtin or custom) |
 | `transparent` | Make background transparent (for terminal background bleed-through) |
+| `userMessageOpacity` | User message background opacity when transparent: `0` (clear), `30` (dim), `70` (subtle), `100` (solid) |
+| `diffOpacity` | Diff background opacity when transparent: `0` (clear), `30` (dim), `70` (subtle), `100` (solid) |
+| `borderStrength` | Border visibility: `"default"`, `"strong"`, or `"op"` |
 
-Toggle transparency with `Tab` in the theme picker.
+### Theme Picker Controls
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Navigate themes (live preview) |
+| `Enter` | Apply selected theme |
+| `Tab` | Toggle transparent mode |
+| `M` | Cycle message background opacity |
+| `D` | Cycle diff background opacity |
+| `B` | Cycle border strength |
 
 ## Custom Themes
 
@@ -93,7 +108,7 @@ mkdir -p ~/.soulforge/themes
 }
 ```
 
-The file name (minus `.json`) becomes the theme ID. This theme appears as "My Theme" in the picker.
+The file name (minus `.json`) becomes the theme ID. This theme appears as "My Coffee" in the picker.
 
 ### Metadata Fields
 
@@ -109,37 +124,55 @@ The file name (minus `.json`) becomes the theme ID. This theme appears as "My Th
 Tokens use kebab-case in JSON files (auto-converted to camelCase internally). The full list:
 
 **Brand**
-- `brand` — primary brand color (used for highlights, active elements)
+- `brand` — primary brand color (highlights, active elements)
 - `brand-secondary` — secondary brand color
 - `brand-dim` — dimmed brand variant
 - `brand-alt` — alternative brand color
-
-**Backgrounds**
-- `bg-primary` — main background
-- `bg-elevated` — panels, popups, modals
-- `bg-sunken` — recessed areas
 
 **Text**
 - `text-primary` — main text
 - `text-secondary` — secondary text
 - `text-muted` — muted text
 - `text-dim` — dimmed text
-- `text-faint` — faintest text
+- `text-faint` — faint text
+- `text-subtle` — faintest text
+
+**Backgrounds**
+- `bg-app` — root application background
+- `bg-primary` — primary content area
+- `bg-secondary` — secondary content areas
+- `bg-elevated` — elevated panels (reasoning, diffs, plans)
+- `bg-popup` — popup/modal backgrounds
+- `bg-popup-highlight` — selected row in popups
+- `bg-overlay` — overlay dimming layer
+- `bg-input` — input fields
+- `bg-banner` — system banner
+- `bg-banner-error` — system banner (error state)
+- `bg-user` — user message bubble background
 
 **Borders**
 - `border` — default border color
-- `border-dim` — subtle borders
+- `border-focused` — focused/active border
+- `border-active` — active state border
+- `border-slash` — slash command mode border
 
 **Status**
 - `success` — success indicators
 - `error` — error indicators
 - `warning` — warning indicators
 - `info` — info indicators
+- `amber` — secondary warning/warm indicator
 
 **Diff**
-- `diff-add` — added lines
-- `diff-remove` — removed lines
-- `diff-change` — changed lines
+- `diff-added-bg` — background for added lines
+- `diff-removed-bg` — background for removed lines
+- `diff-added-sign` — color for + indicators
+- `diff-removed-sign` — color for - indicators
+
+**Accents**
+- `accent-user` — user message accent
+- `accent-assistant` — assistant message accent
+- `accent-system` — system message accent
 
 ### Legacy Format
 

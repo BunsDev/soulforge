@@ -31,6 +31,9 @@ Press `/theme` or `Ctrl+K` → search "theme" to open the theme picker. Themes p
 | `everforest-dark` | Comfortable green |
 | `ayu-dark` | Ayu Dark |
 | `nightfox` | Nightfox |
+| `proxysoul-main` | proxySoul — deep purple with hot pink |
+| `proxysoul-coffee` | proxySoul Coffee — warm amber & burnt orange |
+| `proxysoul-water` | proxySoul Water — ocean blue & teal |
 
 ### Light
 
@@ -49,7 +52,10 @@ Theme is saved globally in `~/.soulforge/config.json`:
 {
   "theme": {
     "name": "catppuccin",
-    "transparent": true
+    "transparent": true,
+    "userMessageOpacity": 70,
+    "diffOpacity": 30,
+    "borderStrength": "strong"
   }
 }
 ```
@@ -58,8 +64,20 @@ Theme is saved globally in `~/.soulforge/config.json`:
 |-------|-------------|
 | `name` | Theme ID (builtin or custom) |
 | `transparent` | Make background transparent (terminal background bleed-through) |
+| `userMessageOpacity` | User message background opacity when transparent: `0` (clear), `30` (dim), `70` (subtle), `100` (solid) |
+| `diffOpacity` | Diff background opacity when transparent: `0` (clear), `30` (dim), `70` (subtle), `100` (solid) |
+| `borderStrength` | Border visibility: `"default"`, `"strong"`, or `"op"` |
 
-Toggle transparency with `Tab` in the theme picker.
+### Theme picker controls
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Navigate themes (live preview) |
+| `Enter` | Apply selected theme |
+| `Tab` | Toggle transparent mode |
+| `M` | Cycle message background opacity |
+| `D` | Cycle diff background opacity |
+| `B` | Cycle border strength |
 
 ## Custom themes
 
@@ -105,11 +123,29 @@ The file name (minus `.json`) becomes the theme ID.
 Tokens use kebab-case in JSON files (auto-converted to camelCase internally):
 
 - **Brand**: `brand`, `brand-secondary`, `brand-dim`, `brand-alt`
-- **Backgrounds**: `bg-primary`, `bg-elevated`, `bg-sunken`
-- **Text**: `text-primary`, `text-secondary`, `text-muted`, `text-dim`, `text-faint`
-- **Borders**: `border`, `border-dim`
-- **Status**: `success`, `error`, `warning`, `info`
-- **Diff**: `diff-add`, `diff-remove`, `diff-change`
+- **Text**: `text-primary`, `text-secondary`, `text-muted`, `text-dim`, `text-faint`, `text-subtle`
+- **Backgrounds**: `bg-app`, `bg-primary`, `bg-secondary`, `bg-elevated`, `bg-popup`, `bg-popup-highlight`, `bg-overlay`, `bg-input`, `bg-banner`, `bg-banner-error`, `bg-user`
+- **Borders**: `border`, `border-focused`, `border-active`, `border-slash`
+- **Status**: `success`, `error`, `warning`, `info`, `amber`
+- **Diff**: `diff-added-bg`, `diff-removed-bg`, `diff-added-sign`, `diff-removed-sign`
+- **Accents**: `accent-user`, `accent-assistant`, `accent-system`
+
+### Legacy format
+
+You can also define multiple themes in `~/.soulforge/themes.json`:
+
+```json
+{
+  "my-theme": {
+    "_extends": "dark",
+    "brand": "#ff6600"
+  },
+  "another-theme": {
+    "_extends": "light",
+    "brand": "#0066ff"
+  }
+}
+```
 
 ## Hot reload
 

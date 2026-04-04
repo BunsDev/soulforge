@@ -11,6 +11,7 @@
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-strict-blue.svg" alt="TypeScript" /></a>
   <img src="https://img.shields.io/badge/tests-2296%20passing-brightgreen.svg" alt="Tests" />
   <a href="https://bun.sh"><img src="https://img.shields.io/badge/runtime-Bun-f472b6.svg" alt="Bun" /></a>
+  <a href="https://paypal.me/waeru"><img src="https://img.shields.io/badge/%E2%9A%94%EF%B8%8F_Fuel_the_Forge-PayPal-9B30FF.svg?style=flat&logo=paypal&logoColor=white" alt="Fuel the Forge" /></a>
 </p>
 
 <p align="center">
