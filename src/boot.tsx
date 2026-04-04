@@ -60,7 +60,9 @@ try {
       diffOpacity: cfg.theme?.diffOpacity,
       borderStrength: cfg.theme?.borderStrength,
     });
-} catch {}
+} catch {
+  applyTheme("dark", true);
+}
 watchThemes();
 
 const _t = getThemeTokens();
