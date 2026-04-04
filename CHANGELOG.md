@@ -2,6 +2,42 @@
 
 All notable changes to SoulForge are documented here.
 
+## [2.1.0] — 2026-04-04
+
+### Bug Fixes
+
+- make headless test TTY-independent
+- detect brew install when ~/.soulforge/bin shadows PATH\n\nBrew's post-install copies the binary to ~/.soulforge/bin/, which\nshadows the brew symlink at $HOMEBREW_PREFIX/bin/soulforge in PATH.\nThis caused detectInstallMethod() to fall through to \"binary\".\n\nFix: directly check if $HOMEBREW_PREFIX/bin/soulforge exists as a\nsymlink — the one artifact only brew creates.
+- accordion behavior in model selector — expanding a provider collapses others
+- update prompt-content test to match shell guidance heading
+- apply default transparent theme on first launch
+- strip mismatched provider options from subagents
+- git commit messages with literal \n instead of real newlines
+- remove Copilot auto-detect, require manual OAuth token
+- prevent interactive prompts from freezing the TUI
+- add x64-baseline build for pre-AVX CPUs
+- call GREEN() in headless --list-providers output
+- show clean error in headless when model API key is missing
+- detect package manager from monorepo root lockfile
+- handle web-tree-sitter WASM rename and broken grammar resilience
+### Documentation
+
+- add Copilot provider guide, update README and mintlify for 12 providers
+- fix theme token reference and add PayPal badge
+- merge redundant README sections into single feature table
+### Features
+
+- detect GitHub CLI and surface availability in system prompt
+- add MiniMax provider with M2/M2.1 models
+- inject working directory into system prompt and add conventional commits rule
+- add Copilot auto-detect toggle in /keys and fix footer text
+- add GitHub Copilot and GitHub Models as LLM providers
+### Miscellaneous
+
+- move Fuel the Forge badge to top of README
+### Refactor
+
+- derive secrets, icons, and API key UI from provider registry
 ## [2.0.0] — 2026-04-03
 
 ### Bug Fixes
