@@ -6,6 +6,7 @@ import { icon, providerIcon } from "../../core/icons.js";
 import { PROVIDER_CONFIGS } from "../../core/llm/models.js";
 import { useTheme } from "../../core/theme/index.js";
 import { useAllProviderModels } from "../../hooks/useAllProviderModels.js";
+import { isModelFree } from "../../stores/statusbar.js";
 import { useUIStore } from "../../stores/ui.js";
 import { Overlay, POPUP_BG, POPUP_HL, PopupRow, SPINNER_FRAMES } from "../layout/shared.js";
 
@@ -30,6 +31,7 @@ type Entry =
       name: string;
       ctx?: number;
       hasDesc: boolean;
+      free: boolean;
     };
 
 function fmtCtx(n?: number): string {
@@ -118,11 +120,12 @@ function ModelRow({ entry, active, isCurrent, isLast, iw }: ModelRowProps) {
   const cont = isLast ? "   " : " │ ";
   const bg = active ? POPUP_HL : POPUP_BG;
   const ctxStr = fmtCtx(entry.ctx);
+  const freeTag = entry.free ? " FREE" : "";
   const checkW = isCurrent ? 2 : 0;
-  const avail = iw - 5 - ctxStr.length - checkW;
+  const avail = iw - 5 - ctxStr.length - checkW - freeTag.length;
   const nm =
     entry.name.length > avail ? `${entry.name.slice(0, Math.max(0, avail - 1))}…` : entry.name;
-  const pad = Math.max(1, iw - 5 - nm.length - ctxStr.length - checkW);
+  const pad = Math.max(1, iw - 5 - nm.length - ctxStr.length - checkW - freeTag.length);
 
   return (
     <box key={`m-${entry.fullId}`} flexDirection="column">
@@ -137,6 +140,11 @@ function ModelRow({ entry, active, isCurrent, isLast, iw }: ModelRowProps) {
         >
           {nm}
         </text>
+        {entry.free && (
+          <text fg={t.success} bg={bg}>
+            {" FREE"}
+          </text>
+        )}
         {ctxStr ? (
           <text fg={active ? t.brandDim : t.textDim} bg={bg}>
             {" ".repeat(pad)}
@@ -272,14 +280,16 @@ export function LlmSelector({ visible, activeModel, onSelect, onClose }: Props) 
       for (const m of filtered) {
         const name = m.name || m.id;
         const hasDesc = name !== m.id;
+        const fullId = `${cfg.id}/${m.id}`;
         out.push({
           kind: "model",
           providerId: cfg.id,
           id: m.id,
-          fullId: `${cfg.id}/${m.id}`,
+          fullId,
           name,
           ctx: m.contextWindow,
           hasDesc,
+          free: isModelFree(fullId),
         });
       }
     }
