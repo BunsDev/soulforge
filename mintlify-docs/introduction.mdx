@@ -7,7 +7,7 @@ icon: "terminal"
 <img src="/images/main-1.png" alt="SoulForge" />
 <img src="/images/main-2.png" alt="SoulForge" />
 
-Your real Neovim -- config, plugins, LSP -- embedded in an AI agent that understands your codebase structurally. Graph-powered intelligence, multi-agent dispatch, 9 providers. Works over SSH.
+Your real Neovim -- config, plugins, LSP -- embedded in an AI agent that understands your codebase structurally. Graph-powered intelligence, multi-agent dispatch, 12 providers. Works over SSH.
 
 ## How it compares
 
@@ -19,7 +19,7 @@ Your real Neovim -- config, plugins, LSP -- embedded in an AI agent that underst
 | **Compound tools** | `rename_symbol`, `move_symbol`, `refactor` -- compiler-guaranteed, atomic | Rename via LSP | -- | -- | -- |
 | **Semantic context** | AST summaries for top 500 symbols, dispatch auto-enrichment | -- | -- | -- | Tree-sitter tag summaries |
 | **Multi-agent** | Parallel dispatch (8 agents, 3 concurrent, shared cache, edit ownership) | Subagents + Agent Teams | Subagents + Fleet | Multi-agent v2 + subagents | Single agent |
-| **Providers** | 9 (LLM Gateway, Anthropic, OpenAI, Google, xAI, Ollama, +3) + custom | Anthropic (API, Bedrock, Vertex) | Multi-model | OpenAI models | 100+ LLMs |
+| **Providers** | 12 (LLM Gateway, Anthropic, OpenAI, Google, xAI, Copilot, GitHub Models, Ollama, +4) + custom | Anthropic (API, Bedrock, Vertex) | Multi-model | OpenAI models | 100+ LLMs |
 | **Task routing** | Per-task model assignment (plan, code, explore, search, trivial, cleanup, compact) | Single model | Single model | Per-agent model | Single model |
 | **Context management** | 2-layer: per-step pruning + V1/V2 compaction | Auto-compaction | Context window management | Server-side compaction | -- |
 | **License** | BSL 1.1 (source-available) | Proprietary | Proprietary | Apache 2.0 | Apache 2.0 |
@@ -70,8 +70,8 @@ Your real Neovim -- config, plugins, LSP -- embedded in an AI agent that underst
   Catppuccin, Dracula, Gruvbox, Nord, Tokyo Night, Rose Pine, and more. Create custom themes with hot reload.
 </Card>
 
-<Card title="9 providers" icon="plug">
-  LLM Gateway, Anthropic, OpenAI, Google, xAI, Ollama, OpenRouter, Vercel AI Gateway, Proxy, and custom OpenAI-compatible APIs.
+<Card title="12 providers" icon="plug">
+  LLM Gateway, Anthropic, OpenAI, Google, xAI, GitHub Copilot, GitHub Models, Ollama, OpenRouter, Vercel AI Gateway, Proxy, and custom OpenAI-compatible APIs.
 </Card>
 
 <Card title="Per-model cost tracking" icon="chart-line">
@@ -134,6 +134,8 @@ SoulForge ships 33 tools organized by capability:
 | **OpenAI** | GPT-4.5, o3, o4-mini | `OPENAI_API_KEY` |
 | **Google** | Gemini 2.5 Pro/Flash | `GOOGLE_GENERATIVE_AI_API_KEY` |
 | **xAI** | Grok 3 | `XAI_API_KEY` |
+| **GitHub Copilot** | Claude, GPT-4o/5.4, Gemini, o-series | `/keys` or `--set-key` ([setup](/docs/copilot-provider)) |
+| **GitHub Models** | GPT-4o, Llama, DeepSeek, Mistral | `GITHUB_MODELS_API_KEY` (PAT with `models:read`) |
 | **Ollama** | Any local model | Auto-detected |
 | **OpenRouter** | 200+ models | `OPENROUTER_API_KEY` |
 | **Vercel AI Gateway** | Unified gateway for 15+ providers | `AI_GATEWAY_API_KEY` |

@@ -23,6 +23,8 @@ You need at least one LLM provider key:
 | OpenAI | `OPENAI_API_KEY` | GPT-4o, o3, o4-mini |
 | xAI | `XAI_API_KEY` | Grok |
 | Google | `GOOGLE_GENERATIVE_AI_API_KEY` | Gemini |
+| GitHub Copilot | `/keys` or `--set-key` | Claude, GPT-4o/5.4, Gemini, o-series |
+| GitHub Models | `GITHUB_MODELS_API_KEY` | GPT-4o, Llama, DeepSeek, Mistral |
 | Ollama | *(none -- runs locally)* | Llama, Mistral, Qwen, etc. |
 
 Add to your shell profile (`~/.zshrc` or `~/.bashrc`):
@@ -33,10 +35,28 @@ export ANTHROPIC_API_KEY=sk-ant-...
 
 Or use a single [AI Gateway](https://sdk.vercel.ai/docs/ai-sdk-core/provider-management) key for all providers, or the built-in **Proxy provider** to relay through a local CLIProxyAPI instance (no API key needed).
 
+### GitHub Copilot
+
+If you have a [GitHub Copilot](https://github.com/features/copilot) subscription, SoulForge can use it as a provider.
+
+**Setup:** Save your token via `/keys` or `soulforge --set-key copilot <token>`. To find your token, extract `oauth_token` from `~/.config/github-copilot/apps.json` (sign in via VS Code or JetBrains first). Or enable `copilotAutoDetect` in config to pick up `GITHUB_TOKEN` and `gh auth token` automatically.
+
+Models available through Copilot: Claude Opus/Sonnet, GPT-4o, GPT-4.1, GPT-5.4, o4-mini, Gemini 2.5 Pro, and more. All included in your Copilot subscription.
+
+<Warning>
+This is an unofficial integration using the same internal API as VS Code. Not endorsed by GitHub. Use at your own risk. See [Copilot provider docs](/docs/copilot-provider) for our full legal review.
+</Warning>
+
 ## Install
 
 <Tabs>
-  <Tab title="Prebuilt binary (recommended)">
+  <Tab title="Homebrew (recommended)">
+    ```bash
+    brew tap proxysoul/tap
+    brew install soulforge
+    ```
+  </Tab>
+  <Tab title="Prebuilt binary">
     Download the latest release from [GitHub Releases](https://github.com/ProxySoul/soulforge/releases/latest), extract, and run the installer:
 
     ```bash
@@ -46,12 +66,6 @@ Or use a single [AI Gateway](https://sdk.vercel.ai/docs/ai-sdk-core/provider-man
     ```
 
     Installs to `~/.soulforge/` and adds it to your PATH. Then run `soulforge` (or `sf`).
-  </Tab>
-  <Tab title="Homebrew">
-    ```bash
-    brew tap proxysoul/tap
-    brew install soulforge
-    ```
   </Tab>
   <Tab title="Bun (global install)">
     Requires [Bun](https://bun.sh) >= 1.2 — SoulForge uses Bun-specific APIs (Workers, native modules, PTY).

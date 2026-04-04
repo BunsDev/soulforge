@@ -9,6 +9,7 @@
 - **[Project Tool](project-tool.md)** — Toolchain detection, pre-commit checks, monorepo discovery
 - **[Steering](steering.md)** — Type while the agent works, messages inject mid-stream
 - **[Provider Options](provider-options.md)** — Thinking modes, effort, speed, context management
+- **[Copilot Provider](copilot-provider.md)** — Setup, models, cost, legal review for GitHub Copilot
 
 ## Architecture
 

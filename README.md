@@ -24,6 +24,21 @@
 
 ---
 
+## Table of Contents
+
+- [Why SoulForge?](#why-soulforge)
+- [How it compares](#how-it-compares)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Providers](#providers)
+- [Configuration](#configuration)
+- [Documentation](#documentation)
+- [Roadmap](#roadmap)
+- [Inspirations](#inspirations)
+- [License](#license)
+
+---
+
 ## Why SoulForge?
 
 Every AI coding tool starts blind. The agent reads files, greps around, slowly pieces together what your codebase looks like. You're paying for the agent to figure out what you already know.
@@ -47,7 +62,7 @@ SoulForge doesn't work that way. On startup, it builds a **live dependency graph
 
 - **Lock-in mode.** Hides agent narration during work, shows only tool activity and the final answer. Toggle via `/lock-in` or config.
 - **Embedded Neovim.** Your actual config, plugins, and LSP servers. The AI works through the same editor you use. [Deep dive →](docs/architecture.md)
-- **10 providers.** Anthropic, OpenAI, Google, xAI, Ollama, OpenRouter, LLM Gateway, Vercel AI Gateway, Proxy, and any OpenAI-compatible API. [Deep dive →](docs/provider-options.md)
+- **12 providers.** Anthropic, OpenAI, Google, xAI, GitHub Copilot, GitHub Models, Ollama, OpenRouter, LLM Gateway, Vercel AI Gateway, Proxy, and any OpenAI-compatible API.
 - **Task router.** Assign different models to different jobs. Spark agents (explore/investigate) and ember agents (code edits) can each use different models. You pick what goes where. [Deep dive →](docs/architecture.md)
 - **Code execution (Smithy).** Sandboxed code execution via Anthropic's `code_execution` tool. The agent can run Python to process data, do calculations, or batch tool calls programmatically.
 - **User steering.** Type while the agent works. Messages queue up and reach the agent at the next step. [Deep dive →](docs/steering.md)
@@ -72,7 +87,7 @@ SoulForge doesn't work that way. On startup, it builds a **live dependency graph
 | **Task routing** | Per-task model assignment (spark, ember, web search, verify, desloppify, compact) | Single model | Single model | Per-agent model | Single model |
 | **Compound tools** | `read` (batch + surgical), `multi_edit` (atomic), `rename_symbol`, `move_symbol`, `rename_file`, `refactor`, `project` | Rename via LSP | — | — | — |
 | **Editor** | Embedded Neovim (your config, your plugins) | No editor | No editor | No editor | No editor |
-| **Providers** | 10 + custom OpenAI-compatible | Anthropic only | Multi-model | OpenAI only | 100+ LLMs |
+| **Providers** | 12 + custom OpenAI-compatible | Anthropic only | Multi-model | OpenAI only | 100+ LLMs |
 | **License** | BSL 1.1 (source-available) | Proprietary | Proprietary | Apache 2.0 | Apache 2.0 |
 
 > *Competitor features verified as of March 29, 2026. [Let us know](https://github.com/ProxySoul/soulforge/issues) if something's changed.*
@@ -168,9 +183,16 @@ soulforge --headless --mode architect       # Read-only analysis
 soulforge --headless --diff "fix the bug"   # Show changed files
 ```
 
-**Modes:** default (full agent), auto (no questions), architect (read-only), socratic, challenge, plan
+| Mode | Description |
+|------|-------------|
+| `default` | Full agent with all tools |
+| `auto` | Executes immediately, no questions |
+| `architect` | Read-only analysis and review |
+| `socratic` | Guided learning through questions |
+| `challenge` | Pushes back on your assumptions |
+| `plan` | Planning mode, no code changes |
 
-[Full CLI reference →](docs/headless.md) · [All 86 slash commands →](docs/commands-reference.md)
+[Full CLI reference](docs/headless.md)
 
 ---
 
@@ -183,11 +205,17 @@ soulforge --headless --diff "fix the bug"   # Show changed files
 | [**OpenAI**](https://platform.openai.com/) | `OPENAI_API_KEY` |
 | [**Google**](https://aistudio.google.com/) | `GOOGLE_GENERATIVE_AI_API_KEY` |
 | [**xAI**](https://console.x.ai/) | `XAI_API_KEY` |
+| [**GitHub Copilot**](https://github.com/features/copilot) | `/keys` or `--set-key` ([setup](docs/copilot-provider.md)) |
+| [**GitHub Models**](https://github.com/marketplace/models) | `GITHUB_MODELS_API_KEY` (PAT with `models:read`) |
 | [**Ollama**](https://ollama.ai) | Auto-detected |
 | [**OpenRouter**](https://openrouter.ai) | `OPENROUTER_API_KEY` |
 | [**Vercel AI Gateway**](https://vercel.com/ai-gateway) | `AI_GATEWAY_API_KEY` |
 | [**Proxy**](https://github.com/router-for-me/CLIProxyAPI) | `PROXY_API_KEY` |
 | **Custom** | Any OpenAI-compatible API |
+
+**GitHub Copilot**: If you have a Copilot subscription, save your token via `/keys` or `--set-key copilot`. Or enable `copilotAutoDetect` in config to pick up `GITHUB_TOKEN` and `gh auth token` automatically. Claude Opus/Sonnet, GPT-4o/5.4, Gemini, o-series included in your subscription. [Full setup guide](docs/copilot-provider.md).
+
+**GitHub Models**: Free playground API with per-token billing. Create a fine-grained PAT with `models:read` scope. Lower rate limits than Copilot.
 
 Add custom providers in config, no code changes:
 
@@ -203,7 +231,7 @@ Add custom providers in config, no code changes:
 }
 ```
 
-[Provider options →](docs/provider-options.md) · [Custom providers →](docs/headless.md#custom-providers)
+[Custom providers](docs/headless.md#custom-providers) · [Provider options](docs/provider-options.md)
 
 ---
 
@@ -247,6 +275,9 @@ See [GETTING_STARTED.md](GETTING_STARTED.md) for the full config reference.
 | [Commands](docs/commands-reference.md) | All 86 slash commands |
 | [Steering](docs/steering.md) | Mid-stream user input |
 | [Provider Options](docs/provider-options.md) | Thinking modes, context management |
+| [Copilot Provider](docs/copilot-provider.md) | Setup, legal review |
+| [Cross-Tab Coordination](docs/cross-tab-coordination.md) | Multi-tab file claims, git coordination |
+| [Themes](docs/themes.md) | 24 themes, custom themes, hot reload |
 | [Prompt System](docs/prompt-system.md) | Per-family prompts, mode overlays |
 | [Getting Started](GETTING_STARTED.md) | First launch walkthrough |
 | [Contributing](CONTRIBUTING.md) | Dev setup, PR guidelines |
@@ -271,7 +302,7 @@ The intelligence layer is being extracted into reusable packages:
 
 - **[Aider](https://github.com/Aider-AI/aider)**: tree-sitter repo maps with PageRank. SoulForge adds cochange analysis, blast radius, clone detection, and live updates.
 - **[Everything Claude Code](https://github.com/affaan-m/everything-claude-code)**: enforce behavior with code, not prompts. Our schema validation, pre-commit gates, and auto-enrichment patterns come from this thinking.
-- **[Vercel AI SDK](https://sdk.vercel.ai)**: the multi-provider abstraction that makes 10 providers possible.
+- **[Vercel AI SDK](https://sdk.vercel.ai)**: the multi-provider abstraction that makes 12 providers possible.
 - **[Neovim](https://neovim.io)**: embedded via msgpack-RPC. Your config and muscle memory shouldn't be a compromise.
 
 ---
