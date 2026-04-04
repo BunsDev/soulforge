@@ -2,6 +2,11 @@
 
 All notable changes to SoulForge are documented here.
 
+## [2.2.1] — 2026-04-04
+
+### Bug Fixes
+
+- add Java/JVM LSP support and fix health check hangs (#8)
 ## [2.2.0] — 2026-04-04
 
 ### Bug Fixes
