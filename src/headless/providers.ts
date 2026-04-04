@@ -13,7 +13,7 @@ export async function listProviders(): Promise<void> {
     const mark = s.available ? `${GREEN()}ready${RST}` : `${DIM}no key${RST}`;
     const env = s.envVar ? `  ${DIM}(${s.envVar})${RST}` : "";
     process.stdout.write(
-      `${s.available ? GREEN : DIM}${s.id.padEnd(18)}${RST} ${mark}${env}${tag}\n`,
+      `${s.available ? GREEN() : DIM}${s.id.padEnd(18)}${RST} ${mark}${env}${tag}\n`,
     );
   }
 }
