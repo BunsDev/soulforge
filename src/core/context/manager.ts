@@ -47,6 +47,7 @@ const DEFAULT_CONTEXT_WINDOW = 200_000;
 
 export class ContextManager {
   private cwd: string;
+  private hasGhCli: boolean | null = null;
   private skills = new Map<string, string>();
   private memoryManager: MemoryManager;
   private forgeMode: ForgeMode = "default";
@@ -980,6 +981,13 @@ export class ContextManager {
 
   /** Build a system prompt with project context, scaled to context window. */
   buildSystemPrompt(modelIdOverride?: string): string {
+    if (this.hasGhCli === null) {
+      try {
+        this.hasGhCli = Bun.spawnSync(["gh", "--version"]).exitCode === 0;
+      } catch {
+        this.hasGhCli = false;
+      }
+    }
     const opts: PromptBuilderOptions = {
       modelId: modelIdOverride || this.lastActiveModel,
       hasRepoMap: this.isRepoMapReady(),
@@ -987,6 +995,7 @@ export class ContextManager {
       forgeMode: this.forgeMode,
       projectInstructions: this.projectInstructions || null,
       cwd: this.cwd,
+      hasGhCli: this.hasGhCli,
     };
     return buildPrompt(opts);
   }

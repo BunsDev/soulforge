@@ -48,6 +48,7 @@ export interface PromptBuilderOptions {
   contextPercent?: number;
   projectInstructions: string | null;
   cwd?: string;
+  hasGhCli?: boolean;
 }
 
 /**
@@ -81,8 +82,10 @@ export function buildSystemPrompt(opts: PromptBuilderOptions): string {
     parts.push(TOOL_GUIDANCE_NO_MAP);
   }
 
-  // 3. Working directory (stable — never changes during a session)
+  // 3. Working directory and environment (stable — never changes during a session)
   if (opts.cwd) parts.push(`Working directory: ${opts.cwd}`);
+  if (opts.hasGhCli)
+    parts.push("GitHub CLI (gh) is available. Use it for PRs, issues, and GitHub API operations.");
 
   // ── DYNAMIC SECTION ──
 
