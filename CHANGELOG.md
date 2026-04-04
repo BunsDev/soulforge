@@ -2,6 +2,11 @@
 
 All notable changes to SoulForge are documented here.
 
+## [2.3.0] — 2026-04-04
+
+### Features
+
+- add LM Studio provider; fix non-nerd-font icons for ollama, lmstudio, and custom providers
 ## [2.2.1] — 2026-04-04
 
 ### Bug Fixes
