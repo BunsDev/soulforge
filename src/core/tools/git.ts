@@ -84,6 +84,8 @@ interface GitArgs {
   staged?: boolean;
   count?: number;
   message?: string;
+  body?: string;
+  footer?: string;
   files?: string[];
   sub_action?: string;
   name?: string;
@@ -137,9 +139,13 @@ export const gitTool = {
       case "log":
         result = await execLog(args.count, args.flags);
         break;
-      case "commit":
-        result = await execCommit(args.message ?? "", args.files, args.amend);
+      case "commit": {
+        let msg = args.message ?? "";
+        if (args.body) msg += `\n\n${args.body}`;
+        if (args.footer) msg += `\n\n${args.footer}`;
+        result = await execCommit(msg, args.files, args.amend);
         break;
+      }
       case "push":
         result = await execPush(args.flags);
         break;

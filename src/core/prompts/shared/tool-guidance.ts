@@ -16,7 +16,8 @@ A Soul Map is loaded in context — every file, exported symbol, signature, line
 7. Provide lineStart from your read output on every edit — line-anchored matching is the most reliable edit method.
 8. Each tool call round-trip resends the full conversation. Every extra call costs thousands of tokens — batch aggressively.
 
-## Shell is for git, installs, and system commands only
+## Shell is for installs and system commands only
+Use the git tool for all git operations (commit, push, pull, branch, etc.) — not shell. Use body/footer params for multi-line commit messages.
 Tool descriptions list what each dedicated tool covers. Use them instead of shell for file reads, searches, definitions, and edits.
 
 ## Dispatch — writing good agent tasks

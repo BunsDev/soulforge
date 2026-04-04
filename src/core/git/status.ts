@@ -237,7 +237,8 @@ export async function gitCommit(
   message: string,
   amend?: boolean,
 ): Promise<{ ok: boolean; output: string }> {
-  const fullMessage = _coAuthorEnabled ? `${message}\n\n${CO_AUTHOR_LINE}` : message;
+  const cleaned = message.replace(/\\n/g, "\n");
+  const fullMessage = _coAuthorEnabled ? `${cleaned}\n\n${CO_AUTHOR_LINE}` : cleaned;
   const args = amend ? ["commit", "--amend", "-m", fullMessage] : ["commit", "-m", fullMessage];
   const { ok, stdout } = await run(args, cwd);
   return { ok, output: stdout };

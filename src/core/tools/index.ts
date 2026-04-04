@@ -1487,7 +1487,27 @@ export function buildTools(
           .nullable()
           .optional()
           .transform(nullToUndef)
-          .describe("For commit/stash/tag: message"),
+          .describe("For commit: subject line. For stash/tag: message"),
+        body: z
+          .preprocess(coerceJsonArray, z.union([z.string(), z.array(z.string())]))
+          .nullable()
+          .optional()
+          .transform((v) => {
+            if (v == null) return undefined;
+            return Array.isArray(v) ? v.join("\n") : v;
+          })
+          .describe('For commit: extended description. Prefer ["line1", "line2"] for multi-line.'),
+        footer: z
+          .preprocess(coerceJsonArray, z.union([z.string(), z.array(z.string())]))
+          .nullable()
+          .optional()
+          .transform((v) => {
+            if (v == null) return undefined;
+            return Array.isArray(v) ? v.join("\n") : v;
+          })
+          .describe(
+            'For commit: trailers (Fixes, BREAKING CHANGE). Prefer ["line1", "line2"] for multi-line.',
+          ),
         files: z
           .preprocess(coerceJsonArray, z.array(z.string()))
           .nullable()
