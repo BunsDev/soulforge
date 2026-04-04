@@ -4,11 +4,17 @@ set -euo pipefail
 # SoulForge Bundle Script
 # Creates a self-contained distributable with all native dependencies.
 # Usage: ./scripts/bundle.sh [arch] [platform]
-#   arch:     arm64 (default) or x64
+#   arch:     arm64 (default), x64, or x64-baseline (no AVX — for older CPUs)
 #   platform: darwin (default) or linux
 
 ARCH="${1:-arm64}"
 PLATFORM="${2:-darwin}"
+
+# x64-baseline: same native deps as x64, but Bun binary targets SSE2-only (no AVX).
+# Needed for pre-Sandy Bridge CPUs (Westmere, Nehalem, Core 2, etc.).
+BASE_ARCH="${ARCH}"
+[[ "$ARCH" == "x64-baseline" ]] && BASE_ARCH="x64"
+
 VERSION="$(bun -e "console.log(require('./package.json').version)")"
 BUNDLE_NAME="soulforge-${VERSION}-${PLATFORM}-${ARCH}"
 STAGE_DIR="dist/bundle/${BUNDLE_NAME}"
@@ -48,15 +54,19 @@ elif [[ "$PLATFORM" == "linux" ]]; then
     LAZYGIT_SUFFIX="Linux_arm64"
     PROXY_SUFFIX="linux_arm64"
     BUN_TARGET="bun-linux-aarch64"
-  elif [[ "$ARCH" == "x64" ]]; then
+  elif [[ "$BASE_ARCH" == "x64" ]]; then
     NVIM_ASSET="nvim-linux-x86_64.tar.gz"
     RG_TRIPLET="x86_64-unknown-linux-musl"
     FD_TRIPLET="x86_64-unknown-linux-musl"
     LAZYGIT_SUFFIX="Linux_x86_64"
     PROXY_SUFFIX="linux_amd64"
-    BUN_TARGET="bun-linux-x64"
-  else
-    echo "Unknown arch: ${ARCH} (use arm64 or x64)"
+    if [[ "$ARCH" == "x64-baseline" ]]; then
+        BUN_TARGET="bun-linux-x64-baseline"
+    else
+        BUN_TARGET="bun-linux-x64"
+    fi
+    else
+    echo "Unknown arch: ${ARCH} (use arm64, x64, or x64-baseline)"
     exit 1
   fi
 else

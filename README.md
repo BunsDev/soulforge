@@ -139,6 +139,7 @@ git clone https://github.com/ProxySoul/soulforge.git && cd soulforge && bun inst
 ./scripts/bundle.sh              # macOS ARM64
 ./scripts/bundle.sh x64          # Intel Mac
 ./scripts/bundle.sh x64 linux    # Linux x64
+./scripts/bundle.sh x64-baseline linux  # Linux x64 (older CPUs without AVX)
 ./scripts/bundle.sh arm64 linux  # Linux ARM64
 cd dist/bundle/soulforge-*/ && ./install.sh
 ```
@@ -205,7 +206,7 @@ soulforge --headless --diff "fix the bug"   # Show changed files
 | [**OpenAI**](https://platform.openai.com/) | `OPENAI_API_KEY` |
 | [**Google**](https://aistudio.google.com/) | `GOOGLE_GENERATIVE_AI_API_KEY` |
 | [**xAI**](https://console.x.ai/) | `XAI_API_KEY` |
-| [**GitHub Copilot**](https://github.com/features/copilot) | `/keys` or `--set-key` ([setup](docs/copilot-provider.md)) |
+| [**GitHub Copilot**](https://github.com/features/copilot) | OAuth token from IDE ([setup](docs/copilot-provider.md)) |
 | [**GitHub Models**](https://github.com/marketplace/models) | `GITHUB_MODELS_API_KEY` (PAT with `models:read`) |
 | [**Ollama**](https://ollama.ai) | Auto-detected |
 | [**OpenRouter**](https://openrouter.ai) | `OPENROUTER_API_KEY` |
@@ -213,7 +214,7 @@ soulforge --headless --diff "fix the bug"   # Show changed files
 | [**Proxy**](https://github.com/router-for-me/CLIProxyAPI) | `PROXY_API_KEY` |
 | **Custom** | Any OpenAI-compatible API |
 
-**GitHub Copilot**: If you have a Copilot subscription, save your token via `/keys` or `--set-key copilot`. Or enable `copilotAutoDetect` in config to pick up `GITHUB_TOKEN` and `gh auth token` automatically. Claude Opus/Sonnet, GPT-4o/5.4, Gemini, o-series included in your subscription. [Full setup guide](docs/copilot-provider.md).
+**GitHub Copilot**: Sign in via your IDE (VS Code, JetBrains), copy `oauth_token` from `~/.config/github-copilot/apps.json`, save with `/keys` or `--set-key copilot`. [Full setup guide](docs/copilot-provider.md).
 
 **GitHub Models**: Free playground API with per-token billing. Create a fine-grained PAT with `models:read` scope. Lower rate limits than Copilot.
 

@@ -25,6 +25,9 @@ jobs:
             arch: x64
             platform: linux
           - os: ubuntu-latest
+            arch: x64-baseline
+            platform: linux
+          - os: ubuntu-latest
             arch: arm64
             platform: linux
 
@@ -40,9 +43,12 @@ jobs:
 
       - name: Install target platform native deps
         run: |
-          PKG="@opentui/core-${{ matrix.platform }}-${{ matrix.arch }}"
+          # x64-baseline uses the same native deps as x64
+          NATIVE_ARCH="${{ matrix.arch }}"
+          [[ "$NATIVE_ARCH" == "x64-baseline" ]] && NATIVE_ARCH="x64"
+          PKG="@opentui/core-${{ matrix.platform }}-${NATIVE_ARCH}"
           OTUI_VER=$(bun -e "console.log(require('@opentui/core/package.json').version)")
-          TARGET_DIR="node_modules/@opentui/core-${{ matrix.platform }}-${{ matrix.arch }}"
+          TARGET_DIR="node_modules/@opentui/core-${{ matrix.platform }}-${NATIVE_ARCH}"
           if [ ! -d "$TARGET_DIR" ]; then
             mkdir -p "$TARGET_DIR"
             TARBALL=$(npm pack "${PKG}@${OTUI_VER}" 2>/dev/null | tail -1)
@@ -112,7 +118,7 @@ jobs:
         id: sha
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          for platform in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
+          for platform in darwin-arm64 darwin-x64 linux-x64 linux-x64-baseline linux-arm64; do
             SHA=$(grep "soulforge-${VERSION}-${platform}.tar.gz" assets/SHA256SUMS.txt | awk '{print $1}')
             KEY=$(echo "$platform" | tr '-' '_')
             echo "${KEY}=${SHA}" >> "$GITHUB_OUTPUT"
@@ -132,6 +138,7 @@ jobs:
           SHA_DARWIN_ARM64: ${{ steps.sha.outputs.darwin_arm64 }}
           SHA_DARWIN_X64: ${{ steps.sha.outputs.darwin_x64 }}
           SHA_LINUX_X64: ${{ steps.sha.outputs.linux_x64 }}
+          SHA_LINUX_X64_BASELINE: ${{ steps.sha.outputs.linux_x64_baseline }}
           SHA_LINUX_ARM64: ${{ steps.sha.outputs.linux_arm64 }}
         run: |
           mkdir -p homebrew-tap/Formula
@@ -162,8 +169,14 @@ jobs:
                 sha256 "${SHA_LINUX_ARM64}"
               end
               if Hardware::CPU.intel?
-                url "https://github.com/ProxySoul/soulforge/releases/download/v#{version}/soulforge-#{version}-linux-x64.tar.gz"
-                sha256 "${SHA_LINUX_X64}"
+                # Use baseline build (no AVX) for pre-Sandy Bridge CPUs
+                if `grep -c avx /proc/cpuinfo 2>/dev/null`.strip.to_i > 0
+                  url "https://github.com/ProxySoul/soulforge/releases/download/v#{version}/soulforge-#{version}-linux-x64.tar.gz"
+                  sha256 "${SHA_LINUX_X64}"
+                else
+                  url "https://github.com/ProxySoul/soulforge/releases/download/v#{version}/soulforge-#{version}-linux-x64-baseline.tar.gz"
+                  sha256 "${SHA_LINUX_X64_BASELINE}"
+                end
               end
             end
 
