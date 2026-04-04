@@ -244,7 +244,8 @@ describe("buildCustomProvider", () => {
 		expect(def.id).toBe("test");
 		expect(def.name).toBe("Test");
 		expect(def.envVar).toBe("TEST_KEY");
-		expect(def.icon).toBe("◇");
+		expect(def.icon).toBe("\uF29F"); // nf-fa-diamond
+		expect(def.asciiIcon).toBe("◇");
 		expect(def.custom).toBe(true);
 		expect(def.contextWindows).toEqual([]);
 		expect(typeof def.createModel).toBe("function");

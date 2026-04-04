@@ -63,7 +63,7 @@ SoulForge doesn't work that way. On startup, it builds a **live dependency graph
 
 - **Lock-in mode.** Hides agent narration during work, shows only tool activity and the final answer. Toggle via `/lock-in` or config.
 - **Embedded Neovim.** Your actual config, plugins, and LSP servers. The AI works through the same editor you use. [Deep dive →](docs/architecture.md)
-- **17 providers.** Anthropic, OpenAI, Google, xAI, Groq, DeepSeek, Mistral, Amazon Bedrock, Fireworks, GitHub Copilot, GitHub Models, Ollama, OpenRouter, LLM Gateway, Vercel AI Gateway, Proxy, and any OpenAI-compatible API.
+- **18 providers.** Anthropic, OpenAI, Google, xAI, Groq, DeepSeek, Mistral, Amazon Bedrock, Fireworks, GitHub Copilot, GitHub Models, Ollama, LM Studio, OpenRouter, LLM Gateway, Vercel AI Gateway, Proxy, and any OpenAI-compatible API.
 - **Task router.** Assign different models to different jobs. Spark agents (explore/investigate) and ember agents (code edits) can each use different models. You pick what goes where. [Deep dive →](docs/architecture.md)
 - **Code execution (Smithy).** Sandboxed code execution via Anthropic's `code_execution` tool. The agent can run Python to process data, do calculations, or batch tool calls programmatically.
 - **User steering.** Type while the agent works. Messages queue up and reach the agent at the next step. [Deep dive →](docs/steering.md)
@@ -88,7 +88,7 @@ SoulForge doesn't work that way. On startup, it builds a **live dependency graph
 | **Task routing** | Per-task model assignment (spark, ember, web search, verify, desloppify, compact) | Single model | Single model | Per-agent model | Single model |
 | **Compound tools** | `read` (batch + surgical), `multi_edit` (atomic), `rename_symbol`, `move_symbol`, `rename_file`, `refactor`, `project` | Rename via LSP | — | — | — |
 | **Editor** | Embedded Neovim (your config, your plugins) | No editor | No editor | No editor | No editor |
-| **Providers** | 17 + custom OpenAI-compatible | Anthropic only | Multi-model | OpenAI only | 100+ LLMs |
+| **Providers** | 18 + custom OpenAI-compatible | Anthropic only | Multi-model | OpenAI only | 100+ LLMs |
 | **License** | BSL 1.1 (source-available) | Proprietary | Proprietary | Apache 2.0 | Apache 2.0 |
 
 > *Competitor features verified as of March 29, 2026. [Let us know](https://github.com/ProxySoul/soulforge/issues) if something's changed.*
@@ -215,6 +215,7 @@ soulforge --headless --diff "fix the bug"   # Show changed files
 | [**GitHub Copilot**](https://github.com/features/copilot) | OAuth token from IDE ([setup](docs/copilot-provider.md)) |
 | [**GitHub Models**](https://github.com/marketplace/models) | `GITHUB_MODELS_API_KEY` (PAT with `models:read`) |
 | [**Ollama**](https://ollama.ai) | Auto-detected |
+| [**LM Studio**](https://lmstudio.ai) | Auto-detected |
 | [**OpenRouter**](https://openrouter.ai) | `OPENROUTER_API_KEY` |
 | [**Vercel AI Gateway**](https://vercel.com/ai-gateway) | `AI_GATEWAY_API_KEY` |
 | [**Proxy**](https://github.com/router-for-me/CLIProxyAPI) | `PROXY_API_KEY` |
@@ -225,6 +226,10 @@ soulforge --headless --diff "fix the bug"   # Show changed files
 **GitHub Copilot**: Sign in via your IDE (VS Code, JetBrains), copy `oauth_token` from `~/.config/github-copilot/apps.json`, save with `/keys` or `--set-key copilot`. [Full setup guide](docs/copilot-provider.md).
 
 **GitHub Models**: Free playground API with per-token billing. Create a fine-grained PAT with `models:read` scope. Lower rate limits than Copilot.
+
+**Ollama**: Auto-detected at `localhost:11434`. Override with `OLLAMA_HOST=http://host:port`.
+
+**LM Studio**: Auto-detected at `localhost:1234`. Uses the [REST API v0](https://lmstudio.ai/docs/developer/rest/endpoints) for rich model data (context length, type filtering). Override with `LM_STUDIO_URL=http://host:port`. Optional auth: set `LM_API_TOKEN` if you've enabled authentication in LM Studio.
 
 Add custom providers in config, no code changes:
 

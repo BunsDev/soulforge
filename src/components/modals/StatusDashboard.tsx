@@ -16,6 +16,7 @@ import {
   computeModelCost,
   computeTotalCostFromBreakdown,
   isModelFree,
+  isModelLocal,
   type TokenUsage,
   useStatusBarStore,
 } from "../../stores/statusbar.js";
@@ -575,19 +576,22 @@ export function StatusDashboard({
       const sortedBd = Object.entries(su.modelBreakdown ?? {}).sort(
         ([midA, a], [midB, b]) => computeModelCost(midB, b) - computeModelCost(midA, a),
       );
-      const allFree = sortedBd.length > 0 && sortedBd.every(([mid]) => isModelFree(mid));
+      const allLocal = sortedBd.length > 0 && sortedBd.every(([mid]) => isModelLocal(mid));
+      const allFree =
+        !allLocal && sortedBd.length > 0 && sortedBd.every(([mid]) => isModelFree(mid));
       const totalCost =
         sortedBd.length > 0 ? computeTotalCostFromBreakdown(su.modelBreakdown ?? {}) : 0;
-      if (totalCost > 0 || allFree) {
+      if (totalCost > 0 || allFree || allLocal) {
         const fmtCost = (c: number) => (c < 0.01 ? `${c.toFixed(3)}` : `${c.toFixed(2)}`);
         lines.push(<Spacer key="s-cost" innerW={innerW} />);
         const costHeader = isAllScope ? "Cost Breakdown — All Tabs" : "Cost Breakdown";
         lines.push(<SectionHeader key="h-cost" label={costHeader} innerW={innerW} />);
         const costLabelW = Math.min(30, innerW - 20);
         for (const [mid, usage] of sortedBd) {
-          const free = isModelFree(mid);
+          const local = isModelLocal(mid);
+          const free = !local && isModelFree(mid);
           const c = computeModelCost(mid, usage);
-          if (c <= 0 && !free) continue;
+          if (c <= 0 && !free && !local) continue;
           const pct = totalCost > 0 ? Math.round((c / totalCost) * 100) : 0;
           const maxModelW = costLabelW - 4;
           const shortId = mid.length > maxModelW ? `${mid.slice(0, maxModelW - 1)}…` : mid;
@@ -595,8 +599,8 @@ export function StatusDashboard({
             <EntryRow
               key={`cost-${mid}`}
               label={`  ${shortId}`}
-              value={free ? "FREE" : `${fmtCost(c)}  (${String(pct)}%)`}
-              valueColor={free ? t.success : t.textPrimary}
+              value={local ? "Local" : free ? "FREE" : `${fmtCost(c)}  (${String(pct)}%)`}
+              valueColor={local || free ? t.success : t.textPrimary}
               labelW={costLabelW}
               rightAlign
               innerW={innerW}
@@ -607,8 +611,8 @@ export function StatusDashboard({
           <EntryRow
             key="cost-total"
             label="  Total"
-            value={allFree ? "FREE" : fmtCost(totalCost)}
-            valueColor={allFree ? t.success : t.warning}
+            value={allLocal ? "Local" : allFree ? "FREE" : fmtCost(totalCost)}
+            valueColor={allLocal || allFree ? t.success : t.warning}
             labelW={costLabelW}
             rightAlign
             innerW={innerW}
@@ -623,6 +627,8 @@ export function StatusDashboard({
       lines.push(<SectionHeader key="h-tabs" label="Per Tab" innerW={innerW} />);
 
       const fmtCost = (c: number, modelIds?: string[]) => {
+        if (modelIds && modelIds.length > 0 && modelIds.every((mid) => isModelLocal(mid)))
+          return "Local";
         if (modelIds && modelIds.length > 0 && modelIds.every((mid) => isModelFree(mid)))
           return "FREE";
         return c <= 0 ? "—" : c < 0.01 ? `$${c.toFixed(3)}` : `$${c.toFixed(2)}`;

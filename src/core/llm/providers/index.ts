@@ -8,6 +8,7 @@ export { githubModels } from "./github-models.js";
 export { google } from "./google.js";
 export { groq } from "./groq.js";
 export { llmgateway } from "./llmgateway.js";
+export { lmstudio } from "./lmstudio.js";
 export { minimax } from "./minimax.js";
 export { mistral } from "./mistral.js";
 export { ollama } from "./ollama.js";
@@ -28,6 +29,7 @@ import { githubModels } from "./github-models.js";
 import { google } from "./google.js";
 import { groq } from "./groq.js";
 import { llmgateway } from "./llmgateway.js";
+import { lmstudio } from "./lmstudio.js";
 import { minimax } from "./minimax.js";
 import { mistral } from "./mistral.js";
 import { ollama } from "./ollama.js";
@@ -56,6 +58,7 @@ const BUILTIN_PROVIDERS: ProviderDefinition[] = [
   githubModels,
   openrouter,
   ollama,
+  lmstudio,
 ];
 
 let allProviders: ProviderDefinition[] = [...BUILTIN_PROVIDERS];

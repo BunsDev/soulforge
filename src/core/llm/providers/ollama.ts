@@ -5,26 +5,29 @@ interface OllamaModel {
   name: string;
 }
 
-// Ollama uses OpenAI's SDK with a local base URL because Ollama exposes
-// an OpenAI-compatible API at localhost:11434/v1.
+/** Ollama host — override with OLLAMA_HOST (e.g. "http://192.168.1.5:11434"). */
+function getOllamaHost(): string {
+  return (process.env.OLLAMA_HOST ?? "http://localhost:11434").replace(/\/+$/, "");
+}
+
 export const ollama: ProviderDefinition = {
   id: "ollama",
   name: "Ollama",
   envVar: "",
-  icon: "🦙",
-  asciiIcon: "🦙",
+  icon: "\uEBA2", // nf-cod-server_process U+EBA2
+  asciiIcon: "O",
   description: "Local models — no key needed",
 
   createModel(modelId: string) {
     const client = createOpenAI({
-      baseURL: "http://localhost:11434/v1",
+      baseURL: `${getOllamaHost()}/v1`,
       apiKey: "ollama",
     });
     return client.chat(modelId);
   },
 
   async fetchModels(): Promise<ProviderModelInfo[] | null> {
-    const res = await fetch("http://localhost:11434/api/tags");
+    const res = await fetch(`${getOllamaHost()}/api/tags`);
     if (!res.ok) throw new Error(`Ollama API ${String(res.status)}`);
     const data = (await res.json()) as { models: OllamaModel[] };
     return data.models.map((m) => {
@@ -42,7 +45,7 @@ export const ollama: ProviderDefinition = {
 
   async checkAvailability() {
     try {
-      const res = await fetch("http://localhost:11434/api/tags", {
+      const res = await fetch(`${getOllamaHost()}/api/tags`, {
         signal: AbortSignal.timeout(1000),
       });
       return res.ok;

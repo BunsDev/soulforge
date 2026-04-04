@@ -37,8 +37,8 @@ describe("new providers registration", () => {
 
 	test("total builtin count increased by 5", () => {
 		const builtins = getAllProviders().filter((p) => !p.custom);
-		// Was 12, now 17
-		expect(builtins.length).toBe(17);
+		// Was 13, now 18
+		expect(builtins.length).toBe(18);
 	});
 });
 

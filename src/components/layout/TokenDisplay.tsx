@@ -4,6 +4,7 @@ import { getThemeTokens } from "../../core/theme/index.js";
 import {
   computeTotalCostFromBreakdown,
   isModelFree,
+  isModelLocal,
   useStatusBarStore,
 } from "../../stores/statusbar.js";
 
@@ -21,8 +22,14 @@ function fmtCost(usd: number): string {
   return `$${usd.toFixed(2)}`;
 }
 
-function buildContent(costCents: number, cacheHitPct: number, free: boolean): StyledText {
+function buildContent(
+  costCents: number,
+  cacheHitPct: number,
+  free: boolean,
+  local: boolean,
+): StyledText {
   const tk = getThemeTokens();
+  if (local) return new StyledText([fgStyle(tk.success)("Local")]);
   if (free) return new StyledText([fgStyle(tk.success)("FREE")]);
   const cost = costCents / 100;
   if (cost <= 0) return new StyledText([fgStyle(tk.textFaint)("$0")]);
@@ -37,15 +44,18 @@ export function TokenDisplay() {
   const cacheHitRef = useRef(0);
   const currentCostRef = useRef(0);
   const freeRef = useRef(false);
+  const localRef = useRef(false);
 
   useEffect(
     () =>
       useStatusBarStore.subscribe((state) => {
         const usage = state.tokenUsage;
         const breakdown = usage.modelBreakdown;
-        // Check if ALL models in the breakdown are free
+        // Check if ALL models in the breakdown are local or free
         const modelIds = Object.keys(breakdown);
-        freeRef.current = modelIds.length > 0 && modelIds.every((mid) => isModelFree(mid));
+        localRef.current = modelIds.length > 0 && modelIds.every((mid) => isModelLocal(mid));
+        freeRef.current =
+          !localRef.current && modelIds.length > 0 && modelIds.every((mid) => isModelFree(mid));
         const rawCost =
           breakdown && modelIds.length > 0 ? computeTotalCostFromBreakdown(breakdown) : 0;
         costRef.current = Math.round(rawCost * 100);
@@ -66,6 +76,7 @@ export function TokenDisplay() {
             currentCostRef.current,
             cacheHitRef.current,
             freeRef.current,
+            localRef.current,
           );
       } catch {}
     }, STEP_MS);
@@ -76,7 +87,12 @@ export function TokenDisplay() {
     <text
       ref={textRef}
       truncate
-      content={buildContent(currentCostRef.current, cacheHitRef.current, freeRef.current)}
+      content={buildContent(
+        currentCostRef.current,
+        cacheHitRef.current,
+        freeRef.current,
+        localRef.current,
+      )}
     />
   );
 }

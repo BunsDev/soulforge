@@ -181,6 +181,15 @@ function matchCopilotPricing(model: string): ModelPricing | undefined {
   return undefined;
 }
 
+const LOCAL_PROVIDERS = new Set(["ollama", "lmstudio"]);
+
+/** Check if a model runs locally (Ollama, LM Studio, etc.) — always zero cost. */
+export function isModelLocal(modelId: string): boolean {
+  const slash = modelId.indexOf("/");
+  if (slash < 0) return false;
+  return LOCAL_PROVIDERS.has(modelId.slice(0, slash).toLowerCase());
+}
+
 /** Check if a model is free (`:free` / `-free` suffix, or zero pricing from OpenRouter). */
 export function isModelFree(modelId: string): boolean {
   const id = modelId.toLowerCase();
@@ -197,8 +206,8 @@ export function isModelFree(modelId: string): boolean {
 function matchPricing(modelId: string): ModelPricing {
   const id = modelId.toLowerCase();
 
-  // Free models — zero cost
-  if (isModelFree(modelId)) return FREE_PRICING;
+  // Local and free models — zero cost
+  if (isModelLocal(modelId) || isModelFree(modelId)) return FREE_PRICING;
 
   // GitHub Copilot: premium request-based pricing
   if (id.startsWith("copilot/")) {
