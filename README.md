@@ -216,7 +216,11 @@ The `soul_vision` tool renders images directly in your chat — pixel-perfect on
 **Legend:** ✅ = native pixel rendering &nbsp; 🎨 = terminal art &nbsp; ⬜ = no animation (shows first frame)
 
 **Formats:** PNG, JPG, WebP, GIF, BMP, TIFF — non-PNG auto-converted via `ffmpeg`, `sips` (macOS), or ImageMagick.
-Install `chafa` for higher quality terminal art on non-pixel terminals. Install `ffmpeg` for animated GIF + format conversion.
+Install [`chafa`](https://github.com/hpjansson/chafa) for higher quality terminal art on non-pixel terminals. Install [`ffmpeg`](https://github.com/FFmpeg/FFmpeg) for animated GIF + format conversion. Install [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) for video to GIF conversion.
+
+```bash
+brew install ffmpeg chafa yt-dlp
+```
 
 </sub>
 

@@ -2,9 +2,10 @@ import { execSync } from "node:child_process";
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, extname, resolve } from "node:path";
-import type { ToolResult } from "../../types/index.js";
+import type { ChatMessage, ToolResult } from "../../types/index.js";
 import {
   canRenderImages,
+  isKittyGraphicsTerminal,
   type KittyAnimFrame,
   renderAnimatedImage,
   renderImageFromData,
@@ -371,4 +372,116 @@ export async function showImage(
     output: `Displayed image: ${name} (${String(art.lines.length)} rows)`,
     _imageArt: [art],
   };
+}
+
+/**
+ * Re-fetch and re-transmit images for a restored session.
+ * Kitty image IDs are ephemeral — they're lost when the terminal session ends.
+ * This scans messages for soul_vision tool calls with stale kittyImageId,
+ * re-fetches the image from the original URL/path, and re-transmits to Kitty
+ * so placeholders render correctly again.
+ */
+export async function restoreSessionImages(messages: ChatMessage[], cwd: string): Promise<number> {
+  if (!canRenderImages() || !isKittyGraphicsTerminal()) return 0;
+
+  const staleEntries: Array<{
+    tc: ChatMessage["toolCalls"] extends (infer T)[] | undefined ? T : never;
+    imgIdx: number;
+  }> = [];
+
+  for (const msg of messages) {
+    if (!msg.toolCalls) continue;
+    for (const tc of msg.toolCalls) {
+      if (tc.name !== "soul_vision" || !tc.imageArt) continue;
+      for (let i = 0; i < tc.imageArt.length; i++) {
+        const img = tc.imageArt[i];
+        if (img?.kittyImageId) {
+          staleEntries.push({ tc, imgIdx: i });
+        }
+      }
+    }
+  }
+
+  if (staleEntries.length === 0) return 0;
+
+  // Re-fetch and re-render each image concurrently (with a concurrency limit)
+  const CONCURRENCY = 3;
+  let idx = 0;
+  let restored = 0;
+
+  async function processNext(): Promise<void> {
+    while (idx < staleEntries.length) {
+      const current = idx++;
+      const entry = staleEntries[current];
+      if (!entry) continue;
+
+      const { tc, imgIdx } = entry;
+      const path = tc.args?.path as string | undefined;
+      if (!path || typeof path !== "string") continue;
+
+      try {
+        let data: Buffer | null = null;
+        let name: string;
+
+        if (URL_RE.test(path)) {
+          const result = await fetchImageUrl(path);
+          if ("error" in result) continue;
+          data = result.data;
+          name = result.name;
+        } else {
+          const filePath = resolve(cwd, path);
+          if (!existsSync(filePath)) continue;
+          const stat = statSync(filePath);
+          if (!stat.isFile() || stat.size > MAX_IMAGE_SIZE) continue;
+          data = readFileSync(filePath);
+          name = path;
+        }
+
+        if (!data) continue;
+
+        // Re-render: GIF animation or static image
+        let art: {
+          kittyImageId?: number;
+          kittyCols?: number;
+          kittyRows?: number;
+          lines: string[];
+          name: string;
+        } | null = null;
+
+        if (isGif(data) && supportsKittyAnimation()) {
+          const frames = extractGifFrames(data);
+          if (frames && frames.length > 1) {
+            art = renderAnimatedImage(frames, name, { cols: tc.imageArt?.[imgIdx]?.kittyCols });
+          }
+        }
+
+        if (!art) {
+          const pngData = ensurePng(data, name);
+          if (!pngData) continue;
+          art = renderImageFromData(pngData, name, { cols: tc.imageArt?.[imgIdx]?.kittyCols });
+        }
+
+        if (art && tc.imageArt) {
+          // Update the stale entry in-place with the new Kitty image ID
+          const prev = tc.imageArt[imgIdx];
+          tc.imageArt[imgIdx] = {
+            ...(prev ?? { name: art.name, lines: [] }),
+            kittyImageId: art.kittyImageId,
+            kittyCols: art.kittyCols,
+            kittyRows: art.kittyRows,
+            lines: art.lines,
+          };
+          restored++;
+        }
+      } catch {
+        // Best-effort — skip failed images
+      }
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(CONCURRENCY, staleEntries.length) }, () =>
+    processNext(),
+  );
+  await Promise.all(workers);
+  return restored;
 }

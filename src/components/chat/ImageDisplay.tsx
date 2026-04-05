@@ -131,7 +131,7 @@ export function ImageDisplay({ img }: { img: ImageArtItem }) {
 
   // Fallback: half-block ANSI art via ghostty-terminal
   // cols must accommodate the widest line — use a safe upper bound
-  const vtCols = Math.max(80, img.lines.length > 0 ? img.lines[0]!.length : 120);
+  const vtCols = Math.max(80, img.lines.length > 0 ? (img.lines[0]?.length ?? 120) : 120);
   return (
     <box flexDirection="column" flexShrink={0}>
       <ImageHeader img={img} />

@@ -32,6 +32,7 @@ import { SessionManager } from "../core/sessions/manager.js";
 import { getMissingRequired } from "../core/setup/prerequisites.js";
 import { suspendAndRun } from "../core/terminal/suspend.js";
 import { useTheme, useThemeStore } from "../core/theme/index.js";
+import { restoreSessionImages } from "../core/tools/show-image.js";
 import { garble, WORDMARK as SHUTDOWN_WORDMARK } from "../core/utils/splash.js";
 import { isDismissed } from "../core/version.js";
 import type { ChatInstance, WorkspaceSnapshot } from "../hooks/useChat.js";
@@ -676,6 +677,18 @@ export function App({
       tabMgr.restoreFromMeta(data.meta.tabs, data.meta.activeTabId, data.tabMessages);
       setForgeModeHeader(data.meta.forgeMode);
       setExitSessionId(data.meta.id);
+      // Re-fetch images so Kitty placeholders render again
+      const allMessages = [...data.tabMessages.values()].flat();
+      restoreSessionImages(allMessages, cwd)
+        .then((restored) => {
+          if (restored > 0) {
+            // Force React re-render — the objects were mutated in-place
+            for (const tab of data.meta.tabs) {
+              tabMgr.getChat(tab.id)?.setMessages((prev) => [...prev]);
+            }
+          }
+        })
+        .catch(() => {});
     }
   }, []);
 
@@ -1197,6 +1210,17 @@ export function App({
             tabMgr.restoreFromMeta(data.meta.tabs, data.meta.activeTabId, data.tabMessages);
             setForgeModeHeader(data.meta.forgeMode);
             setExitSessionId(data.meta.id);
+            // Re-fetch images so Kitty placeholders render again
+            const allMessages = [...data.tabMessages.values()].flat();
+            restoreSessionImages(allMessages, cwd)
+              .then((restored) => {
+                if (restored > 0) {
+                  for (const tab of data.meta.tabs) {
+                    tabMgr.getChat(tab.id)?.setMessages((prev) => [...prev]);
+                  }
+                }
+              })
+              .catch(() => {});
           }
         }}
         onSystemMessage={addSystemMessage}
