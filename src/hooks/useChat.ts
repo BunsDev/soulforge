@@ -34,7 +34,6 @@ import {
   getModelContextInfoSync,
   getModelContextWindow,
   getShortModelLabel,
-  supportsVision,
 } from "../core/llm/models.js";
 import { resolveModel } from "../core/llm/provider.js";
 import {
@@ -1375,40 +1374,21 @@ export function useChat({
         return;
       }
 
-      // Check if the active model supports vision before sending images
-      const modelId = activeModelRef.current;
-      let validImages = images && images.length > 0 ? images : undefined;
-      let imageStrippedWarning = false;
-      if (validImages && !supportsVision(modelId)) {
-        validImages = undefined;
-        imageStrippedWarning = true;
-      }
-
       const userMsg: ChatMessage = {
         id: crypto.randomUUID(),
         role: "user",
         content: input,
         timestamp: Date.now(),
-        images: validImages,
+        images: images && images.length > 0 ? images : undefined,
       };
       setMessages((prev) => [...prev, userMsg]);
-
-      if (imageStrippedWarning) {
-        const warn: ChatMessage = {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: `Images removed — **${modelId}** does not support vision input. Switch to a multimodal model (Claude 3.5+, GPT-4o, Gemini) to send images.`,
-          timestamp: Date.now(),
-        };
-        setMessages((prev) => [...prev, warn]);
-      }
 
       const currentCoreMessages = coreMessagesRef.current;
       // Build user content: text + optional image parts for multimodal models
       let userContent: string | Array<TextPart | ImagePart>;
-      if (validImages && validImages.length > 0) {
+      if (images && images.length > 0) {
         const parts: Array<TextPart | ImagePart> = [{ type: "text" as const, text: input }];
-        for (const img of validImages) {
+        for (const img of images) {
           parts.push({
             type: "image" as const,
             image: Buffer.from(img.base64, "base64"),
