@@ -79,6 +79,19 @@ const INPUT_KEY_BINDINGS = [
   { name: "linefeed", action: "newline" as const },
 ];
 
+/** Re-create virtual extmarks for all [image-N] tokens in the textarea.
+ *  Must be called after setText() which resets the buffer and destroys extmarks. */
+function syncImageExtmarks(ta: TextareaRenderable): void {
+  ta.extmarks.clear();
+  const text = ta.plainText;
+  const re = /\[image-\d+\]/g;
+  let m = re.exec(text);
+  while (m !== null) {
+    ta.extmarks.create({ start: m.index, end: m.index + m[0].length, virtual: true });
+    m = re.exec(text);
+  }
+}
+
 export const InputBox = memo(function InputBox({
   onSubmit,
   isLoading,
@@ -479,29 +492,14 @@ export const InputBox = memo(function InputBox({
               mediaType: clipImg.mediaType,
             });
             if (tagIdx !== -1) {
-              const tokenStart = tagIdx;
               const tokenText = `[${label}]`;
               const newText = `${text.slice(0, tagIdx)}${tokenText} ${text.slice(tagIdx + loadingTag.length)}`;
               ta.setText(newText);
-              // Create virtual extmark to make the token atomic
-              ta.extmarks.create({
-                start: tokenStart,
-                end: tokenStart + tokenText.length,
-                virtual: true,
-              });
-              ta.cursorOffset = tokenStart + tokenText.length + 1;
+              syncImageExtmarks(ta);
+              ta.cursorOffset = tagIdx + tokenText.length + 1;
             } else {
               ta.insertText(`[${label}] `);
-              // Create virtual extmark for the just-inserted token
-              const insertedText = ta.plainText;
-              const insertedIdx = insertedText.lastIndexOf(`[${label}]`);
-              if (insertedIdx !== -1) {
-                ta.extmarks.create({
-                  start: insertedIdx,
-                  end: insertedIdx + label.length + 2,
-                  virtual: true,
-                });
-              }
+              syncImageExtmarks(ta);
             }
           } else {
             // No image in clipboard — remove the loading placeholder
