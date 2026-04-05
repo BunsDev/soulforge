@@ -209,9 +209,15 @@ async function applyEdit(
   // Auto-format after edit (cached command, 5s timeout)
   const formatted = await autoFormatAfterEdit(filePath);
   if (formatted) {
-    output += " (formatted)";
     const postFormatContent = await readBufferContent(filePath);
     updateLastAfterHash(filePath, postFormatContent, tabId);
+    const postLines = postFormatContent.split("\n").length;
+    const preLines = updated.split("\n").length;
+    if (postLines !== preLines) {
+      output += ` (formatted, line count changed ${String(preLines)}→${String(postLines)} — re-read affected range before next edit)`;
+    } else {
+      output += " (formatted)";
+    }
   }
 
   // Post-edit diagnostics: same-file only (skip expensive cross-file findImporters)
