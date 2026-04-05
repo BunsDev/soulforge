@@ -378,8 +378,8 @@ export const InputBox = memo(function InputBox({
   );
 
   // Sync textarea content → React state.
-  // Also enforces image token atomicity: if any [image-N] was partially edited,
-  // remove the corrupted token entirely from both text and pendingImages.
+  // Safety net: if an [image-N] token was corrupted despite key-level guards
+  // (e.g. paste over selection, programmatic edit), remove it.
   const handleContentChange = useCallback(() => {
     const ta = textareaRef.current;
     const text = ta?.plainText ?? "";
@@ -389,35 +389,11 @@ export const InputBox = memo(function InputBox({
       historyIdx.current = -1;
     }
 
-    // Enforce image token integrity
+    // Check image token integrity
     if (pendingImages.current.length > 0) {
-      const corrupted: string[] = [];
-      for (const img of pendingImages.current) {
-        if (!text.includes(`[${img.label}]`)) {
-          corrupted.push(img.label);
-        }
-      }
-      if (corrupted.length > 0) {
-        pendingImages.current = pendingImages.current.filter(
-          (img) => !corrupted.includes(img.label),
-        );
-        // Strip any partial remnants of corrupted tokens
-        let cleaned = text;
-        for (const label of corrupted) {
-          // Remove partial fragments like "[image-", "image-1]", "mage-1", etc.
-          for (const frag of [`[${label}`, `${label}]`, label]) {
-            cleaned = cleaned.split(frag).join("");
-          }
-        }
-        if (cleaned !== text && ta) {
-          const offset = Math.min(ta.cursorOffset, cleaned.length);
-          ta.setText(cleaned);
-          ta.cursorOffset = offset;
-          setValue(cleaned);
-          lineCountRef.current = ta.lineCount ?? 1;
-          setVisualLines(calcVisualLines(cleaned));
-          return;
-        }
+      const surviving = pendingImages.current.filter((img) => text.includes(`[${img.label}]`));
+      if (surviving.length < pendingImages.current.length) {
+        pendingImages.current = surviving;
       }
     }
 
@@ -426,9 +402,25 @@ export const InputBox = memo(function InputBox({
     setVisualLines(calcVisualLines(text));
   }, [calcVisualLines]);
 
-  // Track cursor line for history gating
+  // Track cursor line for history gating.
+  // Also enforce that the cursor never lands inside an [image-N] token —
+  // snap to the nearest edge. This catches all cursor movement: arrow keys,
+  // mouse clicks, home/end, word-jump, etc.
   const handleCursorChange = useCallback((event: { line: number; visualColumn: number }) => {
     cursorLineRef.current = event.line;
+    if (pendingImages.current.length > 0) {
+      const ta = textareaRef.current;
+      if (!ta) return;
+      const text = ta.plainText;
+      const offset = ta.cursorOffset;
+      const tokenRange = findImageTokenAt(text, offset);
+      if (tokenRange) {
+        // Snap to whichever edge is closer
+        const distToStart = offset - tokenRange.start;
+        const distToEnd = tokenRange.end - offset;
+        ta.cursorOffset = distToStart <= distToEnd ? tokenRange.start : tokenRange.end;
+      }
+    }
   }, []);
 
   // After fuzzy history selection, the textarea remounts — move cursor to end
@@ -536,23 +528,50 @@ export const InputBox = memo(function InputBox({
       return;
     }
 
-    // Backspace: delete entire [image-N] block atomically
-    if (isFocused && evt.name === "backspace" && !evt.ctrl && !evt.meta) {
+    // ── Image token protection ──
+    // Block ANY key that would modify content while cursor is inside an [image-N] token.
+    // This prevents typing into, deleting from, or otherwise corrupting image tokens.
+    if (isFocused && pendingImages.current.length > 0) {
       const ta = textareaRef.current;
-      if (!ta) return;
-      const text = ta.plainText;
-      const offset = ta.cursorOffset;
-      // Check if cursor is right after an [image-N] token (or inside one)
-      const tokenRange = findImageTokenAt(text, offset);
-      if (tokenRange) {
-        evt.preventDefault();
-        const newText = text.slice(0, tokenRange.start) + text.slice(tokenRange.end);
-        ta.setText(newText);
-        ta.cursorOffset = tokenRange.start;
-        pendingImages.current = pendingImages.current.filter(
-          (img) => img.label !== tokenRange.label,
-        );
-        return;
+      if (ta) {
+        const text = ta.plainText;
+        const offset = ta.cursorOffset;
+        const tokenRange = findImageTokenAt(text, offset);
+
+        if (tokenRange) {
+          // Backspace/delete: remove the entire token
+          if (evt.name === "backspace" || evt.name === "delete") {
+            evt.preventDefault();
+            const newText = text.slice(0, tokenRange.start) + text.slice(tokenRange.end);
+            ta.setText(newText);
+            ta.cursorOffset = tokenRange.start;
+            pendingImages.current = pendingImages.current.filter(
+              (img) => img.label !== tokenRange.label,
+            );
+            return;
+          }
+
+          // Arrow keys: skip over the token
+          if (evt.name === "left" || evt.name === "right") {
+            evt.preventDefault();
+            ta.cursorOffset = evt.name === "left" ? tokenRange.start : tokenRange.end;
+            return;
+          }
+
+          // Any printable character or other editing key: block it
+          if (
+            !evt.ctrl &&
+            !evt.meta &&
+            evt.name !== "up" &&
+            evt.name !== "down" &&
+            evt.name !== "return" &&
+            evt.name !== "escape" &&
+            evt.name !== "tab"
+          ) {
+            evt.preventDefault();
+            return;
+          }
+        }
       }
     }
 
