@@ -2,6 +2,29 @@
 
 All notable changes to SoulForge are documented here.
 
+## [2.5.0] — 2026-04-05
+
+### Bug Fixes
+
+- warn agent when auto-format changes line count after edit
+- complete async migration and bug fixes for soul_vision
+- smart video fallback — animated GIF for Kitty, static frame for others
+- remove Konsole from Kitty Unicode placeholder support
+- render reasoning blocks with Markdown component
+### Features
+
+- auto mode bypasses all permission prompts, use hardRestart for updates
+- cap soul_vision image height, retry flaky video-to-GIF, update README
+- async video pipeline with live progress UI
+- restore Kitty images on session resume
+- restore Kitty images on session resume
+- soul_vision tool for inline image display
+### Refactor
+
+- clean up soul_vision for performance and reusability
+### Testing
+
+- add image rendering and terminal detection tests
 ## [2.4.0] — 2026-04-05
 
 ### Bug Fixes
