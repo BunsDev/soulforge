@@ -79,6 +79,24 @@ const INPUT_KEY_BINDINGS = [
   { name: "linefeed", action: "newline" as const },
 ];
 
+/** Find the [image-N] token that contains or is adjacent to the given cursor offset. */
+function findImageTokenAt(
+  text: string,
+  offset: number,
+): { start: number; end: number; label: string } | null {
+  const re = /\[image-\d+\]/g;
+  let m = re.exec(text);
+  while (m !== null) {
+    const start = m.index;
+    const end = start + m[0].length;
+    if (offset > start && offset <= end) {
+      return { start, end, label: m[0].slice(1, -1) };
+    }
+    m = re.exec(text);
+  }
+  return null;
+}
+
 export const InputBox = memo(function InputBox({
   onSubmit,
   isLoading,
@@ -359,16 +377,52 @@ export const InputBox = memo(function InputBox({
     ],
   );
 
-  // Sync textarea content → React state
+  // Sync textarea content → React state.
+  // Also enforces image token atomicity: if any [image-N] was partially edited,
+  // remove the corrupted token entirely from both text and pendingImages.
   const handleContentChange = useCallback(() => {
-    const text = textareaRef.current?.plainText ?? "";
+    const ta = textareaRef.current;
+    const text = ta?.plainText ?? "";
     if (isNavigatingHistory.current) {
       isNavigatingHistory.current = false;
     } else {
       historyIdx.current = -1;
     }
+
+    // Enforce image token integrity
+    if (pendingImages.current.length > 0) {
+      const corrupted: string[] = [];
+      for (const img of pendingImages.current) {
+        if (!text.includes(`[${img.label}]`)) {
+          corrupted.push(img.label);
+        }
+      }
+      if (corrupted.length > 0) {
+        pendingImages.current = pendingImages.current.filter(
+          (img) => !corrupted.includes(img.label),
+        );
+        // Strip any partial remnants of corrupted tokens
+        let cleaned = text;
+        for (const label of corrupted) {
+          // Remove partial fragments like "[image-", "image-1]", "mage-1", etc.
+          for (const frag of [`[${label}`, `${label}]`, label]) {
+            cleaned = cleaned.split(frag).join("");
+          }
+        }
+        if (cleaned !== text && ta) {
+          const offset = Math.min(ta.cursorOffset, cleaned.length);
+          ta.setText(cleaned);
+          ta.cursorOffset = offset;
+          setValue(cleaned);
+          lineCountRef.current = ta.lineCount ?? 1;
+          setVisualLines(calcVisualLines(cleaned));
+          return;
+        }
+      }
+    }
+
     setValue(text);
-    lineCountRef.current = textareaRef.current?.lineCount ?? 1;
+    lineCountRef.current = ta?.lineCount ?? 1;
     setVisualLines(calcVisualLines(text));
   }, [calcVisualLines]);
 
@@ -488,20 +542,16 @@ export const InputBox = memo(function InputBox({
       if (!ta) return;
       const text = ta.plainText;
       const offset = ta.cursorOffset;
-      // Check if cursor is right after an [image-N] token
-      const before = text.slice(0, offset);
-      const match = before.match(/\[image-\d+\]$/);
-      if (match) {
+      // Check if cursor is right after an [image-N] token (or inside one)
+      const tokenRange = findImageTokenAt(text, offset);
+      if (tokenRange) {
         evt.preventDefault();
-        const token = match[0];
-        const tokenStart = offset - token.length;
-        // Remove the token from text
-        const newText = text.slice(0, tokenStart) + text.slice(offset);
+        const newText = text.slice(0, tokenRange.start) + text.slice(tokenRange.end);
         ta.setText(newText);
-        ta.cursorOffset = tokenStart;
-        // Remove from pendingImages
-        const label = token.slice(1, -1); // strip [ and ]
-        pendingImages.current = pendingImages.current.filter((img) => img.label !== label);
+        ta.cursorOffset = tokenRange.start;
+        pendingImages.current = pendingImages.current.filter(
+          (img) => img.label !== tokenRange.label,
+        );
         return;
       }
     }
