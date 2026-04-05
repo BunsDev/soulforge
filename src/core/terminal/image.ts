@@ -32,12 +32,12 @@ export function canRenderImages(): boolean {
  * by embedding U+10EEEE chars in the cell buffer. Without them, images paint behind the TUI.
  *
  * Confirmed Unicode placeholder support:
- *   Kitty, Ghostty, Konsole
+ *   Kitty, Ghostty
  *
  * NO Unicode placeholder support (images break TUI):
- *   WezTerm — https://github.com/wezterm/wezterm/issues/986 (only in community fork)
- *   iTerm2  — https://github.com/gnachman/iTerm2/commit/4fe5b21
- *   Warp    — https://github.com/warpdotdev/Warp/issues/6210
+ *   Konsole — has Kitty protocol but no Unicode placeholders
+ *   WezTerm — only in community fork
+ *   iTerm2, Warp
  */
 export function isKittyGraphicsTerminal(): boolean {
   const term = process.env.TERM_PROGRAM?.toLowerCase() ?? "";
@@ -50,8 +50,10 @@ export function isKittyGraphicsTerminal(): boolean {
   if (process.env.KITTY_WINDOW_ID) return true;
   if (term === "kitty" || term === "ghostty") return true;
 
-  // Konsole sets KONSOLE_VERSION
-  if (process.env.KONSOLE_VERSION) return true;
+  // Konsole: has Kitty graphics protocol but does NOT support Unicode placeholders (U+10EEEE).
+  // Direct image transmission works, but placeholders render as blank/broken.
+  // See: https://invent.kde.org/utilities/konsole/-/merge_requests/594
+  // Falls through to half-block art fallback.
 
   return false;
 }

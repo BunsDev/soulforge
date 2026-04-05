@@ -168,10 +168,10 @@ The `soul_vision` tool renders images directly in your chat — pixel-perfect on
 </tr>
 <tr>
 <td><strong>Konsole</strong></td>
-<td>✅ pixel-perfect</td>
+<td>🎨 chafa / half-block</td>
 <td>⬜ static frame</td>
-<td>Kitty graphics protocol + Unicode placeholders</td>
-<td>Animation not yet implemented</td>
+<td>Terminal art (chafa → built-in half-block)</td>
+<td>Has Kitty graphics but no Unicode placeholders (<a href="https://invent.kde.org/utilities/konsole/-/merge_requests/594">MR #594</a>)</td>
 </tr>
 <tr>
 <td><strong>iTerm2</strong></td>
