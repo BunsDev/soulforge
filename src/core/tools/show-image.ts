@@ -1,5 +1,12 @@
-import { execSync, spawn } from "node:child_process";
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, extname, resolve } from "node:path";
 import type { ChatMessage, ToolResult } from "../../types/index.js";
@@ -19,20 +26,33 @@ const URL_RE = /^https?:\/\//i;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
 const GIF_SIGNATURE = Buffer.from("GIF8");
 
+/** Best-effort sync file removal — no shell, no throw. */
+function safeUnlink(path: string): void {
+  try {
+    if (existsSync(path)) unlinkSync(path);
+  } catch {
+    /* best-effort */
+  }
+}
+
 export interface SoulVisionArgs {
   path: string;
   cols?: number;
 }
 
 /**
- * Convert non-PNG image data to PNG.
+ * Convert non-PNG image data to PNG (async).
  * Tries multiple tools in order of availability:
  *   1. ffmpeg (cross-platform, most commonly installed on dev machines)
  *   2. sips (macOS built-in)
  *   3. magick / convert (ImageMagick)
  * Returns the PNG buffer or null if no converter is available.
  */
-function convertToPng(data: Buffer, ext: string): Buffer | null {
+async function convertToPng(
+  data: Buffer,
+  ext: string,
+  signal?: AbortSignal,
+): Promise<Buffer | null> {
   const id = `soul-vision-${String(Date.now())}-${String(Math.random()).slice(2, 8)}`;
   const srcPath = resolve(tmpdir(), `${id}${ext}`);
   const dstPath = resolve(tmpdir(), `${id}.png`);
@@ -40,20 +60,17 @@ function convertToPng(data: Buffer, ext: string): Buffer | null {
   try {
     writeFileSync(srcPath, data);
 
-    const converters = [
-      // ffmpeg: works everywhere, handles all formats
-      `ffmpeg -y -i "${srcPath}" -frames:v 1 "${dstPath}" 2>/dev/null`,
-      // sips: macOS built-in
-      `sips -s format png "${srcPath}" --out "${dstPath}" 2>/dev/null`,
-      // ImageMagick (v7 then v6)
-      `magick "${srcPath}" "png:${dstPath}" 2>/dev/null`,
-      `convert "${srcPath}" "png:${dstPath}" 2>/dev/null`,
+    const converters: [string, string[]][] = [
+      ["ffmpeg", ["-y", "-i", srcPath, "-frames:v", "1", dstPath]],
+      ["sips", ["-s", "format", "png", srcPath, "--out", dstPath]],
+      ["magick", [srcPath, `png:${dstPath}`]],
+      ["convert", [srcPath, `png:${dstPath}`]],
     ];
 
-    for (const cmd of converters) {
+    for (const [cmd, cmdArgs] of converters) {
       try {
-        execSync(cmd, { timeout: 10_000, stdio: "pipe" });
-        if (existsSync(dstPath)) return readFileSync(dstPath);
+        const result = await spawnAsync(cmd, cmdArgs, { timeout: 10_000, signal });
+        if (result.code === 0 && existsSync(dstPath)) return readFileSync(dstPath);
       } catch {
         // try next
       }
@@ -61,12 +78,8 @@ function convertToPng(data: Buffer, ext: string): Buffer | null {
 
     return null;
   } finally {
-    try {
-      if (existsSync(srcPath)) execSync(`rm -f "${srcPath}"`, { stdio: "pipe", timeout: 2000 });
-      if (existsSync(dstPath)) execSync(`rm -f "${dstPath}"`, { stdio: "pipe", timeout: 2000 });
-    } catch {
-      // cleanup best-effort
-    }
+    safeUnlink(srcPath);
+    safeUnlink(dstPath);
   }
 }
 
@@ -117,10 +130,9 @@ const _toolCache: Record<string, boolean> = {};
 function hasTool(name: string): boolean {
   if (name in _toolCache) return _toolCache[name] ?? false;
   try {
-    // `where` on Windows, `which` everywhere else
-    const cmd = process.platform === "win32" ? `where ${name}` : `which ${name}`;
-    execSync(cmd, { stdio: "pipe", timeout: 5000 });
-    _toolCache[name] = true;
+    const cmd = process.platform === "win32" ? "where" : "which";
+    const result = spawnSync(cmd, [name], { stdio: "pipe", timeout: 5000 });
+    _toolCache[name] = result.status === 0;
   } catch {
     _toolCache[name] = false;
   }
@@ -175,15 +187,19 @@ function progress(toolCallId: string | undefined, tag: string, msg: string): voi
 
 // ── Async spawn helper ──
 
+const MAX_STDERR = 10 * 1024; // 10 KB cap on stderr accumulation
+
 function spawnAsync(
   cmd: string,
   args: string[],
   opts: {
     timeout?: number;
+    signal?: AbortSignal;
     onStderr?: (line: string) => void;
   } = {},
 ): Promise<{ code: number; stdout: Buffer; stderr: string }> {
   return new Promise((resolve, reject) => {
+    let settled = false;
     const proc = spawn(cmd, args, {
       stdio: ["pipe", "pipe", "pipe"],
       timeout: opts.timeout ?? 120_000,
@@ -193,17 +209,46 @@ function spawnAsync(
     proc.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
     proc.stderr.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
-      stderr += text;
+      if (stderr.length < MAX_STDERR) stderr += text.slice(0, MAX_STDERR - stderr.length);
       if (opts.onStderr) {
         for (const line of text.split("\n")) {
           if (line.trim()) opts.onStderr(line);
         }
       }
     });
-    proc.on("error", reject);
-    proc.on("close", (code) => {
-      resolve({ code: code ?? 1, stdout: Buffer.concat(stdoutChunks), stderr });
+    proc.on("error", (err) => {
+      if (!settled) {
+        settled = true;
+        reject(err);
+      }
     });
+    proc.on("close", (code) => {
+      if (!settled) {
+        settled = true;
+        resolve({ code: code ?? 1, stdout: Buffer.concat(stdoutChunks), stderr });
+      }
+    });
+
+    // Kill process on abort signal
+    if (opts.signal) {
+      if (opts.signal.aborted) {
+        proc.kill();
+        if (!settled) {
+          settled = true;
+          reject(new Error("Aborted"));
+        }
+      } else {
+        const onAbort = () => {
+          proc.kill();
+          if (!settled) {
+            settled = true;
+            reject(new Error("Aborted"));
+          }
+        };
+        opts.signal.addEventListener("abort", onAbort, { once: true });
+        proc.on("close", () => opts.signal?.removeEventListener("abort", onAbort));
+      }
+    }
   });
 }
 
@@ -216,6 +261,7 @@ async function videoToGif(
   videoPath: string,
   toolCallId?: string,
   maxDuration = MAX_GIF_DURATION,
+  signal?: AbortSignal,
 ): Promise<Buffer | null> {
   if (!hasFfmpeg()) return null;
 
@@ -242,7 +288,7 @@ async function videoToGif(
         "1",
         palettePath,
       ],
-      { timeout: 60_000 },
+      { timeout: 60_000, signal },
     );
     if (pass1.code !== 0 || !existsSync(palettePath)) return null;
 
@@ -266,6 +312,7 @@ async function videoToGif(
       ],
       {
         timeout: 60_000,
+        signal,
         onStderr: (line) => {
           const m = line.match(/time=(\d+:\d+:\d+\.\d+)/);
           if (m) progress(toolCallId, "FFMPEG", `${msg}… ${m[1]}`);
@@ -282,13 +329,8 @@ async function videoToGif(
   } catch {
     return null;
   } finally {
-    for (const p of [gifPath, palettePath]) {
-      try {
-        if (existsSync(p)) execSync(`rm -f "${p}"`, { stdio: "pipe", timeout: 2000 });
-      } catch {
-        /* */
-      }
-    }
+    safeUnlink(gifPath);
+    safeUnlink(palettePath);
   }
 }
 
@@ -296,7 +338,11 @@ async function videoToGif(
  * Extract a single frame from a video as PNG using ffmpeg (async).
  * Much faster than full GIF conversion — used for non-Kitty terminals.
  */
-async function videoToFrame(videoPath: string, toolCallId?: string): Promise<Buffer | null> {
+async function videoToFrame(
+  videoPath: string,
+  toolCallId?: string,
+  signal?: AbortSignal,
+): Promise<Buffer | null> {
   if (!hasFfmpeg()) return null;
 
   const id = `soul-vision-frame-${String(Date.now())}-${String(Math.random()).slice(2, 8)}`;
@@ -307,7 +353,7 @@ async function videoToFrame(videoPath: string, toolCallId?: string): Promise<Buf
     const result = await spawnAsync(
       "ffmpeg",
       ["-y", "-i", videoPath, "-frames:v", "1", "-q:v", "2", framePath],
-      { timeout: 15_000 },
+      { timeout: 15_000, signal },
     );
     if (result.code === 0 && existsSync(framePath)) {
       const data = readFileSync(framePath);
@@ -317,11 +363,7 @@ async function videoToFrame(videoPath: string, toolCallId?: string): Promise<Buf
   } catch {
     return null;
   } finally {
-    try {
-      if (existsSync(framePath)) execSync(`rm -f "${framePath}"`, { stdio: "pipe", timeout: 2000 });
-    } catch {
-      /* */
-    }
+    safeUnlink(framePath);
   }
 }
 
@@ -337,6 +379,7 @@ async function videoToFrame(videoPath: string, toolCallId?: string): Promise<Buf
 async function fetchVideoFromUrl(
   url: string,
   toolCallId?: string,
+  signal?: AbortSignal,
 ): Promise<{ data: Buffer; name: string; isGif: boolean } | { error: string }> {
   const urlName = (() => {
     try {
@@ -395,6 +438,7 @@ async function fetchVideoFromUrl(
           ],
           {
             timeout: 120_000,
+            signal,
             onStderr: (line) => {
               const m = line.match(/(\d+\.\d+)%/);
               if (m) progress(toolCallId, "YT-DL", `${dlMsg}… ${m[1]}%`);
@@ -405,13 +449,13 @@ async function fetchVideoFromUrl(
         if (dlResult.code === 0 && existsSync(videoPath)) {
           // Kitty: full animated GIF
           if (supportsKittyAnimation()) {
-            const gif = await videoToGif(videoPath, toolCallId);
+            const gif = await videoToGif(videoPath, toolCallId, MAX_GIF_DURATION, signal);
             if (gif) {
               return { data: gif, name: `${urlName}.gif`, isGif: true };
             }
           }
           // Others: single frame PNG (much faster)
-          const frame = await videoToFrame(videoPath, toolCallId);
+          const frame = await videoToFrame(videoPath, toolCallId, signal);
           if (frame) {
             return { data: frame, name: `${urlName}-frame.png`, isGif: false };
           }
@@ -435,7 +479,7 @@ async function fetchVideoFromUrl(
           thumbBase,
           url,
         ],
-        { timeout: 30_000 },
+        { timeout: 30_000, signal },
       );
       const thumbFile = `${thumbBase}.png`;
       cleanupFiles.push(thumbFile);
@@ -465,13 +509,7 @@ async function fetchVideoFromUrl(
 
     return { error: "Failed to extract video content from URL." };
   } finally {
-    for (const p of cleanupFiles) {
-      try {
-        if (existsSync(p)) execSync(`rm -f "${p}"`, { stdio: "pipe", timeout: 2000 });
-      } catch {
-        /* */
-      }
-    }
+    for (const p of cleanupFiles) safeUnlink(p);
   }
 }
 
@@ -482,6 +520,7 @@ async function convertLocalVideo(
   filePath: string,
   displayName: string,
   toolCallId?: string,
+  signal?: AbortSignal,
 ): Promise<{ data: Buffer; name: string; isGif: boolean } | { error: string }> {
   if (!hasFfmpeg()) {
     return {
@@ -497,14 +536,14 @@ async function convertLocalVideo(
 
   // Kitty: full animated GIF
   if (supportsKittyAnimation()) {
-    const gif = await videoToGif(filePath, toolCallId);
+    const gif = await videoToGif(filePath, toolCallId, MAX_GIF_DURATION, signal);
     if (gif) {
       return { data: gif, name: `${baseName}.gif`, isGif: true };
     }
   }
 
   // Others: single frame PNG (much faster)
-  const frame = await videoToFrame(filePath, toolCallId);
+  const frame = await videoToFrame(filePath, toolCallId, signal);
   if (frame) {
     return { data: frame, name: `${baseName}-frame.png`, isGif: false };
   }
@@ -513,9 +552,13 @@ async function convertLocalVideo(
 }
 
 /**
- * Ensure buffer is PNG — convert if needed.
+ * Ensure buffer is PNG — convert if needed (async).
  */
-export function ensurePng(data: Buffer, name: string): Buffer | null {
+export async function ensurePng(
+  data: Buffer,
+  name: string,
+  signal?: AbortSignal,
+): Promise<Buffer | null> {
   // Already PNG?
   if (data.length >= 4 && data.subarray(0, 4).equals(PNG_SIGNATURE)) {
     return data;
@@ -523,7 +566,7 @@ export function ensurePng(data: Buffer, name: string): Buffer | null {
 
   // Need conversion — determine source extension
   const ext = extname(name).toLowerCase() || ".jpg";
-  return convertToPng(data, ext);
+  return convertToPng(data, ext, signal);
 }
 
 /** Check if data is a GIF. */
@@ -532,44 +575,47 @@ function isGif(data: Buffer): boolean {
 }
 
 /**
- * Extract individual frames from a GIF.
+ * Extract individual frames from a GIF (async).
  * Tries ffmpeg first (most common), then ImageMagick as fallback.
  * Returns array of { png: Buffer, delay: number (ms) } or null if no tool available.
  */
-function extractGifFrames(data: Buffer): KittyAnimFrame[] | null {
+async function extractGifFrames(
+  data: Buffer,
+  signal?: AbortSignal,
+): Promise<KittyAnimFrame[] | null> {
   const id = `soul-vision-gif-${String(Date.now())}-${String(Math.random()).slice(2, 8)}`;
   const srcPath = resolve(tmpdir(), `${id}.gif`);
   const outPattern = resolve(tmpdir(), `${id}-frame-%04d.png`);
-  const outGlob = `${resolve(tmpdir(), id)}-frame-*.png`;
 
   try {
     writeFileSync(srcPath, data);
 
-    // Parse GIF delays from the binary data directly (centiseconds in GCE blocks)
     const delays = parseGifDelays(data);
 
-    // Strategy 1: ffmpeg (most commonly installed)
+    // Strategy 1: ffmpeg
     let extracted = false;
     try {
-      execSync(`ffmpeg -y -i "${srcPath}" -vsync 0 "${outPattern}" 2>/dev/null`, {
+      const r = await spawnAsync("ffmpeg", ["-y", "-i", srcPath, "-vsync", "0", outPattern], {
         timeout: 30_000,
-        stdio: "pipe",
+        signal,
       });
-      extracted = true;
+      extracted = r.code === 0;
     } catch {
       // ffmpeg not available
     }
 
-    // Strategy 2: ImageMagick (convert or magick)
+    // Strategy 2: ImageMagick
     if (!extracted) {
       for (const cmd of ["magick", "convert"]) {
         try {
-          execSync(`${cmd} "${srcPath}" -coalesce "${outPattern}" 2>/dev/null`, {
+          const r = await spawnAsync(cmd, [srcPath, "-coalesce", outPattern], {
             timeout: 30_000,
-            stdio: "pipe",
+            signal,
           });
-          extracted = true;
-          break;
+          if (r.code === 0) {
+            extracted = true;
+            break;
+          }
         } catch {
           // not available
         }
@@ -578,18 +624,13 @@ function extractGifFrames(data: Buffer): KittyAnimFrame[] | null {
 
     if (!extracted) return null;
 
-    // Read extracted frame PNGs
-    const frameFiles: string[] = [];
-    try {
-      const ls = execSync(`ls -1 ${outGlob} 2>/dev/null`, {
-        timeout: 5000,
-        stdio: ["pipe", "pipe", "pipe"],
-        encoding: "utf-8",
-      });
-      frameFiles.push(...ls.trim().split("\n").filter(Boolean).sort());
-    } catch {
-      return null;
-    }
+    // Read extracted frame PNGs using readdirSync (no shell)
+    const dir = tmpdir();
+    const prefix = `${id}-frame-`;
+    const frameFiles = readdirSync(dir)
+      .filter((f) => f.startsWith(prefix) && f.endsWith(".png"))
+      .sort()
+      .map((f) => resolve(dir, f));
 
     if (frameFiles.length === 0) return null;
 
@@ -601,10 +642,18 @@ function extractGifFrames(data: Buffer): KittyAnimFrame[] | null {
 
     return frames.length > 0 ? frames : null;
   } finally {
+    safeUnlink(srcPath);
+    // Clean up frame files
     try {
-      execSync(`rm -f "${srcPath}" ${outGlob} 2>/dev/null`, { stdio: "pipe", timeout: 3000 });
+      const dir = tmpdir();
+      const prefix = `${id}-frame-`;
+      for (const f of readdirSync(dir)) {
+        if (f.startsWith(prefix) && f.endsWith(".png")) {
+          safeUnlink(resolve(dir, f));
+        }
+      }
     } catch {
-      // best-effort
+      /* best-effort */
     }
   }
 }
@@ -683,6 +732,7 @@ export async function showImage(
   args: SoulVisionArgs,
   cwd: string,
   toolCallId?: string,
+  signal?: AbortSignal,
 ): Promise<ToolResult & { _imageArt?: Array<{ name: string; lines: string[] }> }> {
   if (!canRenderImages()) {
     return {
@@ -700,7 +750,7 @@ export async function showImage(
     if ("error" in result) {
       // If the URL returned non-image content, try video extraction
       if (result.error.startsWith("not_image:")) {
-        const videoResult = await fetchVideoFromUrl(args.path, toolCallId);
+        const videoResult = await fetchVideoFromUrl(args.path, toolCallId, signal);
         if ("error" in videoResult) {
           return { success: false, output: videoResult.error };
         }
@@ -736,7 +786,7 @@ export async function showImage(
           output: `Video too large (${String(Math.round(stat.size / 1024 / 1024))}MB). Max: 20MB.`,
         };
       }
-      const videoResult = await convertLocalVideo(filePath, args.path, toolCallId);
+      const videoResult = await convertLocalVideo(filePath, args.path, toolCallId, signal);
       if ("error" in videoResult) {
         return { success: false, output: videoResult.error };
       }
@@ -770,7 +820,7 @@ export async function showImage(
 
   // GIF animation path — extract frames and animate in Kitty
   if (isGif(data) && supportsKittyAnimation()) {
-    const frames = extractGifFrames(data);
+    const frames = await extractGifFrames(data, signal);
     if (frames && frames.length > 1) {
       const art = renderAnimatedImage(frames, name, { cols: args.cols });
       if (art) {
@@ -785,7 +835,7 @@ export async function showImage(
   }
 
   // Convert to PNG if needed (Kitty only accepts PNG / raw pixels)
-  const pngData = ensurePng(data, name);
+  const pngData = await ensurePng(data, name, signal);
   if (!pngData) {
     return {
       success: false,
@@ -884,14 +934,14 @@ export async function restoreSessionImages(messages: ChatMessage[], cwd: string)
         } | null = null;
 
         if (isGif(data) && supportsKittyAnimation()) {
-          const frames = extractGifFrames(data);
+          const frames = await extractGifFrames(data);
           if (frames && frames.length > 1) {
             art = renderAnimatedImage(frames, name, { cols: tc.imageArt?.[imgIdx]?.kittyCols });
           }
         }
 
         if (!art) {
-          const pngData = ensurePng(data, name);
+          const pngData = await ensurePng(data, name);
           if (!pngData) continue;
           art = renderImageFromData(pngData, name, { cols: tc.imageArt?.[imgIdx]?.kittyCols });
         }

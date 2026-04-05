@@ -2276,6 +2276,7 @@ export function useChat({
               if (tc) {
                 tc.state = "done";
                 tc.result = resultStr;
+                tc.progressText = undefined;
                 // Extract half-block image art from shell tool results
                 if (
                   typeof part.output === "object" &&
@@ -2368,6 +2369,7 @@ export function useChat({
               if (tc) {
                 tc.state = "error";
                 tc.error = String(part.error);
+                tc.progressText = undefined;
               }
               const errorArgs = safeParseArgs(toolCallArgs.get(part.toolCallId));
               completedCalls.push({

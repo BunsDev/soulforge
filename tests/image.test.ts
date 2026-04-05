@@ -401,20 +401,20 @@ describe("parseGifDelays", () => {
 });
 
 describe("ensurePng", () => {
-	it("returns PNG data unchanged", () => {
+	it("returns PNG data unchanged", async () => {
 		const png = buildPng(4, 4);
-		const result = ensurePng(png, "test.png");
+		const result = await ensurePng(png, "test.png");
 		expect(result).not.toBeNull();
 		// Should be the exact same buffer (no conversion needed)
 		expect(result!.equals(png)).toBe(true);
 	});
 
-	it("returns null for non-PNG without converter tools", () => {
+	it("returns null for non-PNG without converter tools", async () => {
 		// JPEG-like data — conversion depends on external tools
 		const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, ...Array(100).fill(0)]);
 		// This may return null or a valid PNG depending on whether ffmpeg/sips/magick is installed
 		// We just verify it doesn't throw
-		const result = ensurePng(jpeg, "test.jpg");
+		const result = await ensurePng(jpeg, "test.jpg");
 		expect(result === null || Buffer.isBuffer(result)).toBe(true);
 	});
 });

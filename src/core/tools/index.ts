@@ -830,8 +830,8 @@ export function buildTools(
           .transform(nullToUndef)
           .describe("Display width in terminal columns (default: 120, max: 200)"),
       }),
-      execute: async (args, { toolCallId }) => {
-        return showImage(args, effectiveCwd, toolCallId);
+      execute: async (args, { toolCallId, abortSignal }) => {
+        return showImage(args, effectiveCwd, toolCallId, abortSignal);
       },
     }),
 
