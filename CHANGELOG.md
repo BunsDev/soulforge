@@ -2,6 +2,11 @@
 
 All notable changes to SoulForge are documented here.
 
+## [2.6.5] — 2026-04-06
+
+### Miscellaneous
+
+- match git repo link
 ## [2.6.4] — 2026-04-06
 
 ### Miscellaneous
