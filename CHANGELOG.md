@@ -2,6 +2,11 @@
 
 All notable changes to SoulForge are documented here.
 
+## [2.6.4] — 2026-04-06
+
+### Miscellaneous
+
+- *sigh* npm pls x2
 ## [2.6.3] — 2026-04-06
 
 ### Miscellaneous
