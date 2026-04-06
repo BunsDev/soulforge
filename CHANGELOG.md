@@ -2,6 +2,11 @@
 
 All notable changes to SoulForge are documented here.
 
+## [2.6.2] — 2026-04-06
+
+### Miscellaneous
+
+- fix npm publish
 ## [2.6.1] — 2026-04-06
 
 ### Miscellaneous
