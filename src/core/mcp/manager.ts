@@ -300,7 +300,7 @@ export class MCPManager {
       if (!conn) continue;
 
       for (const [toolName, toolDef] of Object.entries(conn.toolSet)) {
-        const qualifiedName = `mcp__${serverName}__${toolName}`;
+        const qualifiedName = sanitizeToolName(`mcp__${serverName}__${toolName}`);
         result[qualifiedName] = {
           ...toolDef,
           description: `[mcp:${serverName}] ${toolDef.description ?? ""}`,
@@ -323,6 +323,11 @@ export class MCPManager {
     const names = [...this.connections.keys()];
     await Promise.allSettled(names.map((n) => this.disconnect(n)));
   }
+}
+
+/** Sanitize tool names to match API pattern: ^[a-zA-Z0-9_-]{1,128}$ */
+function sanitizeToolName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 128);
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
