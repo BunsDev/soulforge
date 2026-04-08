@@ -38,7 +38,7 @@ export function TabBar({
         const num = String(i + 1);
         const activity = activities.get(tab.id);
         const isDefaultLabel = /^Tab \d+$/.test(tab.label);
-        const label = isDefaultLabel ? null : truncateLabel(tab.label, 20);
+        const label = isDefaultLabel ? " New tab" : ` ${truncateLabel(tab.label, 20)}`;
         const tabMode = getMode(tab.id);
         const tabModeLabel = getModeLabel(tabMode);
         const tabModeColor = getModeColor(tabMode);
@@ -49,7 +49,7 @@ export function TabBar({
         const hasUnread = activity?.hasUnread ?? false;
         const needsAttention = activity?.needsAttention ?? false;
 
-        const stateColor = needsAttention
+        const bracketColor = needsAttention
           ? t.warning
           : isCompacting
             ? t.info
@@ -57,54 +57,75 @@ export function TabBar({
               ? t.brandAlt
               : hasError
                 ? t.error
-                : null;
+                : isActive
+                  ? t.borderFocused
+                  : t.textSecondary;
 
-        const numColor = isActive ? t.brand : (stateColor ?? t.textMuted);
-        const labelColor = isActive ? t.textPrimary : hasUnread ? t.amber : t.textSecondary;
+        const numColor = isActive
+          ? t.borderFocused
+          : needsAttention
+            ? t.warning
+            : isCompacting
+              ? t.info
+              : isLoading
+                ? t.brandAlt
+                : t.textSecondary;
+        const labelColor = isActive ? t.textPrimary : hasUnread ? t.amber : t.textMuted;
 
         return (
           <box key={tab.id} flexDirection="row">
-            {i > 0 && <text fg={t.textDim}> │ </text>}
-            {needsAttention && !isActive && <text fg={t.warning}>? </text>}
-            {isCompacting && !needsAttention && <Spinner color={t.info} suffix={" "} />}
-            {isLoading && !isCompacting && !needsAttention && (
-              <Spinner color={t.brandAlt} suffix={" "} />
-            )}
-            {isActive && <text fg={t.brand}>▸ </text>}
-            <text fg={numColor} attributes={isActive ? TextAttributes.BOLD : undefined}>
-              {num}
-            </text>
-            {tabMode !== "default" && (
-              <text fg={tabModeColor} attributes={isActive ? TextAttributes.BOLD : undefined}>
-                {" "}
-                {tabModeLabel}
+            {i > 0 && <text fg={t.textSubtle}> │ </text>}
+            <box flexDirection="row" backgroundColor={isActive ? t.bgPopup : undefined}>
+              {needsAttention && !isActive && <text fg={t.warning}>? </text>}
+              {isCompacting && !needsAttention && <Spinner color={t.info} suffix={" "} />}
+              {isLoading && !isCompacting && !needsAttention && (
+                <Spinner color={t.brandAlt} suffix={" "} />
+              )}
+              <text fg={bracketColor}>[</text>
+              <text fg={numColor} attributes={isActive ? TextAttributes.BOLD : undefined}>
+                {num}
               </text>
-            )}
-            {label && (
-              <text fg={labelColor} attributes={isActive ? TextAttributes.BOLD : undefined}>
-                {" "}
-                {label}
-              </text>
-            )}
-            {(activity?.editedFileCount ?? 0) > 0 && (
-              <text fg={t.success}>
-                {" "}
-                {icon("pencil")}
-                {String(activity?.editedFileCount ?? 0)}
-              </text>
-            )}
-            {(() => {
-              const modelLabel = getModelLabel(tab.id);
-              if (!modelLabel) return null;
-              return (
-                <text fg={isActive ? t.textMuted : t.textDim}>
-                  {" "}
-                  {truncateLabel(modelLabel, 16)}
+              <text fg={bracketColor}>]</text>
+              {tabMode !== "default" && (
+                <>
+                  <text fg={isActive ? tabModeColor : t.textMuted}>[</text>
+                  <text fg={tabModeColor} attributes={isActive ? TextAttributes.BOLD : undefined}>
+                    {tabModeLabel}
+                  </text>
+                  <text fg={isActive ? tabModeColor : t.textMuted}>]</text>
+                </>
+              )}
+              {(activity?.editedFileCount ?? 0) > 0 && (
+                <>
+                  <text fg={isActive ? t.success : t.textDim}>[</text>
+                  <text fg={t.success}>
+                    {icon("pencil")} {String(activity?.editedFileCount ?? 0)}
+                  </text>
+                  <text fg={isActive ? t.success : t.textDim}>]</text>
+                </>
+              )}
+              {(() => {
+                const modelLabel = getModelLabel(tab.id);
+                if (!modelLabel) return null;
+                const c = isActive ? t.textSecondary : t.textDim;
+                return (
+                  <>
+                    <text fg={c}> [</text>
+                    <text fg={isActive ? t.textSecondary : t.textMuted}>
+                      {truncateLabel(modelLabel, 16)}
+                    </text>
+                    <text fg={c}>]</text>
+                  </>
+                );
+              })()}
+              {label && (
+                <text fg={labelColor} attributes={isActive ? TextAttributes.BOLD : undefined}>
+                  {label}
                 </text>
-              );
-            })()}
-            {hasUnread && !isLoading && !needsAttention && <text fg={t.amber}> ●</text>}
-            {hasError && !isLoading && !needsAttention && <text fg={t.error}> ✗</text>}
+              )}
+              {hasUnread && !isLoading && !needsAttention && <text fg={t.amber}>[●]</text>}
+              {hasError && !isLoading && !needsAttention && <text fg={t.error}>[✗]</text>}
+            </box>
           </box>
         );
       })}
