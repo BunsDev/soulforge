@@ -21,7 +21,7 @@ import {
   useStatusBarStore,
 } from "../../stores/statusbar.js";
 import { useWorkerStore } from "../../stores/workers.js";
-import { Popup, POPUP_BG, PopupRow } from "../layout/shared.js";
+import { POPUP_BG, Popup, PopupRow } from "../layout/shared.js";
 
 const CHROME_ROWS = 6;
 const TABS = ["Context", "System"] as const;
@@ -997,34 +997,23 @@ export function StatusDashboard({
       title=""
       icon={icon("gauge")}
       borderColor={TAB_COLORS[tab]}
-      headerRight={
-        <>
-          {TABS.map((tabName, i) => {
-            const isActive = tabName === tab;
-            const color = TAB_COLORS[tabName];
-            return (
-              <text
-                key={tabName}
-                fg={isActive ? color : t.textMuted}
-                bg={POPUP_BG}
-                attributes={isActive ? TextAttributes.BOLD : undefined}
-              >
-                {i > 0 ? " │ " : ""}
-                {isActive ? `▸ ${tabName}` : `  ${tabName}`}
-              </text>
-            );
-          })}
-        </>
-      }
+      headerRight={TABS.map((tabName, i) => {
+        const isActive = tabName === tab;
+        const color = TAB_COLORS[tabName];
+        return (
+          <text
+            key={tabName}
+            fg={isActive ? color : t.textMuted}
+            bg={POPUP_BG}
+            attributes={isActive ? TextAttributes.BOLD : undefined}
+          >
+            {i > 0 ? " │ " : ""}
+            {isActive ? `▸ ${tabName}` : `  ${tabName}`}
+          </text>
+        );
+      })}
       footer={footerHints}
     >
-      {/* Separator */}
-      <PopupRow w={innerW}>
-        <text fg={t.textSubtle} bg={POPUP_BG}>
-          {"─".repeat(innerW - 4)}
-        </text>
-      </PopupRow>
-
       {/* Content */}
       <box
         flexDirection="column"

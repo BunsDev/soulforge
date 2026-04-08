@@ -17,6 +17,7 @@ import {
   PopupRow,
   PopupSeparator,
   SPINNER_FRAMES,
+  Spinner,
   useSpinnerFrameRef,
 } from "../layout/shared.js";
 
@@ -195,18 +196,24 @@ export function LlmSelector({ visible, activeModel, onSelect, onClose }: Props) 
   const pw = Math.min(MAX_W, Math.floor(termCols * 0.85));
   const iw = pw - 2;
   // Chrome: title(1) + sep(1) + search(1) + hint(1) + sep(1) + spacer(1) + sep(1) + footer(1) = 8
-  const maxVis = Math.max(6, termRows - 4 - 8);
+  // Cap list height so the popup doesn't fill the entire terminal
+  const maxVis = Math.min(Math.max(6, termRows - 4 - 8), 28);
 
-  const { providerData: provData, availability } = useAllProviderModels(visible);
+  const { providerData: provData, availability, anyLoading } = useAllProviderModels(visible);
 
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
   const [scrollOff, setScrollOff] = useState(0);
   const spinFrameRef = useSpinnerFrameRef();
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  // Defer the heavy entry list by one frame so the popup chrome paints instantly
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (!visible) return;
+    if (!visible) {
+      setReady(false);
+      return;
+    }
     setQuery("");
     setCursor(0);
     setScrollOff(0);
@@ -216,6 +223,9 @@ export function LlmSelector({ visible, activeModel, onSelect, onClose }: Props) 
       init[cfg.id] = cfg.id !== activeProvider;
     }
     setCollapsed(init);
+    // Paint the popup chrome first, then mount the entry list next frame
+    const raf = setTimeout(() => setReady(true), 0);
+    return () => clearTimeout(raf);
   }, [visible, activeModel]);
 
   const { providerFilter, modelFilter } = (() => {
@@ -580,7 +590,21 @@ export function LlmSelector({ visible, activeModel, onSelect, onClose }: Props) 
 
         <PopupSeparator w={iw} />
 
-        {displayEntries.length === 0 ? (
+        {!ready || (anyLoading && displayEntries.length === 0) ? (
+          <box
+            flexDirection="column"
+            height={Math.min(5, maxVis)}
+            justifyContent="center"
+            alignItems="center"
+          >
+            <box flexDirection="row" gap={1} justifyContent="center">
+              <Spinner color={t.brand} />
+              <text fg={t.textMuted} bg={POPUP_BG}>
+                Loading models…
+              </text>
+            </box>
+          </box>
+        ) : displayEntries.length === 0 ? (
           <PopupRow w={iw}>
             <text fg={t.textMuted} bg={POPUP_BG}>
               {query ? "no matching models" : "no providers available"}

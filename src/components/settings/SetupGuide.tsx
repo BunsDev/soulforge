@@ -16,7 +16,7 @@ import {
   type PrerequisiteStatus,
 } from "../../core/setup/prerequisites.js";
 import { useTheme } from "../../core/theme/index.js";
-import { Popup, POPUP_BG, POPUP_HL, PopupRow } from "../layout/shared.js";
+import { POPUP_BG, POPUP_HL, Popup, PopupRow } from "../layout/shared.js";
 
 const MAX_POPUP_WIDTH = 74;
 const CHROME_ROWS = 10;

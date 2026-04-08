@@ -1,7 +1,7 @@
-import { type Selection, TextAttributes } from "@opentui/core";
-import { useRenderer, useTerminalDimensions } from "@opentui/react";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
+import { type Selection, TextAttributes } from "@opentui/core";
+import { useRenderer, useTerminalDimensions } from "@opentui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {

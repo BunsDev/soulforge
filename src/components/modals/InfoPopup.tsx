@@ -2,7 +2,7 @@ import { TextAttributes } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useEffect, useState } from "react";
 import { useTheme } from "../../core/theme/index.js";
-import { POPUP_BG, PopupRow, Popup } from "../layout/shared.js";
+import { POPUP_BG, Popup, PopupRow } from "../layout/shared.js";
 
 const CHROME_ROWS = 6;
 

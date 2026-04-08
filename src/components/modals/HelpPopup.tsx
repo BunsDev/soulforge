@@ -3,7 +3,7 @@ import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useEffect, useState } from "react";
 import { icon } from "../../core/icons.js";
 import { useTheme } from "../../core/theme/index.js";
-import { Popup, POPUP_BG, PopupRow } from "../layout/shared.js";
+import { POPUP_BG, Popup, PopupRow } from "../layout/shared.js";
 
 const MAX_POPUP_WIDTH = 88;
 const CHROME_ROWS = 6;

@@ -5,7 +5,7 @@ import { type ThemeTokens, useTheme } from "../../core/theme/index.js";
 import { usePopupScroll } from "../../hooks/usePopupScroll.js";
 import type { AgentEditorAccess, EditorIntegration } from "../../types/index.js";
 import type { ConfigScope } from "../layout/shared.js";
-import { CONFIG_SCOPES, Popup, POPUP_BG, POPUP_HL, PopupRow } from "../layout/shared.js";
+import { CONFIG_SCOPES, POPUP_BG, POPUP_HL, Popup, PopupRow } from "../layout/shared.js";
 
 const AGENT_ACCESS_MODES: AgentEditorAccess[] = ["on", "off", "when-open"];
 const AGENT_ACCESS_LABELS: Record<AgentEditorAccess, string> = {

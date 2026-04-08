@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { icon } from "../../core/icons.js";
 import type { BackendProbeResult, HealthCheckResult } from "../../core/intelligence/router.js";
 import { type ThemeTokens, useTheme } from "../../core/theme/index.js";
-import { Popup, POPUP_BG, PopupRow, useSpinnerFrame } from "../layout/shared.js";
+import { POPUP_BG, Popup, PopupRow, useSpinnerFrameRef } from "../layout/shared.js";
 
 const CHROME_ROWS = 6;
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -124,12 +124,12 @@ export function DiagnosePopup({ visible, onClose, runHealthCheck }: Props) {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const t = useTheme();
-  const spinnerFrame = useSpinnerFrame();
+  const spinnerFrameRef = useSpinnerFrameRef();
 
   const popupWidth = Math.min(64, Math.floor(termCols * 0.8));
   const innerW = popupWidth - 2;
   const labelW = 28;
-  const spinnerCh = SPINNER[spinnerFrame % SPINNER.length] ?? "⠋";
+  const spinnerCh = SPINNER[spinnerFrameRef.current % SPINNER.length] ?? "⠋";
   const containerRows = termRows - 2;
   const maxVisible = Math.max(6, Math.floor(containerRows * 0.8) - CHROME_ROWS);
 
@@ -191,14 +191,12 @@ export function DiagnosePopup({ visible, onClose, runHealthCheck }: Props) {
       title="Health Check"
       icon={icon("brain")}
       headerRight={
-        <>
-          {result ? (
-            <text bg={POPUP_BG} fg={t.textMuted}>
-              {"  "}
-              {result.language} · {result.probeFile.split("/").pop()}
-            </text>
-          ) : null}
-        </>
+        result ? (
+          <text bg={POPUP_BG} fg={t.textMuted}>
+            {"  "}
+            {result.language} · {result.probeFile.split("/").pop()}
+          </text>
+        ) : null
       }
       footer={[
         { key: "↑↓", label: "scroll" },
