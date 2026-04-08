@@ -200,9 +200,9 @@ export const LockInWrapper = memo(function LockInWrapper({
       {visible.length > 0 || children ? (
         <box
           flexDirection="column"
-          border={["left"]}
+          border={visible.length + hiddenCount >= 2 || children ? ["left"] : undefined}
           borderColor={effectiveDone ? t.textFaint : t.textMuted}
-          paddingLeft={1}
+          paddingLeft={visible.length + hiddenCount >= 2 || children ? 1 : 2}
           opacity={effectiveDone ? 0.6 : 1}
         >
           {hiddenCount > 0 ? (
