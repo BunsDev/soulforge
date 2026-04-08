@@ -210,7 +210,7 @@ if (isCompile) {
     let src = await Bun.file(bundlePath).text();
     src = src.replace(
       /\w+ = await import\(`@opentui\/core-\$\{process\.platform\}-\$\{process\.arch\}\/index\.ts`\);\s*\w+ = \w+\.default;/,
-      `targetLibPath = require("path").join(import.meta.dir, "native", "libopentui." + (process.platform === "darwin" ? "dylib" : "so"));`,
+      `targetLibPath = import.meta.dir + "/native/libopentui." + (process.platform === "darwin" ? "dylib" : "so");`,
     );
     await Bun.write(bundlePath, src);
   }
