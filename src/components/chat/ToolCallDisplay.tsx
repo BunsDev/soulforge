@@ -659,10 +659,16 @@ const ToolRow = memo(
     );
 
     const inTree = !!treePosition;
+    // Multi-file read tree (2+ files in a single read call)
+    const multiReadFiles = useMemo(() => {
+      if (tc.toolName !== "read" || !tc.args) return null;
+      return extractMultiReadFiles(tc.toolName, tc.args);
+    }, [tc.toolName, tc.args]);
     const hasExpanded =
       inTree &&
       (!!staticProps.diff ||
         (staticProps.imageArt && staticProps.imageArt.length > 0) ||
+        (multiReadFiles && multiReadFiles.length >= 2) ||
         (isMultiAgent &&
           multiProgress !== null &&
           multiProgress.agents.size > 0 &&
@@ -766,11 +772,6 @@ const ToolRow = memo(
             </box>
           ))
         : null;
-    // Multi-file read tree (2+ files in a single read call)
-    const multiReadFiles = useMemo(() => {
-      if (tc.toolName !== "read" || !tc.args) return null;
-      return extractMultiReadFiles(tc.toolName, tc.args);
-    }, [tc.toolName, tc.args]);
     const multiReadContent =
       multiReadFiles && multiReadFiles.length >= 2
         ? (() => {
