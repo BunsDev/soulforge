@@ -627,6 +627,15 @@ export function App({
   shutdownPhaseRef.current = shutdownPhase;
   const exitTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
+  const handleCycleTab = useCallback(
+    (direction: 1 | -1) => {
+      if (tabMgr.tabCount <= 1) return;
+      if (direction === 1) tabMgr.nextTab();
+      else tabMgr.prevTab();
+    },
+    [tabMgr.tabCount, tabMgr.nextTab, tabMgr.prevTab],
+  );
+
   const handleExit = useCallback(() => {
     if (shutdownPhaseRef.current >= 0) return;
     setShutdownPhase(0);
@@ -1179,6 +1188,7 @@ export function App({
             editorCursorCol={cursorCol}
             editorVisualSelection={visualSelection}
             clearEditorSelection={clearNvimSelection}
+            onCycleTab={handleCycleTab}
           />
         ))}
       </box>

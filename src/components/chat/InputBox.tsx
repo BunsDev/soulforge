@@ -25,6 +25,8 @@ interface Props {
   onDropdownChange?: (visible: boolean) => void;
   /** Container width as a percentage of terminal width — used when the input is narrower than the terminal (e.g. landing page). */
   widthPct?: number;
+  /** Called when Tab is pressed and not consumed by autocomplete. Direction: 1 = next, -1 = prev. */
+  onCycleTab?: (direction: 1 | -1) => void;
 }
 
 let _commands: Array<{ cmd: string; icon: string; desc: string }> | null = null;
@@ -104,6 +106,7 @@ export const InputBox = memo(function InputBox({
   cwd,
   onDropdownChange,
   widthPct,
+  onCycleTab,
 }: Props) {
   const [value, setValue] = useState("");
   const valueRef = useRef(value);
@@ -497,6 +500,13 @@ export const InputBox = memo(function InputBox({
         evt.preventDefault();
         return;
       }
+    }
+
+    // Tab cycles tabs when not consumed by autocomplete
+    if (evt.name === "tab" && onCycleTab) {
+      onCycleTab(evt.shift ? -1 : 1);
+      evt.preventDefault();
+      return;
     }
 
     if (focused) {

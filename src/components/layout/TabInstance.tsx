@@ -81,6 +81,7 @@ interface TabInstanceProps {
   editorCursorCol: number;
   editorVisualSelection: string | null;
   clearEditorSelection: () => void;
+  onCycleTab?: (direction: 1 | -1) => void;
 }
 
 const MAX_RENDERED = 40;
@@ -129,6 +130,7 @@ export const TabInstance = memo(function TabInstance({
   editorCursorCol,
   editorVisualSelection,
   clearEditorSelection,
+  onCycleTab,
 }: TabInstanceProps) {
   const t = useTheme();
   const scrollRef = useRef<ScrollBoxRenderable>(null);
@@ -735,6 +737,7 @@ export const TabInstance = memo(function TabInstance({
                   )
                 }
                 queueCount={chat.messageQueue.length}
+                onCycleTab={onCycleTab}
               />
             </box>
           </box>
