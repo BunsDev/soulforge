@@ -29,6 +29,10 @@ export interface ProviderDefinition {
   fetchModels(): Promise<ProviderModelInfo[] | null>;
   fallbackModels: ProviderModelInfo[];
   contextWindows: [pattern: string, tokens: number][];
+  /** Overrides for known-incorrect upstream API context window values.
+   *  Checked BEFORE API/cache data. Only add entries here when a provider
+   *  API reports a wrong value (e.g. OpenRouter lists GLM-5 as 80k). */
+  contextWindowOverrides?: [pattern: string, tokens: number][];
   grouped?: boolean;
   custom?: boolean;
   checkAvailability?(): Promise<boolean>;

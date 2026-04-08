@@ -41,6 +41,17 @@ export const llmgateway: ProviderDefinition = {
     { id: "deepseek-chat", name: "DeepSeek Chat" },
   ],
 
+  // Corrections for known-incorrect upstream API values.
+  contextWindowOverrides: [
+    ["glm-5.1", 204_800],
+    ["glm-5-turbo", 202_752],
+    ["glm-5", 204_800],
+    ["glm-4.7", 200_000],
+    ["glm-4.6", 200_000],
+    ["glm-4.5", 128_000],
+    ["glm-4", 128_000],
+  ],
+
   // Specific overrides first → shared patterns → generic catch-alls last.
   contextWindows: [
     // Claude (LLM Gateway uses hyphens: claude-opus-4-6)
@@ -96,8 +107,6 @@ export const llmgateway: ProviderDefinition = {
     ["sonar", 130_000],
     ["kimi", 256_000],
     ["seed-", 256_000],
-    ["glm-5", 203_000],
-    ["glm-4", 131_000],
     ["minimax", 200_000],
     ["grok", 131_072],
     ["llama-3.2", 32_768],

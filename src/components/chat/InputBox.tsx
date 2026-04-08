@@ -502,8 +502,8 @@ export const InputBox = memo(function InputBox({
       }
     }
 
-    // Tab cycles tabs when not consumed by autocomplete
-    if (evt.name === "tab" && onCycleTab) {
+    // Tab cycles tabs when not consumed by autocomplete (skip when popup is open)
+    if (evt.name === "tab" && onCycleTab && isFocused) {
       onCycleTab(evt.shift ? -1 : 1);
       evt.preventDefault();
       return;

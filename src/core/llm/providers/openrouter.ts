@@ -39,6 +39,18 @@ export const openrouter: ProviderDefinition = {
     { id: "x-ai/grok-4", name: "Grok 4" },
   ],
 
+  // Corrections for known-incorrect upstream API values.
+  contextWindowOverrides: [
+    // OpenRouter lists GLM-5 as 80k — actual is ~200k (docs.z.ai)
+    ["glm-5.1", 204_800],
+    ["glm-5-turbo", 202_752],
+    ["glm-5", 204_800],
+    ["glm-4.7", 200_000],
+    ["glm-4.6", 200_000],
+    ["glm-4.5", 128_000],
+    ["glm-4", 128_000],
+  ],
+
   // Specific overrides first → shared patterns → generic catch-alls last.
   // Specific overrides must NOT be substrings of shared patterns (ordering matters).
   contextWindows: [

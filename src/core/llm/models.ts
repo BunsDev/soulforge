@@ -73,8 +73,17 @@ export function getModelContextInfoSync(modelId: string): ContextWindowResult {
   const providerId = slashIdx >= 0 ? modelId.slice(0, slashIdx) : "";
   const model = slashIdx >= 0 ? modelId.slice(slashIdx + 1) : modelId;
 
+  // 0. Provider-specific overrides for known-incorrect upstream API values
+  //    (e.g. OpenRouter lists GLM-5 as 80k, actual ~200k)
+  const ownProvider = providerId ? getProvider(providerId) : null;
+  if (ownProvider?.contextWindowOverrides) {
+    for (const [pattern, tokens] of ownProvider.contextWindowOverrides) {
+      if (model.includes(pattern)) return { tokens, source: "fallback" };
+    }
+  }
+
   // 1. Provider's own API data (most accurate)
-  if (providerId && !getProvider(providerId)?.grouped) {
+  if (providerId && !ownProvider?.grouped) {
     const entry = modelCache.get(providerId);
     if (entry && Date.now() - entry.ts <= MODEL_CACHE_TTL) {
       const match = entry.models.find((m) => m.id === model);
@@ -91,13 +100,12 @@ export function getModelContextInfoSync(modelId: string): ContextWindowResult {
     }
   }
 
-  // 2. OpenRouter metadata (accurate, covers all providers)
+  // 2. OpenRouter metadata (broad coverage, but sometimes inaccurate)
   const orMatch = findOpenRouterModel(model);
   if (orMatch?.context_length) return { tokens: orMatch.context_length, source: "openrouter" };
 
   // 3. Hardcoded fallback patterns — own provider only for grouped providers
   //    (e.g. Ollama's "qwen" pattern must not match OpenRouter's qwen models)
-  const ownProvider = providerId ? getProvider(providerId) : null;
   if (ownProvider) {
     for (const [pattern, tokens] of ownProvider.contextWindows) {
       if (model.includes(pattern)) return { tokens, source: "fallback" };

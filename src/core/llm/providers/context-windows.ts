@@ -93,6 +93,16 @@ export const SHARED_CONTEXT_WINDOWS: [pattern: string, tokens: number][] = [
   ["nova-lite", 300_000],
   ["nova-micro", 128_000],
 
+  // GLM (Zhipu / Z.AI) — Source: docs.z.ai + NVIDIA NIM model cards (2026-04)
+  ["glm-5.1", 204_800],
+  ["glm-5-turbo", 202_752],
+  ["glm-5", 204_800],
+  ["glm-4.7", 200_000],
+  ["glm-4.6", 200_000],
+  ["glm-4.5", 128_000],
+  ["glm-4-32b", 128_000],
+  ["glm-4", 128_000],
+
   // AI21
   ["jamba", 256_000],
 ];
