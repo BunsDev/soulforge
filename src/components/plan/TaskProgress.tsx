@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { icon } from "../../core/icons.js";
 import { useTheme } from "../../core/theme/index.js";
 import { onTaskChange, type Task } from "../../core/tools/task-list.js";
-import { SPINNER_FRAMES, useSpinnerFrame } from "../layout/shared.js";
+import { Spinner } from "../layout/shared.js";
 
 const MAX_VISIBLE = 6;
 
@@ -13,8 +13,7 @@ interface TaskListProps {
 }
 
 function InlineSpinner({ color }: { color: string }) {
-  const frame = useSpinnerFrame();
-  return <span fg={color}>{SPINNER_FRAMES[frame % SPINNER_FRAMES.length]}</span>;
+  return <Spinner inline color={color} />;
 }
 
 export function TaskList({ tasks, nested }: TaskListProps) {

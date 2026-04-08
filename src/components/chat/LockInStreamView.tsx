@@ -5,7 +5,7 @@ import { useTheme } from "../../core/theme/index.js";
 import { resolveToolDisplay, TOOL_LABELS_DONE } from "../../core/tool-display.js";
 import { garble } from "../../core/utils/splash.js";
 import { formatElapsed } from "../../hooks/useElapsed.js";
-import { SPINNER_FRAMES, useSpinnerFrame } from "../layout/shared.js";
+import { Spinner } from "../layout/shared.js";
 
 export const LOCKIN_EDIT_TOOLS = new Set([
   "edit_file",
@@ -29,6 +29,7 @@ const SPIN_EXPLORE = ["◴", "◷", "◶", "◵"];
 const SPIN_EDIT = ["▏", "▎", "▍", "▌", "▋", "▊", "▉", "█", "▉", "▊", "▋", "▌", "▍", "▎", "▏"];
 const SPIN_DISPATCH = ["◇", "◈", "◆", "◈"];
 const DOTS_CYCLE = [".", "..", "...", "..", ".", ".."];
+const DOTS_PADDED = DOTS_CYCLE.map((d) => d.padEnd(3));
 
 const EXPLORE_PAIRS: [string, string][] = [
   ["Scanning the codebase…", "Scanned the codebase"],
@@ -149,7 +150,6 @@ export const LockInWrapper = memo(function LockInWrapper({
   loadingStartedAt?: number;
 }) {
   const t = useTheme();
-  const frame = useSpinnerFrame();
 
   const effectiveDone = done;
   const [elapsed, setElapsed] = useState(0);
@@ -165,7 +165,6 @@ export const LockInWrapper = memo(function LockInWrapper({
   const statusMsg = useRotatingMessage(pairs, effectiveDone);
   const statusColor = hasDispatch ? t.info : hasEdits ? t.warning : t.brand;
   const spinFrames = hasDispatch ? SPIN_DISPATCH : hasEdits ? SPIN_EDIT : SPIN_EXPLORE;
-  const spinChar = spinFrames[frame % spinFrames.length] ?? "◴";
 
   const hiddenCount = Math.max(0, tools.length - MAX_VISIBLE);
   const hidden = tools.slice(0, hiddenCount);
@@ -180,9 +179,7 @@ export const LockInWrapper = memo(function LockInWrapper({
           {effectiveDone ? (
             <span fg={t.success}>{"✓ "}</span>
           ) : (
-            <span fg={statusColor} attributes={TextAttributes.BOLD}>
-              {spinChar}{" "}
-            </span>
+            <Spinner inline frames={spinFrames} color={statusColor} bold suffix={" "} />
           )}
           <span
             fg={effectiveDone ? t.textSecondary : t.textPrimary}
@@ -191,9 +188,7 @@ export const LockInWrapper = memo(function LockInWrapper({
             {statusMsg}
           </span>
           {effectiveDone ? null : (
-            <span fg={t.textMuted}>
-              {(DOTS_CYCLE[Math.floor(frame / 4) % DOTS_CYCLE.length] ?? ".").padEnd(3)}
-            </span>
+            <Spinner inline frames={DOTS_PADDED} color={t.textMuted} divisor={4} />
           )}
           {!effectiveDone && elapsed > 0 ? (
             <span fg={t.textFaint}>{formatElapsed(elapsed)}</span>
@@ -233,18 +228,17 @@ export const LockInWrapper = memo(function LockInWrapper({
                   : i === 0 && hiddenCount === 0
                     ? "┌ "
                     : "├ ";
-            const statusChar = tc.done
-              ? tc.error
-                ? "✗"
-                : "✓"
-              : (SPINNER_FRAMES[frame % SPINNER_FRAMES.length] ?? "⠋");
             const statusClr = tc.done ? (tc.error ? t.error : t.success) : t.brand;
 
             return (
               <box key={tc.id} height={1} flexShrink={0}>
                 <text truncate>
                   <span fg={t.textFaint}>{connector}</span>
-                  <span fg={statusClr}>{statusChar}</span>
+                  {tc.done ? (
+                    <span fg={statusClr}>{tc.error ? "✗" : "✓"}</span>
+                  ) : (
+                    <Spinner inline color={t.brand} />
+                  )}
                   <span fg={tc.done ? t.textDim : iconColor}> {toolIcon} </span>
                   <span fg={tc.done ? t.textDim : t.brand}>{displayLabel}</span>
                   {tc.argStr ? (

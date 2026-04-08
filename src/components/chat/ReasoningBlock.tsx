@@ -1,6 +1,6 @@
 import { icon } from "../../core/icons.js";
 import { useTheme } from "../../core/theme/index.js";
-import { SPINNER_FRAMES, useSpinnerFrame } from "../layout/shared.js";
+import { Spinner } from "../layout/shared.js";
 import { Markdown } from "./Markdown.js";
 
 const brainIcon = () => icon("brain");
@@ -14,8 +14,7 @@ interface Props {
 
 function ThinkingSpinner() {
   const t = useTheme();
-  const frame = useSpinnerFrame();
-  return <text fg={t.brandDim}>{SPINNER_FRAMES[frame]}</text>;
+  return <Spinner color={t.brandDim} />;
 }
 
 export function ReasoningBlock({ content, expanded, isStreaming, id }: Props) {

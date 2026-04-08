@@ -1,6 +1,6 @@
-import { TextAttributes } from "@opentui/core";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { TextAttributes } from "@opentui/core";
 import {
   createContext,
   memo,
@@ -807,7 +807,7 @@ function renderSegments(
                 <text truncate>
                   {isActive ? (
                     <>
-                      <Spinner />
+                      <Spinner inline />
                       <span> </span>
                     </>
                   ) : (
@@ -1129,14 +1129,6 @@ const AssistantMessage = memo(function AssistantMessage({
               <Markdown text={lockInFinalAnswer} />
             </box>
           ) : null}
-          {msg.durationMs != null ? (
-            <box height={1} marginTop={1}>
-              <text fg={t.textFaint}>
-                {"✓ Completed in "}
-                {formatElapsed(Math.floor(msg.durationMs / 1000))}
-              </text>
-            </box>
-          ) : null}
         </>
       ) : hasSegments ? (
         renderSegments(
@@ -1165,6 +1157,14 @@ const AssistantMessage = memo(function AssistantMessage({
           ) : null}
         </>
       )}
+      {msg.durationMs != null ? (
+        <box height={1} marginTop={1}>
+          <text fg={t.textFaint}>
+            {"✓ Completed in "}
+            {formatElapsed(Math.floor(msg.durationMs / 1000))}
+          </text>
+        </box>
+      ) : null}
     </box>
   );
 });

@@ -3,58 +3,64 @@ import { memo, useEffect, useRef } from "react";
 import { useTheme } from "../../core/theme/index.js";
 
 /**
- * SoulForge branded spinner — Elder Futhark rune cycle.
+ * SoulForge branded spinner — oscillating rune wheel.
  *
- * Cycles through full-height runes that tell a forging story:
- *   seed → kindle → flame → DAWN → completion → rest → seed
+ * A wheel of Elder Futhark runes that spins forward then
+ * reverses back — like an engraved drum oscillating.
  *
- * All runes are from the full-height set (no mid-dots) so they
- * align properly with surrounding text.
+ * Forward:  ᛁ → ᚲ → ᚠ → ᛊ → ᛏ → ᛉ → ᛞ  (intensity rises)
+ * Reverse:  ᛞ → ᛉ → ᛏ → ᛊ → ᚠ → ᚲ → ᛁ  (intensity fades)
  *
- * Color shifts smoothly with intensity:
- *   faint → muted → brand → bright → SPARK → bright → brand → muted → faint
+ * Color follows the rotation — brighter as it spins forward, dimmer
+ * as it returns. Feels like a pendulum or breathing forge bellows.
  *
- * Single character wide. Nerd font not required — runes are in
- * the Unicode Runic block (U+16A0–U+16FF), supported everywhere.
+ * Single character wide. Unicode Runic block (U+16A0–U+16FF).
  */
 
-// ── Rune frames ─────────────────────────────────────────────────────
-// [rune, intensity] — intensity drives color
-// 0=faint, 1=muted, 2=brand, 3=bright, 4=spark
+// ── Rune wheel ──────────────────────────────────────────────────────
 
 type Intensity = 0 | 1 | 2 | 3 | 4;
-type RuneFrame = [string, Intensity];
 
-const RUNE_FRAMES: RuneFrame[] = [
-  // Seed phase — potential gathering
-  ["ᛜ", 0], // Ingwaz — seed/potential
-  ["ᚾ", 0], // Nauthiz — need-fire (friction)
-  // Kindle phase — fire catches
-  ["ᚲ", 1], // Kenaz — torch kindles
-  ["ᚠ", 1], // Fehu — fire catches
-  // Flame phase — rising
-  ["ᛊ", 2], // Sowilo — sun/flame rises
-  ["ᛏ", 2], // Tiwaz — power ascending
-  // Blaze phase — peak approaching
-  ["ᛉ", 3], // Algiz — reaching upward
-  // PEAK — breakthrough
-  ["ᛞ", 4], // Dagaz — DAWN (peak spark!)
-  // Afterglow — completion
-  ["ᛟ", 3], // Othala — heritage/completion
-  ["ᛗ", 3], // Mannaz — soul forged
-  // Cooling — settling
-  ["ᛇ", 2], // Eihwaz — endurance
-  ["ᚹ", 2], // Wunjo — satisfaction
-  // Fading — cycle winding down
-  ["ᛃ", 1], // Jera — harvest/cycle
-  ["ᛁ", 1], // Isa — stillness
-  // Rest — back to seed
-  ["ᚺ", 0], // Hagalaz — rest
-  ["ᛜ", 0], // Ingwaz — seed again
+// Runes that tell a forging story — all full-height glyphs
+const WHEEL: string[] = [
+  "ᛁ", // Isa — stillness/ice (seed)
+  "ᚲ", // Kenaz — torch kindles
+  "ᚠ", // Fehu — fire catches
+  "ᛊ", // Sowilo — sun rises
+  "ᛏ", // Tiwaz — power ascending
+  "ᛉ", // Algiz — reaching upward
+  "ᛞ", // Dagaz — DAWN (peak)
 ];
 
-const FRAME_COUNT = RUNE_FRAMES.length;
-const TICK_MS = 130; // ~2s full cycle — smooth but not frantic
+// Intensity curve: maps wheel position → color intensity
+const INTENSITY_CURVE: Intensity[] = [0, 0, 1, 2, 2, 3, 4];
+
+// Build the full oscillation: forward + hold peak + reverse + hold rest
+type Frame = { glyph: string; intensity: Intensity };
+
+function buildFrames(): Frame[] {
+  const frames: Frame[] = [];
+
+  // Forward spin
+  for (let i = 0; i < WHEEL.length; i++) {
+    frames.push({ glyph: WHEEL[i] as string, intensity: INTENSITY_CURVE[i] as Intensity });
+  }
+  // Hold peak (spark lingers)
+  frames.push({ glyph: "ᛞ", intensity: 3 });
+
+  // Reverse spin (skip the peak — already held)
+  for (let i = WHEEL.length - 2; i >= 0; i--) {
+    frames.push({ glyph: WHEEL[i] as string, intensity: INTENSITY_CURVE[i] as Intensity });
+  }
+  // Hold rest (seed lingers before next forward)
+  frames.push({ glyph: "ᛁ", intensity: 0 });
+
+  return frames;
+}
+
+const FRAMES = buildFrames();
+const FRAME_COUNT = FRAMES.length;
+const TICK_MS = 150; // ~2.25s full oscillation
 
 // ── Color mapping ───────────────────────────────────────────────────
 
@@ -98,6 +104,7 @@ function ensureTick() {
 
 export const ForgeSpinner = memo(function ForgeSpinner({ color }: { color?: string } = {}) {
   const t = useTheme();
+  // biome-ignore lint/suspicious/noExplicitAny: ref shared across text/span renderables with imperative updates
   const textRef = useRef<any>(null);
 
   const brand = color ?? t.brand;
@@ -106,11 +113,11 @@ export const ForgeSpinner = memo(function ForgeSpinner({ color }: { color?: stri
 
   useEffect(() => {
     const listener = (f: number) => {
-      const [rune, intensity] = RUNE_FRAMES[f % FRAME_COUNT]!;
+      const { glyph, intensity } = FRAMES[f % FRAME_COUNT] as Frame;
       const c = colorsRef.current;
       try {
         if (textRef.current) {
-          textRef.current.content = rune;
+          textRef.current.content = glyph;
           textRef.current.fg = intensityColor(intensity, c.brand, c.muted, c.faint, c.spark);
         }
       } catch {}
@@ -131,7 +138,7 @@ export const ForgeSpinner = memo(function ForgeSpinner({ color }: { color?: stri
     };
   }, []);
 
-  const [rune, intensity] = RUNE_FRAMES[globalFrame % FRAME_COUNT]!;
+  const { glyph, intensity } = FRAMES[globalFrame % FRAME_COUNT] as Frame;
   const fg = intensityColor(
     intensity,
     colorsRef.current.brand,
@@ -142,7 +149,7 @@ export const ForgeSpinner = memo(function ForgeSpinner({ color }: { color?: stri
 
   return (
     <text ref={textRef} fg={fg}>
-      {rune}
+      {glyph}
     </text>
   );
 });
@@ -157,9 +164,9 @@ export function forgeSpinnerChunks(
   faint: string,
   spark: string,
 ) {
-  const [rune, intensity] = RUNE_FRAMES[frame % FRAME_COUNT]!;
+  const { glyph, intensity } = FRAMES[frame % FRAME_COUNT] as Frame;
   const fg = intensityColor(intensity, brand, muted, faint, spark);
-  return [fgStyle(fg)(rune)];
+  return [fgStyle(fg)(glyph)];
 }
 
 export { TICK_MS as FORGE_TICK_MS };

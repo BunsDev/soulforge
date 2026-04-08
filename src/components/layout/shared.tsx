@@ -83,11 +83,23 @@ export function useSpinnerFrameRef(): React.MutableRefObject<number> {
 export const Spinner = memo(function Spinner({
   frames = SPINNER_FRAMES,
   color,
+  divisor = 1,
+  suffix,
+  bold,
+  inline,
 }: {
   frames?: string[];
   color?: string;
+  /** Slow down frame rate — e.g. divisor=4 updates every 4th tick */
+  divisor?: number;
+  /** Static suffix appended after the animated frame (e.g. " " for spacing) */
+  suffix?: string;
+  bold?: boolean;
+  /** Render as <span> for use inside <text> parents. Default: <text> for standalone use. */
+  inline?: boolean;
 } = {}) {
   const t = useTheme();
+  // biome-ignore lint/suspicious/noExplicitAny: ref shared across text/span renderables with imperative updates
   const textRef = useRef<any>(null);
   const fg = color ?? t.brand;
 
@@ -95,7 +107,8 @@ export const Spinner = memo(function Spinner({
     const listener = (f: number) => {
       try {
         if (textRef.current) {
-          textRef.current.content = frames[f % frames.length] ?? "⠋";
+          const idx = Math.floor(f / divisor) % frames.length;
+          textRef.current.content = (frames[idx] ?? "⠋") + (suffix ?? "");
         }
       } catch {}
     };
@@ -113,11 +126,22 @@ export const Spinner = memo(function Spinner({
         }
       }
     };
-  }, [frames]);
+  }, [frames, divisor, suffix]);
 
+  const initIdx = Math.floor(globalFrame / divisor) % frames.length;
+  const content = (frames[initIdx] ?? "⠋") + (suffix ?? "");
+  const attrs = bold ? 1 : undefined;
+
+  if (inline) {
+    return (
+      <span ref={textRef} fg={fg} attributes={attrs}>
+        {content}
+      </span>
+    );
+  }
   return (
-    <text ref={textRef} fg={fg}>
-      {frames[globalFrame % frames.length] ?? "⠋"}
+    <text ref={textRef} fg={fg} attributes={attrs}>
+      {content}
     </text>
   );
 });

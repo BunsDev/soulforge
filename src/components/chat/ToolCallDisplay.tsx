@@ -11,7 +11,7 @@ import {
   type ToolCategory,
 } from "../../core/tool-display.js";
 import { parsePlanOutput } from "../../types/plan-schema.js";
-import { SPINNER_FRAMES, useSpinnerFrame } from "../layout/shared.js";
+import { Spinner } from "../layout/shared.js";
 import { StructuredPlanView } from "../plan/StructuredPlanView.js";
 import { DiffView } from "./DiffView.js";
 import { useDispatchDisplay } from "./dispatch-display.js";
@@ -54,12 +54,6 @@ export interface LiveToolCall {
 export const SUBAGENT_NAMES = new Set(["dispatch", "web_search"]);
 
 export const RENDER_DEBOUNCE = 80;
-
-const Spinner = memo(function Spinner({ color }: { color?: string }) {
-  const t = useTheme();
-  const frame = useSpinnerFrame();
-  return <span fg={color ?? t.brand}>{SPINNER_FRAMES[frame]}</span>;
-});
 
 function useElapsedTimers(calls: LiveToolCall[]) {
   const startTimes = useRef(new Map<string, number>());
@@ -151,9 +145,9 @@ const ChildStepRow = memo(
         <text truncate>
           <span fg={t.textFaint}>{isLast ? "└ " : "├ "}</span>
           {step.cacheState === "wait" ? (
-            <Spinner color={_cc.wait} />
+            <Spinner inline color={_cc.wait} />
           ) : step.state === "running" ? (
-            <Spinner color={t.textMuted} />
+            <Spinner inline color={t.textMuted} />
           ) : step.state === "done" ? (
             <span fg={t.success}>✓</span>
           ) : (
@@ -289,7 +283,7 @@ const MultiAgentChildRow = memo(
           <text truncate>
             <span fg={t.textFaint}>{connector}</span>
             {info.state === "running" ? (
-              <Spinner color={roleColor} />
+              <Spinner inline color={roleColor} />
             ) : info.state === "done" ? (
               info.succeeded ? (
                 <span fg={t.success}>✓</span>
@@ -419,9 +413,9 @@ const MultiAgentChildRow = memo(
                           {"  "}└{" "}
                         </span>
                         {lastRunning.cacheState === "wait" ? (
-                          <Spinner color={stepCacheColors.wait} />
+                          <Spinner inline color={stepCacheColors.wait} />
                         ) : (
-                          <Spinner color={t.textMuted} />
+                          <Spinner inline color={t.textMuted} />
                         )}
                         <span fg={stepColor}> {stepIcon} </span>
                         {stepCategory ? <span fg={stepCatColor}>[{stepCategory}]</span> : null}
@@ -451,7 +445,7 @@ const MultiAgentChildRow = memo(
                       {continuation}
                       {"  "}└{" "}
                     </span>
-                    <Spinner color={t.textMuted} />
+                    <Spinner inline color={t.textMuted} />
                     <span fg={t.textMuted}> thinking...</span>
                   </text>
                 </box>
@@ -632,7 +626,7 @@ const ToolRow = memo(
     // Status content: Spinner for running, static icon for done/error
     const statusIcon =
       tc.state === "running" ? (
-        <Spinner />
+        <Spinner inline />
       ) : tc.state === "error" ? (
         <span fg={t.error}>✗</span>
       ) : (
@@ -731,7 +725,7 @@ const ToolRow = memo(
                   <box height={1} flexShrink={0} marginLeft={3}>
                     <text truncate>
                       <span fg={t.textFaint}>└ </span>
-                      <Spinner color={t.textMuted} />
+                      <Spinner inline color={t.textMuted} />
                       <span fg={t.textMuted}> thinking...</span>
                     </text>
                   </box>
@@ -743,7 +737,7 @@ const ToolRow = memo(
       ) : null;
 
     const diffContent = staticProps.diff ? (
-      <box marginTop={1} flexDirection="column">
+      <box flexDirection="column">
         <DiffView
           filePath={staticProps.diff.path}
           oldString={staticProps.diff.oldString}
