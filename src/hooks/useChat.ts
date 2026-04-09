@@ -1172,6 +1172,7 @@ export function useChat({
               role: "assistant" as const,
               content: "Continuing.",
               timestamp: compactTs,
+              isCompactionSummary: true,
             },
             ...recentChat,
             {
