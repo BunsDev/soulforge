@@ -3,8 +3,8 @@ import { existsSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { attach } from "neovim";
-import { trackBunProcess, trackProcess } from "../process-tracker.js";
 import type { NvimConfigMode } from "../../types/index.js";
+import { trackBunProcess, trackProcess } from "../process-tracker.js";
 
 export interface NvimInstance {
   api: ReturnType<typeof attach>;

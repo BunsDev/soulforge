@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { trackProcess } from "../../../process-tracker.js";
 import readline from "node:readline";
 import type {
   JSONSchema7,
@@ -15,6 +14,7 @@ import type {
   LanguageModelV2StreamPart,
   LanguageModelV2Usage,
 } from "@ai-sdk/provider";
+import { trackProcess } from "../../../process-tracker.js";
 
 export interface CodexRunnerCall {
   modelId: string;
