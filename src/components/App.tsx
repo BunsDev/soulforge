@@ -330,7 +330,6 @@ export function App({
     effectiveConfig.nvimPath,
     effectiveConfig.nvimConfig,
     closeEditor,
-    effectiveConfig.vimHints !== false,
     hasTabBarRef.current,
     editorSplitRef.current,
   );
@@ -1139,16 +1138,11 @@ export function App({
       <box flexDirection="row" flexGrow={1} flexShrink={1} minHeight={0}>
         <EditorPanel
           isOpen={editorOpen}
-          fileName={editorFile}
           ptyOnData={ptyOnData}
           nvimCols={nvimCols}
           nvimRows={nvimRows}
-          modeName={nvimMode}
           focused={focusMode === "editor"}
-          cursorLine={cursorLine}
-          cursorCol={cursorCol}
           onClosed={handleEditorClosed}
-          showHints={effectiveConfig.vimHints !== false}
           error={nvimError}
           split={editorSplit}
         />

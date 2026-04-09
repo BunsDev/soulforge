@@ -70,7 +70,6 @@ export function useNeovim(
   nvimPath?: string,
   nvimConfig?: NvimConfigMode,
   onExit?: () => void,
-  showHints = true,
   hasTabBar = true,
   splitPct = 60,
 ): UseNeovimReturn {
@@ -113,7 +112,7 @@ export function useNeovim(
 
     const termCols = process.stdout.columns ?? 120;
     const termRows = process.stdout.rows ?? 40;
-    const dims = getEditorDimensions(termCols, termRows, showHints, hasTabBar, splitPct);
+    const dims = getEditorDimensions(termCols, termRows, hasTabBar, splitPct);
 
     launchNeovim(nvimPath ?? "nvim", dims.cols, dims.rows, nvimConfig)
       .then((nvim) => {
@@ -156,7 +155,7 @@ export function useNeovim(
       .finally(() => {
         launchingRef.current = false;
       });
-  }, [active, nvimPath, nvimConfig, showHints, hasTabBar, splitPct, launchGeneration]);
+  }, [active, nvimPath, nvimConfig, hasTabBar, splitPct, launchGeneration]);
 
   // Resize neovim when terminal dimensions change
   useEffect(() => {
@@ -167,7 +166,7 @@ export function useNeovim(
       if (!nvim || !mountedRef.current) return;
       const tc = process.stdout.columns ?? 120;
       const tr = process.stdout.rows ?? 40;
-      const d = getEditorDimensions(tc, tr, showHints, hasTabBar, splitPct);
+      const d = getEditorDimensions(tc, tr, hasTabBar, splitPct);
       nvim.pty.resize(d.cols, d.rows);
       setNvimDims({ cols: d.cols, rows: d.rows });
     };
@@ -177,7 +176,7 @@ export function useNeovim(
     return () => {
       process.stdout.removeListener("resize", onResize);
     };
-  }, [ready, active, showHints, hasTabBar, splitPct]);
+  }, [ready, active, hasTabBar, splitPct]);
 
   // Poll buffer name, cursor position, and visual selection when ready
   useEffect(() => {
