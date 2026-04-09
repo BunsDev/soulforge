@@ -50,13 +50,20 @@ export class SessionManager {
     return total;
   }
 
-  async saveSession(meta: SessionMeta, tabMessages: Map<string, ChatMessage[]>): Promise<void> {
+  async saveSession(
+    meta: SessionMeta,
+    tabMessages: Map<string, ChatMessage[]>,
+    tabCoreMessages?: Map<string, import("ai").ModelMessage[]>,
+  ): Promise<void> {
     this.ensureDir();
     const sessionDir = join(this.dir, meta.id);
 
     try {
       const io = getIOClient();
-      await io.saveSession(sessionDir, meta, [...tabMessages.entries()]);
+      const coreEntries = tabCoreMessages
+        ? ([...tabCoreMessages.entries()] as [string, import("ai").ModelMessage[]][])
+        : undefined;
+      await io.saveSession(sessionDir, meta, [...tabMessages.entries()], coreEntries);
       return;
     } catch {
       // IO worker unavailable — fall back to local serialization
@@ -94,9 +101,25 @@ export class SessionManager {
     await writeFile(jsonlTmp, lines ? `${lines}\n` : "", { encoding: "utf-8", mode: 0o600 });
     await rename(jsonlTmp, jsonlPath);
     await rename(metaTmp, metaPath);
+
+    // Save core messages (API-facing, survives compaction)
+    if (tabCoreMessages) {
+      const coreData: Record<string, import("ai").ModelMessage[]> = {};
+      for (const [tabId, cores] of tabCoreMessages) {
+        coreData[tabId] = cores;
+      }
+      const corePath = join(sessionDir, "core.json");
+      const coreTmp = `${corePath}.${suffix}.tmp`;
+      await writeFile(coreTmp, JSON.stringify(coreData), { encoding: "utf-8", mode: 0o600 });
+      await rename(coreTmp, corePath);
+    }
   }
 
-  loadSession(id: string): { meta: SessionMeta; tabMessages: Map<string, ChatMessage[]> } | null {
+  loadSession(id: string): {
+    meta: SessionMeta;
+    tabMessages: Map<string, ChatMessage[]>;
+    tabCoreMessages?: Map<string, import("ai").ModelMessage[]>;
+  } | null {
     const sessionDir = join(this.dir, id);
     const metaPath = join(sessionDir, "meta.json");
     if (!existsSync(metaPath)) return null;
@@ -126,7 +149,25 @@ export class SessionManager {
         tabMessages.set(tab.id, allMessages.slice(startLine, endLine));
       }
 
-      return { meta, tabMessages };
+      // Load saved core messages (API-facing, survives compaction)
+      const corePath = join(sessionDir, "core.json");
+      let tabCoreMessages: Map<string, import("ai").ModelMessage[]> | undefined;
+      if (existsSync(corePath)) {
+        try {
+          const coreData = JSON.parse(readFileSync(corePath, "utf-8")) as Record<
+            string,
+            import("ai").ModelMessage[]
+          >;
+          tabCoreMessages = new Map();
+          for (const [tabId, cores] of Object.entries(coreData)) {
+            tabCoreMessages.set(tabId, cores);
+          }
+        } catch {
+          /* ignore corrupt core.json — will fall back to rebuild */
+        }
+      }
+
+      return { meta, tabMessages, tabCoreMessages };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logBackgroundError("session-load", `Failed to load session ${id}: ${msg}`);
@@ -134,9 +175,11 @@ export class SessionManager {
     }
   }
 
-  async loadSessionAsync(
-    id: string,
-  ): Promise<{ meta: SessionMeta; tabMessages: Map<string, ChatMessage[]> } | null> {
+  async loadSessionAsync(id: string): Promise<{
+    meta: SessionMeta;
+    tabMessages: Map<string, ChatMessage[]>;
+    tabCoreMessages?: Map<string, import("ai").ModelMessage[]>;
+  } | null> {
     const sessionDir = join(this.dir, id);
     try {
       const io = getIOClient();
@@ -146,7 +189,14 @@ export class SessionManager {
       for (const [tabId, msgs] of result.tabEntries) {
         tabMessages.set(tabId, msgs);
       }
-      return { meta: result.meta, tabMessages };
+      let tabCoreMessages: Map<string, import("ai").ModelMessage[]> | undefined;
+      if (result.coreEntries) {
+        tabCoreMessages = new Map();
+        for (const [tabId, cores] of result.coreEntries) {
+          tabCoreMessages.set(tabId, cores as import("ai").ModelMessage[]);
+        }
+      }
+      return { meta: result.meta, tabMessages, tabCoreMessages };
     } catch {
       return this.loadSession(id);
     }
@@ -160,11 +210,8 @@ export class SessionManager {
     const firstTab = data.meta.tabs[0];
     if (!firstTab) return null;
     const msgs = data.tabMessages.get(firstTab.id) ?? [];
-    // Rebuild core only from the last compaction summary so compacted
-    // context isn't resurrected from the full chat history.
-    const lastCompactIdx = msgs.findLastIndex((m) => m.isCompactionSummary);
-    const coreSource = lastCompactIdx >= 0 ? msgs.slice(lastCompactIdx) : msgs;
-    return { messages: msgs, coreMessages: rebuildCoreMessages(coreSource) };
+    const savedCore = data.tabCoreMessages?.get(firstTab.id);
+    return { messages: msgs, coreMessages: savedCore ?? rebuildCoreMessages(msgs) };
   }
 
   findByPrefix(prefix: string): string | null {
@@ -235,7 +282,11 @@ export class SessionManager {
    * Synchronous save — used only for emergency crash-recovery writes
    * (signal handlers, uncaughtException). Never call from normal async paths.
    */
-  saveSessionSync(meta: SessionMeta, tabMessages: Map<string, ChatMessage[]>): void {
+  saveSessionSync(
+    meta: SessionMeta,
+    tabMessages: Map<string, ChatMessage[]>,
+    tabCoreMessages?: Map<string, import("ai").ModelMessage[]>,
+  ): void {
     this.ensureDir();
     const sessionDir = join(this.dir, meta.id);
     if (!existsSync(sessionDir)) {
@@ -268,6 +319,17 @@ export class SessionManager {
     writeFileSync(jsonlTmp, lines ? `${lines}\n` : "", { encoding: "utf-8", mode: 0o600 });
     renameSync(jsonlTmp, jsonlPath);
     renameSync(metaTmp, metaPath);
+
+    if (tabCoreMessages) {
+      const coreData: Record<string, import("ai").ModelMessage[]> = {};
+      for (const [tabId, cores] of tabCoreMessages) {
+        coreData[tabId] = cores;
+      }
+      const corePath = join(sessionDir, "core.json");
+      const coreTmp = `${corePath}.${suffix}.tmp`;
+      writeFileSync(coreTmp, JSON.stringify(coreData), { encoding: "utf-8", mode: 0o600 });
+      renameSync(coreTmp, corePath);
+    }
   }
 
   deleteSession(id: string): boolean {

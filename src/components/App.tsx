@@ -658,7 +658,7 @@ export function App({
           );
           const snapshot = workspaceSnapshotRef.current?.();
           if (snapshot && hasUserMessages && activeChat) {
-            const { meta, tabMessages } = buildSessionMeta({
+            const { meta, tabMessages, tabCoreMessages } = buildSessionMeta({
               sessionId: activeChat.sessionId,
               title: SessionManager.deriveTitle(activeChat.messages),
               cwd,
@@ -666,9 +666,10 @@ export function App({
               currentTabMessages: activeChat.messages.filter(
                 (m: ChatMessage) => m.role !== "system" || m.showInChat,
               ),
+              currentTabCoreMessages: activeChat.coreMessages,
             });
-            updateEmergencySnapshot(sessionManager, meta, tabMessages);
-            await sessionManager.saveSession(meta, tabMessages);
+            updateEmergencySnapshot(sessionManager, meta, tabMessages, tabCoreMessages);
+            await sessionManager.saveSession(meta, tabMessages, tabCoreMessages);
             setExitSessionId(meta.id);
             savedSessionIdRef.current = meta.id;
           }
@@ -714,7 +715,12 @@ export function App({
 
     const data = sessionManager.loadSession(fullId);
     if (data) {
-      tabMgr.restoreFromMeta(data.meta.tabs, data.meta.activeTabId, data.tabMessages);
+      tabMgr.restoreFromMeta(
+        data.meta.tabs,
+        data.meta.activeTabId,
+        data.tabMessages,
+        data.tabCoreMessages,
+      );
       setForgeModeHeader(data.meta.forgeMode);
       setExitSessionId(data.meta.id);
       // Defer image restore so chat UI renders first — extractGifFrames uses execSync
@@ -815,7 +821,7 @@ export function App({
       const snapshot = workspaceSnapshotRef.current?.();
       if (snapshot) {
         try {
-          const { meta, tabMessages } = buildSessionMeta({
+          const { meta, tabMessages, tabCoreMessages } = buildSessionMeta({
             sessionId: activeChat.sessionId,
             title: SessionManager.deriveTitle(activeChat.messages),
             cwd,
@@ -823,9 +829,10 @@ export function App({
             currentTabMessages: activeChat.messages.filter(
               (m: ChatMessage) => m.role !== "system" || m.showInChat,
             ),
+            currentTabCoreMessages: activeChat.coreMessages,
           });
-          updateEmergencySnapshot(sessionManager, meta, tabMessages);
-          await sessionManager.saveSession(meta, tabMessages);
+          updateEmergencySnapshot(sessionManager, meta, tabMessages, tabCoreMessages);
+          await sessionManager.saveSession(meta, tabMessages, tabCoreMessages);
         } catch (err) {
           logBackgroundError(
             "new-session",
@@ -1247,7 +1254,12 @@ export function App({
         onRestore={(sessionId) => {
           const data = sessionManager.loadSession(sessionId);
           if (data) {
-            tabMgr.restoreFromMeta(data.meta.tabs, data.meta.activeTabId, data.tabMessages);
+            tabMgr.restoreFromMeta(
+              data.meta.tabs,
+              data.meta.activeTabId,
+              data.tabMessages,
+              data.tabCoreMessages,
+            );
             setForgeModeHeader(data.meta.forgeMode);
             setExitSessionId(data.meta.id);
             // Defer image restore so chat UI renders first

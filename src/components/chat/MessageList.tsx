@@ -1393,9 +1393,6 @@ export const MessageList = memo(function MessageList({
   return (
     <box flexDirection="column" paddingX={1} width="100%">
       {messages.map((msg, idx) => {
-        // Compaction summary/ack are internal bookkeeping — never render.
-        if (msg.isCompactionSummary) return null;
-
         if (msg.role === "system") {
           return <SystemMessage key={msg.id} msg={msg} animate={idx === lastSystemIdx} />;
         }

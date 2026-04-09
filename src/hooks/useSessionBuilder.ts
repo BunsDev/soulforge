@@ -1,3 +1,4 @@
+import type { ModelMessage } from "ai";
 import type { SessionMeta, TabMeta } from "../core/sessions/types.js";
 import type { ChatMessage } from "../types/index.js";
 import type { WorkspaceSnapshot } from "./useChat.js";
@@ -8,6 +9,7 @@ interface BuildParams {
   cwd: string;
   snapshot: WorkspaceSnapshot;
   currentTabMessages: ChatMessage[];
+  currentTabCoreMessages?: ModelMessage[];
 }
 
 export function buildSessionMeta({
@@ -16,8 +18,14 @@ export function buildSessionMeta({
   cwd,
   snapshot,
   currentTabMessages,
-}: BuildParams): { meta: SessionMeta; tabMessages: Map<string, ChatMessage[]> } {
+  currentTabCoreMessages,
+}: BuildParams): {
+  meta: SessionMeta;
+  tabMessages: Map<string, ChatMessage[]>;
+  tabCoreMessages: Map<string, ModelMessage[]>;
+} {
   const tabMessages = new Map<string, ChatMessage[]>();
+  const tabCoreMessages = new Map<string, ModelMessage[]>();
   const tabs: TabMeta[] = [];
 
   for (const tabState of snapshot.tabStates) {
@@ -26,6 +34,10 @@ export function buildSessionMeta({
       ? currentTabMessages
       : tabState.messages.filter((m) => m.role !== "system" || m.showInChat);
     tabMessages.set(tabState.id, msgs);
+
+    const cores =
+      isActiveTab && currentTabCoreMessages ? currentTabCoreMessages : tabState.coreMessages;
+    tabCoreMessages.set(tabState.id, cores);
 
     tabs.push({
       id: tabState.id,
@@ -56,5 +68,5 @@ export function buildSessionMeta({
     tabs,
   };
 
-  return { meta, tabMessages };
+  return { meta, tabMessages, tabCoreMessages };
 }
