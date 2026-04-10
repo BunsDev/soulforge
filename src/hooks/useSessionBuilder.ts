@@ -6,6 +6,7 @@ import type { WorkspaceSnapshot } from "./useChat.js";
 interface BuildParams {
   sessionId: string;
   title: string;
+  customTitle?: string | null;
   cwd: string;
   snapshot: WorkspaceSnapshot;
   currentTabMessages: ChatMessage[];
@@ -15,6 +16,7 @@ interface BuildParams {
 export function buildSessionMeta({
   sessionId,
   title,
+  customTitle,
   cwd,
   snapshot,
   currentTabMessages,
@@ -60,6 +62,7 @@ export function buildSessionMeta({
   const meta: SessionMeta = {
     id: sessionId,
     title,
+    ...(customTitle ? { customTitle } : {}),
     cwd,
     startedAt,
     updatedAt: Date.now(),

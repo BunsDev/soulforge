@@ -339,6 +339,23 @@ export class SessionManager {
     return true;
   }
 
+  renameSession(id: string, newTitle: string): boolean {
+    const metaPath = join(this.dir, id, "meta.json");
+    if (!existsSync(metaPath)) return false;
+    try {
+      const meta = JSON.parse(readFileSync(metaPath, "utf-8")) as SessionMeta;
+      meta.title = newTitle;
+      meta.customTitle = newTitle;
+      const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const tmp = `${metaPath}.${suffix}.tmp`;
+      writeFileSync(tmp, JSON.stringify(meta, null, 2), { encoding: "utf-8", mode: 0o600 });
+      renameSync(tmp, metaPath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   clearAllSessions(): number {
     if (!existsSync(this.dir)) return 0;
     const entries = readdirSync(this.dir);

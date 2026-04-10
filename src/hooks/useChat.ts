@@ -232,6 +232,8 @@ export interface ChatInstance {
   lastStepOutput: number;
   chatChars: number;
   sessionId: string;
+  customTitle: string | null;
+  setCustomTitle: (title: string | null) => void;
   planFile: string;
   planMode: boolean;
   planRequest: string | null;
@@ -523,6 +525,10 @@ export function useChat({
     initialState?.tokenUsage ?? { ...ZERO_USAGE },
   );
   const sessionIdRef = useRef<string>(initialState?.sessionId ?? crypto.randomUUID());
+  const customTitleRef = useRef<string | null>(null);
+  const setCustomTitle = useCallback((title: string | null) => {
+    customTitleRef.current = title;
+  }, []);
   const sharedCacheRef = useRef<SharedCacheRef>(
     (() => {
       const ref: SharedCacheRef = {
@@ -1424,7 +1430,8 @@ export function useChat({
             if (!snapshot) return;
             const { meta, tabMessages, tabCoreMessages } = buildSessionMeta({
               sessionId: sessionIdRef.current,
-              title: SessionManager.deriveTitle(allMsgs),
+              title: customTitleRef.current ?? SessionManager.deriveTitle(allMsgs),
+              customTitle: customTitleRef.current,
               cwd,
               snapshot,
               currentTabMessages: allMsgs.filter((m) => m.role !== "system" || m.showInChat),
@@ -2547,7 +2554,8 @@ export function useChat({
                       const allMsgs = [...prev, partialMsg];
                       const { meta, tabMessages, tabCoreMessages } = buildSessionMeta({
                         sessionId: sessionIdRef.current,
-                        title: SessionManager.deriveTitle(allMsgs),
+                        title: customTitleRef.current ?? SessionManager.deriveTitle(allMsgs),
+                        customTitle: customTitleRef.current,
                         cwd,
                         snapshot,
                         currentTabMessages: allMsgs.filter(
@@ -2702,7 +2710,8 @@ export function useChat({
             if (snapshot) {
               const { meta, tabMessages, tabCoreMessages } = buildSessionMeta({
                 sessionId: sessionIdRef.current,
-                title: SessionManager.deriveTitle(allMsgs),
+                title: customTitleRef.current ?? SessionManager.deriveTitle(allMsgs),
+                customTitle: customTitleRef.current,
                 cwd,
                 snapshot,
                 currentTabMessages: allMsgs.filter((m) => m.role !== "system" || m.showInChat),
@@ -3281,6 +3290,8 @@ export function useChat({
     lastStepOutput,
     chatChars,
     sessionId: sessionIdRef.current,
+    customTitle: customTitleRef.current,
+    setCustomTitle,
     planFile: planFileName(sessionIdRef.current),
     planMode: planModeRef.current,
     planRequest: planRequestRef.current,

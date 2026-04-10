@@ -660,7 +660,8 @@ export function App({
           if (snapshot && hasUserMessages && activeChat) {
             const { meta, tabMessages, tabCoreMessages } = buildSessionMeta({
               sessionId: activeChat.sessionId,
-              title: SessionManager.deriveTitle(activeChat.messages),
+              title: activeChat.customTitle ?? SessionManager.deriveTitle(activeChat.messages),
+              customTitle: activeChat.customTitle,
               cwd,
               snapshot,
               currentTabMessages: activeChat.messages.filter(
@@ -723,8 +724,11 @@ export function App({
       );
       setForgeModeHeader(data.meta.forgeMode);
       setExitSessionId(data.meta.id);
-      // Defer image restore so chat UI renders first — extractGifFrames uses execSync
+      // Restore custom title if user renamed this session
       setTimeout(() => {
+        if (data.meta.customTitle) {
+          tabMgr.getChat(data.meta.activeTabId)?.setCustomTitle(data.meta.customTitle);
+        }
         const allMessages = [...data.tabMessages.values()].flat();
         restoreSessionImages(allMessages, cwd)
           .then((restored) => {
@@ -823,7 +827,8 @@ export function App({
         try {
           const { meta, tabMessages, tabCoreMessages } = buildSessionMeta({
             sessionId: activeChat.sessionId,
-            title: SessionManager.deriveTitle(activeChat.messages),
+            title: activeChat.customTitle ?? SessionManager.deriveTitle(activeChat.messages),
+            customTitle: activeChat.customTitle,
             cwd,
             snapshot,
             currentTabMessages: activeChat.messages.filter(
@@ -1262,6 +1267,14 @@ export function App({
             );
             setForgeModeHeader(data.meta.forgeMode);
             setExitSessionId(data.meta.id);
+            // Restore custom title if user renamed this session
+            if (data.meta.customTitle) {
+              setTimeout(() => {
+                tabMgr
+                  .getChat(data.meta.activeTabId)
+                  ?.setCustomTitle(data.meta.customTitle ?? null);
+              }, 0);
+            }
             // Defer image restore so chat UI renders first
             setTimeout(() => {
               const allMessages = [...data.tabMessages.values()].flat();
